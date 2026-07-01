@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    clean_recent_lib::run()
+    scourgify_lib::run()
 }
