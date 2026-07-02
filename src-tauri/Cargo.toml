@@ -24,9 +24,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = ["tray-icon", "image-ico"] }
 tauri-plugin-autostart = "2.0.0"
+tauri-plugin-dialog = "2.0.0"
 tauri-plugin-log = "2.0.0"
 tauri-plugin-opener = "2.0.0"
 tauri-plugin-os = "2.0.0"
 tauri-plugin-single-instance = "2.0.0"
+
+[target.'cfg(windows)'.dependencies]
 wincent = "0.2.5"
 winreg = "0.56.0"

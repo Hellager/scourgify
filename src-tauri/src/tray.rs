@@ -9,8 +9,9 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
 use crate::{
+    alert,
     config::Config,
-    privacy::{PrivacyManager, PrivacyModeState},
+    privacy::{LockResult, PrivacyManager, PrivacyModeState},
     theme,
 };
 
@@ -20,12 +21,18 @@ const QUIT_ID: &str = "quit";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
     let privacy = app.state::<PrivacyManager>();
+    let privacy_requested = app
+        .state::<Mutex<Config>>()
+        .lock()
+        .map(|config| config.privacy_mode)
+        .unwrap_or(false);
+    let privacy_state = privacy.state();
     let privacy_mode = CheckMenuItem::with_id(
         app,
         PRIVACY_MODE_ID,
-        "Privacy Mode",
+        privacy_label(privacy_state),
         true,
-        is_privacy_enabled(privacy.state()),
+        privacy_requested || is_privacy_enabled(privacy_state),
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit", true, None::<&str>)?;
@@ -102,8 +109,15 @@ fn toggle_auto_start<R: Runtime>(app: &AppHandle<R>, menu_item: &CheckMenuItem<R
 fn toggle_privacy_mode<R: Runtime>(app: &AppHandle<R>, menu_item: &CheckMenuItem<R>) {
     let privacy = app.state::<PrivacyManager>();
     let config = app.state::<Mutex<Config>>();
+    let requested = config
+        .lock()
+        .map(|config| config.privacy_mode)
+        .unwrap_or_else(|error| {
+            log::error!("failed to read privacy mode config: {error}");
+            is_privacy_enabled(privacy.state())
+        });
 
-    let result = if is_privacy_enabled(privacy.state()) {
+    let result = if requested {
         privacy.exit().map(|reports| {
             for report in reports {
                 log::debug!(
@@ -113,27 +127,49 @@ fn toggle_privacy_mode<R: Runtime>(app: &AppHandle<R>, menu_item: &CheckMenuItem
                     report.failed_lnk_deletions().len()
                 );
             }
+            LockResult::Full
         })
     } else {
         privacy.enter().map(|result| {
             log::info!("privacy mode entered: {result:?}");
+            if matches!(result, LockResult::Partial) {
+                alert::warning(
+                    app,
+                    "Scourgify",
+                    "Privacy mode is active with partial protection.",
+                );
+            }
+            result
         })
     };
 
     match result {
-        Ok(()) => {
-            let enabled = is_privacy_enabled(privacy.state());
+        Ok(_) => {
+            let enabled = !requested;
             if let Err(error) = crate::persist_privacy_mode(app, &config, enabled) {
                 log::error!("failed to persist privacy mode: {error}");
             }
             if let Err(error) = menu_item.set_checked(enabled) {
                 log::warn!("failed to update privacy menu item: {error}");
             }
+            if let Err(error) = menu_item.set_text(privacy_label(privacy.state())) {
+                log::warn!("failed to update privacy menu text: {error}");
+            }
         }
         Err(error) => {
             log::error!("failed to toggle privacy mode: {error}");
-            if let Err(error) = menu_item.set_checked(is_privacy_enabled(privacy.state())) {
+            alert::warning(
+                app,
+                "Scourgify",
+                &format!("Failed to toggle privacy mode.\n\n{error}"),
+            );
+            if let Err(error) =
+                menu_item.set_checked(requested || is_privacy_enabled(privacy.state()))
+            {
                 log::warn!("failed to restore privacy menu item: {error}");
+            }
+            if let Err(error) = menu_item.set_text(privacy_label(privacy.state())) {
+                log::warn!("failed to restore privacy menu text: {error}");
             }
         }
     }
@@ -158,4 +194,11 @@ fn quit_app<R: Runtime>(app: &AppHandle<R>) {
 
 fn is_privacy_enabled(state: PrivacyModeState) -> bool {
     !matches!(state, PrivacyModeState::Inactive)
+}
+
+fn privacy_label(state: PrivacyModeState) -> &'static str {
+    match state {
+        PrivacyModeState::ActivePartial { .. } => "Privacy Mode (Partial)",
+        _ => "Privacy Mode",
+    }
 }

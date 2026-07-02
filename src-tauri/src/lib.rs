@@ -1,3 +1,7 @@
+#[cfg(not(windows))]
+compile_error!("Scourgify is Windows-only because wincent targets Windows Quick Access.");
+
+mod alert;
 mod config;
 mod privacy;
 mod theme;
@@ -15,12 +19,17 @@ use privacy::{LockResult, PrivacyManager, PrivacyModeState};
 pub fn run() {
     tauri::Builder::default()
         .plugin(build_logger().build())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            log::info!("secondary instance requested");
+            alert::info(app, "Scourgify", "Scourgify is already running.");
+        }))
         .invoke_handler(tauri::generate_handler![
             privacy_enter,
             privacy_exit,
@@ -32,8 +41,23 @@ pub fn run() {
             let privacy_manager = privacy::PrivacyManager::new(config.privacy_mode_cleanup_links);
             if config.privacy_mode {
                 match privacy_manager.enter() {
-                    Ok(result) => log::info!("restored privacy mode: {result:?}"),
-                    Err(error) => log::error!("failed to restore privacy mode: {error}"),
+                    Ok(LockResult::Full) => log::info!("restored privacy mode: full"),
+                    Ok(LockResult::Partial) => {
+                        log::warn!("restored privacy mode with partial protection");
+                        alert::warning(
+                            app.handle(),
+                            "Scourgify",
+                            "Privacy mode was restored with partial protection.",
+                        );
+                    }
+                    Err(error) => {
+                        log::error!("failed to restore privacy mode: {error}");
+                        alert::warning(
+                            app.handle(),
+                            "Scourgify",
+                            &format!("Failed to restore privacy mode.\n\n{error}"),
+                        );
+                    }
                 }
             }
             app.manage(Mutex::new(config));
