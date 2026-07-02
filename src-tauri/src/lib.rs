@@ -1,4 +1,5 @@
 mod config;
+mod theme;
 
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
@@ -12,6 +13,8 @@ pub fn run() {
         .setup(|app| {
             let config = config::load(app.handle())?;
             app.manage(std::sync::Mutex::new(config));
+            theme::build_tray(app.handle())?;
+            theme::spawn_theme_watcher(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
