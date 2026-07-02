@@ -1,7 +1,8 @@
 import "./App.css";
+import { AboutDialog } from "./components/AboutDialog";
 
 function App() {
-  return null;
+  return <AboutDialog />;
 }
 
 export default App;

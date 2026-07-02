@@ -17,6 +17,7 @@ use crate::{
 
 const PRIVACY_MODE_ID: &str = "privacy-mode";
 const AUTO_START_ID: &str = "auto-start";
+const ABOUT_ID: &str = "about";
 const QUIT_ID: &str = "quit";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
@@ -36,6 +37,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit", true, None::<&str>)?;
+    let about = MenuItem::with_id(app, ABOUT_ID, "About", true, None::<&str>)?;
     let auto_start = CheckMenuItem::with_id(
         app,
         AUTO_START_ID,
@@ -56,6 +58,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
             &privacy_mode,
             &auto_start,
             &PredefinedMenuItem::separator(app)?,
+            &about,
             &quit,
         ],
     )?;
@@ -68,12 +71,27 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
         .on_menu_event(move |app, event| match event.id().as_ref() {
             PRIVACY_MODE_ID => toggle_privacy_mode(app, &privacy_mode),
             AUTO_START_ID => toggle_auto_start(app, &auto_start),
+            ABOUT_ID => show_about(app),
             QUIT_ID => quit_app(app),
             _ => {}
         })
         .build(app)?;
 
     Ok(())
+}
+
+fn show_about<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        if let Err(error) = window.center() {
+            log::warn!("failed to center about window: {error}");
+        }
+        if let Err(error) = window.show() {
+            log::error!("failed to show about window: {error}");
+        }
+        if let Err(error) = window.set_focus() {
+            log::warn!("failed to focus about window: {error}");
+        }
+    }
 }
 
 fn toggle_auto_start<R: Runtime>(app: &AppHandle<R>, menu_item: &CheckMenuItem<R>) {

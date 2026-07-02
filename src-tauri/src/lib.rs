@@ -31,6 +31,7 @@ pub fn run() {
             alert::info(app, "Scourgify", "Scourgify is already running.");
         }))
         .invoke_handler(tauri::generate_handler![
+            hide_about,
             privacy_enter,
             privacy_exit,
             privacy_state
@@ -90,6 +91,14 @@ fn build_logger() -> tauri_plugin_log::Builder {
         .max_file_size(1_000_000)
         .rotation_strategy(RotationStrategy::KeepAll)
         .targets(targets)
+}
+
+#[tauri::command]
+fn hide_about(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide().map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
