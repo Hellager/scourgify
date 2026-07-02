@@ -3,6 +3,7 @@ compile_error!("Scourgify is Windows-only because wincent targets Windows Quick 
 
 mod alert;
 mod config;
+mod i18n;
 mod privacy;
 mod theme;
 mod tray;
@@ -32,6 +33,7 @@ pub fn run() {
         }))
         .invoke_handler(tauri::generate_handler![
             hide_about,
+            current_language,
             privacy_enter,
             privacy_exit,
             privacy_state
@@ -99,6 +101,15 @@ fn hide_about(app: tauri::AppHandle) -> Result<(), String> {
         window.hide().map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn current_language(config: State<'_, Mutex<Config>>) -> Result<String, String> {
+    Ok(config
+        .lock()
+        .map_err(|error| error.to_string())?
+        .language
+        .clone())
 }
 
 #[tauri::command]
