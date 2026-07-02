@@ -1,22 +1,11 @@
 use anyhow::Result;
-use tauri::{
-    image::Image,
-    tray::TrayIconBuilder,
-    AppHandle, Runtime,
-};
+use tauri::{image::Image, AppHandle, Runtime};
 use winreg::{enums::*, RegKey};
 
 pub const MAIN_TRAY_ID: &str = "main-tray";
 
 const LIGHT_ICON: &[u8] = include_bytes!("../icons/tray-light.ico");
 const DARK_ICON: &[u8] = include_bytes!("../icons/tray-dark.ico");
-
-pub fn build_tray<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
-    TrayIconBuilder::with_id(MAIN_TRAY_ID)
-        .icon(current_tray_icon()?)
-        .build(app)?;
-    Ok(())
-}
 
 pub fn spawn_theme_watcher<R: Runtime>(app: AppHandle<R>) {
     std::thread::spawn(move || {

@@ -1,9 +1,10 @@
 mod config;
 mod privacy;
 mod theme;
+mod tray;
 
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::{Manager, Runtime, State};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 use config::Config;
@@ -22,8 +23,7 @@ pub fn run() {
         ])
         .setup(|app| {
             let config = config::load(app.handle())?;
-            let privacy_manager =
-                privacy::PrivacyManager::new(config.privacy_mode_cleanup_links);
+            let privacy_manager = privacy::PrivacyManager::new(config.privacy_mode_cleanup_links);
             if config.privacy_mode {
                 match privacy_manager.enter() {
                     Ok(result) => log::info!("restored privacy mode: {result:?}"),
@@ -32,7 +32,7 @@ pub fn run() {
             }
             app.manage(Mutex::new(config));
             app.manage(privacy_manager);
-            theme::build_tray(app.handle())?;
+            tray::build(app.handle())?;
             theme::spawn_theme_watcher(app.handle().clone());
             Ok(())
         })
@@ -96,8 +96,8 @@ fn privacy_state(privacy: State<'_, PrivacyManager>) -> PrivacyModeState {
     privacy.state()
 }
 
-fn persist_privacy_mode(
-    app: &tauri::AppHandle,
+pub(crate) fn persist_privacy_mode<R: Runtime>(
+    app: &tauri::AppHandle<R>,
     config: &State<'_, Mutex<Config>>,
     enabled: bool,
 ) -> Result<(), String> {
