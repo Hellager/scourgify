@@ -6,6 +6,7 @@ use tauri::{
     tray::TrayIconBuilder,
     AppHandle, Manager, Runtime,
 };
+use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
 use crate::{
     config::Config,
@@ -14,6 +15,7 @@ use crate::{
 };
 
 const PRIVACY_MODE_ID: &str = "privacy-mode";
+const AUTO_START_ID: &str = "auto-start";
 const QUIT_ID: &str = "quit";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
@@ -27,9 +29,28 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit", true, None::<&str>)?;
+    let auto_start = CheckMenuItem::with_id(
+        app,
+        AUTO_START_ID,
+        "Auto Start",
+        true,
+        app.autolaunch().is_enabled().unwrap_or_else(|error| {
+            log::warn!("failed to read autostart state: {error}");
+            app.state::<Mutex<Config>>()
+                .lock()
+                .map(|config| config.auto_start)
+                .unwrap_or(false)
+        }),
+        None::<&str>,
+    )?;
     let menu = Menu::with_items(
         app,
-        &[&privacy_mode, &PredefinedMenuItem::separator(app)?, &quit],
+        &[
+            &privacy_mode,
+            &auto_start,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
     )?;
 
     TrayIconBuilder::with_id(theme::MAIN_TRAY_ID)
@@ -39,12 +60,43 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id().as_ref() {
             PRIVACY_MODE_ID => toggle_privacy_mode(app, &privacy_mode),
+            AUTO_START_ID => toggle_auto_start(app, &auto_start),
             QUIT_ID => quit_app(app),
             _ => {}
         })
         .build(app)?;
 
     Ok(())
+}
+
+fn toggle_auto_start<R: Runtime>(app: &AppHandle<R>, menu_item: &CheckMenuItem<R>) {
+    let manager = app.autolaunch();
+    let enabled = manager.is_enabled().unwrap_or(false);
+    let result = if enabled {
+        manager.disable()
+    } else {
+        manager.enable()
+    };
+
+    match result {
+        Ok(()) => {
+            let enabled = manager.is_enabled().unwrap_or(!enabled);
+            if let Some(config) = app.try_state::<Mutex<Config>>() {
+                if let Err(error) = crate::persist_auto_start(app, &config, enabled) {
+                    log::error!("failed to persist autostart state: {error}");
+                }
+            }
+            if let Err(error) = menu_item.set_checked(enabled) {
+                log::warn!("failed to update autostart menu item: {error}");
+            }
+        }
+        Err(error) => {
+            log::error!("failed to toggle autostart: {error}");
+            if let Err(error) = menu_item.set_checked(enabled) {
+                log::warn!("failed to restore autostart menu item: {error}");
+            }
+        }
+    }
 }
 
 fn toggle_privacy_mode<R: Runtime>(app: &AppHandle<R>, menu_item: &CheckMenuItem<R>) {

@@ -5,6 +5,7 @@ mod tray;
 
 use std::sync::Mutex;
 use tauri::{Manager, Runtime, State};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 use config::Config;
@@ -16,13 +17,18 @@ pub fn run() {
         .plugin(build_logger().build())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             privacy_enter,
             privacy_exit,
             privacy_state
         ])
         .setup(|app| {
-            let config = config::load(app.handle())?;
+            let mut config = config::load(app.handle())?;
+            sync_auto_start_config(app.handle(), &mut config);
             let privacy_manager = privacy::PrivacyManager::new(config.privacy_mode_cleanup_links);
             if config.privacy_mode {
                 match privacy_manager.enter() {
@@ -104,4 +110,27 @@ pub(crate) fn persist_privacy_mode<R: Runtime>(
     let mut config = config.lock().map_err(|error| error.to_string())?;
     config.privacy_mode = enabled;
     config::save(app, &config).map_err(|error| error.to_string())
+}
+
+pub(crate) fn persist_auto_start<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    config: &State<'_, Mutex<Config>>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut config = config.lock().map_err(|error| error.to_string())?;
+    config.auto_start = enabled;
+    config::save(app, &config).map_err(|error| error.to_string())
+}
+
+fn sync_auto_start_config<R: Runtime>(app: &tauri::AppHandle<R>, config: &mut Config) {
+    match app.autolaunch().is_enabled() {
+        Ok(enabled) if config.auto_start != enabled => {
+            config.auto_start = enabled;
+            if let Err(error) = config::save(app, config) {
+                log::error!("failed to persist autostart state: {error}");
+            }
+        }
+        Ok(_) => {}
+        Err(error) => log::warn!("failed to read autostart state: {error}"),
+    }
 }
