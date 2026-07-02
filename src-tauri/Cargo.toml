@@ -1,8 +1,8 @@
 [package]
-name = "scourgify"
-version = "0.0.0"
-description = "A Tauri App"
-authors = ["you"]
+name = "Scourgify"
+version = "0.1.0"
+description = "Windows tray privacy control for Quick Access"
+authors = ["Stein Gu"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
