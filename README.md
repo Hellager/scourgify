@@ -1,7 +1,7 @@
-# Tauri + React + Typescript
+# Scourgify
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Version: 0.0.0
 
-## Recommended IDE Setup
+Scourgify is a Windows tray app for controlling Quick Access privacy behavior.
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+This repository is reset to the minimal baseline for the v0.1.0 implementation plan.
