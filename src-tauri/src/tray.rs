@@ -3,23 +3,25 @@ use std::sync::Mutex;
 use anyhow::Result;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, Runtime,
 };
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
 use crate::{
     alert,
-    config::{self, Config},
+    config::{self, AppMode, Config},
     i18n,
     privacy::{LockResult, PrivacyManager, PrivacyModeState},
     theme,
 };
 
+const OPEN_DASHBOARD_ID: &str = "open-dashboard";
 const PRIVACY_MODE_ID: &str = "privacy-mode";
 const AUTO_START_ID: &str = "auto-start";
 const ABOUT_ID: &str = "about";
 const QUIT_ID: &str = "quit";
+const MODE_PREFIX: &str = "mode:";
 const LANGUAGE_PREFIX: &str = "language:";
 const LANGUAGE_CHANGED_EVENT: &str = "language-changed";
 
@@ -31,14 +33,24 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
         .tooltip("Scourgify")
         .menu(&menu)
         .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if is_left_click_up(&event) {
+                handle_left_click(tray.app_handle());
+            }
+        })
         .on_menu_event(move |app, event| {
             let id = event.id().as_ref();
+            if let Some(mode) = id.strip_prefix(MODE_PREFIX) {
+                set_mode(app, mode);
+                return;
+            }
             if let Some(language) = id.strip_prefix(LANGUAGE_PREFIX) {
                 set_language(app, language);
                 return;
             }
 
             match id {
+                OPEN_DASHBOARD_ID => show_dashboard(app),
                 PRIVACY_MODE_ID => toggle_privacy_mode(app),
                 AUTO_START_ID => toggle_auto_start(app),
                 ABOUT_ID => show_about(app),
@@ -54,6 +66,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
 fn build_menu<R: Runtime>(app: &AppHandle<R>) -> Result<Menu<R>> {
     let language = current_language(app);
     let text = i18n::tray_text(&language);
+    let app_mode = current_app_mode(app);
     let privacy = app.state::<PrivacyManager>();
     let privacy_requested = app
         .state::<Mutex<Config>>()
@@ -67,6 +80,13 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>) -> Result<Menu<R>> {
         privacy_label(&text, privacy_state),
         true,
         privacy_requested || is_privacy_enabled(privacy_state),
+        None::<&str>,
+    )?;
+    let open_dashboard = MenuItem::with_id(
+        app,
+        OPEN_DASHBOARD_ID,
+        text.open_dashboard,
+        true,
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(app, QUIT_ID, text.quit, true, None::<&str>)?;
@@ -85,20 +105,80 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>) -> Result<Menu<R>> {
         }),
         None::<&str>,
     )?;
+    let mode_menu = build_mode_menu(app, app_mode, &text)?;
     let language_menu = build_language_menu(app, &language, text.language)?;
-    let menu = Menu::with_items(
-        app,
-        &[
-            &privacy_mode,
-            &auto_start,
-            &language_menu,
-            &PredefinedMenuItem::separator(app)?,
-            &about,
-            &quit,
-        ],
-    )?;
+    let separator_top = PredefinedMenuItem::separator(app)?;
+    let separator_bottom = PredefinedMenuItem::separator(app)?;
+    let menu = if matches!(app_mode, AppMode::Dashboard) {
+        Menu::with_items(
+            app,
+            &[
+                &open_dashboard,
+                &separator_top,
+                &privacy_mode,
+                &auto_start,
+                &mode_menu,
+                &language_menu,
+                &separator_bottom,
+                &about,
+                &quit,
+            ],
+        )?
+    } else {
+        Menu::with_items(
+            app,
+            &[
+                &privacy_mode,
+                &auto_start,
+                &mode_menu,
+                &language_menu,
+                &separator_bottom,
+                &about,
+                &quit,
+            ],
+        )?
+    };
 
     Ok(menu)
+}
+
+fn build_mode_menu<R: Runtime>(
+    app: &AppHandle<R>,
+    current: AppMode,
+    text: &i18n::TrayText,
+) -> Result<Submenu<R>> {
+    let dashboard = mode_item(
+        app,
+        current,
+        AppMode::Dashboard,
+        "dashboard",
+        text.mode_dashboard,
+    )?;
+    let minimal = mode_item(app, current, AppMode::Minimal, "minimal", text.mode_minimal)?;
+
+    Ok(Submenu::with_items(
+        app,
+        text.mode,
+        true,
+        &[&dashboard, &minimal],
+    )?)
+}
+
+fn mode_item<R: Runtime>(
+    app: &AppHandle<R>,
+    current: AppMode,
+    mode: AppMode,
+    id: &str,
+    label: &str,
+) -> Result<CheckMenuItem<R>> {
+    Ok(CheckMenuItem::with_id(
+        app,
+        format!("{MODE_PREFIX}{id}"),
+        label,
+        true,
+        current == mode,
+        None::<&str>,
+    )?)
 }
 
 fn build_language_menu<R: Runtime>(
@@ -140,6 +220,33 @@ fn show_about<R: Runtime>(app: &AppHandle<R>) {
     if let Err(error) = crate::show_about(app) {
         log::error!("failed to show about window: {error}");
     }
+}
+
+fn show_dashboard<R: Runtime>(app: &AppHandle<R>) {
+    if let Err(error) = crate::show_dashboard(app) {
+        log::error!("failed to show dashboard: {error}");
+    }
+}
+
+fn set_mode<R: Runtime>(app: &AppHandle<R>, mode: &str) {
+    let mode = match mode {
+        "dashboard" => AppMode::Dashboard,
+        "minimal" => AppMode::Minimal,
+        _ => return,
+    };
+
+    if let Some(config) = app.try_state::<Mutex<Config>>() {
+        if let Err(error) = crate::persist_app_mode(app, &config, mode) {
+            log::error!("failed to persist app mode: {error}");
+            refresh_menu(app);
+            return;
+        }
+    }
+
+    if let Err(error) = crate::apply_window_strategy(app, mode) {
+        log::error!("failed to apply app mode: {error}");
+    }
+    refresh_menu(app);
 }
 
 fn toggle_auto_start<R: Runtime>(app: &AppHandle<R>) {
@@ -277,6 +384,23 @@ fn quit_app<R: Runtime>(app: &AppHandle<R>) {
     app.exit(0);
 }
 
+fn handle_left_click<R: Runtime>(app: &AppHandle<R>) {
+    if matches!(current_app_mode(app), AppMode::Dashboard) {
+        show_dashboard(app);
+    }
+}
+
+fn is_left_click_up(event: &TrayIconEvent) -> bool {
+    matches!(
+        event,
+        TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        }
+    )
+}
+
 fn is_privacy_enabled(state: PrivacyModeState) -> bool {
     !matches!(state, PrivacyModeState::Inactive)
 }
@@ -295,5 +419,15 @@ fn current_language<R: Runtime>(app: &AppHandle<R>) -> String {
         .unwrap_or_else(|error| {
             log::error!("failed to read language config: {error}");
             "en-US".to_string()
+        })
+}
+
+fn current_app_mode<R: Runtime>(app: &AppHandle<R>) -> AppMode {
+    app.state::<Mutex<Config>>()
+        .lock()
+        .map(|config| config.app_mode)
+        .unwrap_or_else(|error| {
+            log::error!("failed to read app mode config: {error}");
+            AppMode::Dashboard
         })
 }

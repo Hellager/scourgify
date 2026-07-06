@@ -34,7 +34,7 @@ pub fn run() {
                 .and_then(|config| config.lock().ok().map(|config| config.app_mode))
                 .unwrap_or(AppMode::Minimal);
             if matches!(mode, AppMode::Dashboard) {
-                if let Err(error) = apply_window_strategy(app, mode) {
+                if let Err(error) = show_dashboard(app) {
                     log::warn!("failed to focus dashboard for secondary instance: {error}");
                 }
             } else {
@@ -149,11 +149,7 @@ fn set_app_mode(
     config: State<'_, Mutex<Config>>,
     mode: AppMode,
 ) -> Result<AppMode, String> {
-    {
-        let mut config = config.lock().map_err(|error| error.to_string())?;
-        config.app_mode = mode;
-        config::save(&app, &config).map_err(|error| error.to_string())?;
-    }
+    persist_app_mode(&app, &config, mode)?;
     apply_window_strategy(&app, mode).map_err(|error| error.to_string())?;
     Ok(mode)
 }
@@ -239,6 +235,16 @@ pub(crate) fn persist_auto_start<R: Runtime>(
     config::save(app, &config).map_err(|error| error.to_string())
 }
 
+pub(crate) fn persist_app_mode<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    config: &State<'_, Mutex<Config>>,
+    mode: AppMode,
+) -> Result<(), String> {
+    let mut config = config.lock().map_err(|error| error.to_string())?;
+    config.app_mode = mode;
+    config::save(app, &config).map_err(|error| error.to_string())
+}
+
 fn sync_auto_start_config<R: Runtime>(app: &tauri::AppHandle<R>, config: &mut Config) {
     match app.autolaunch().is_enabled() {
         Ok(enabled) if config.auto_start != enabled => {
@@ -252,6 +258,16 @@ fn sync_auto_start_config<R: Runtime>(app: &tauri::AppHandle<R>, config: &mut Co
     }
 }
 
+pub(crate) fn show_dashboard<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.eval("window.location.hash = '#/'")?;
+        window.center()?;
+        window.show()?;
+        window.set_focus()?;
+    }
+    Ok(())
+}
+
 pub(crate) fn show_about<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {
     if let Some(window) = app.get_webview_window("main") {
         window.eval("window.location.hash = '#/about'")?;
@@ -262,24 +278,22 @@ pub(crate) fn show_about<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), ta
     Ok(())
 }
 
-fn apply_window_strategy<R: Runtime>(
+pub(crate) fn hide_main_window<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<(), tauri::Error> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide()?;
+    }
+    Ok(())
+}
+
+pub(crate) fn apply_window_strategy<R: Runtime>(
     app: &tauri::AppHandle<R>,
     mode: AppMode,
 ) -> Result<(), tauri::Error> {
-    let Some(window) = app.get_webview_window("main") else {
-        return Ok(());
-    };
-
     match mode {
-        AppMode::Dashboard => {
-            window.eval("window.location.hash = '#/'")?;
-            window.center()?;
-            window.show()?;
-            window.set_focus()?;
-        }
-        AppMode::Minimal => {
-            window.hide()?;
-        }
+        AppMode::Dashboard => show_dashboard(app)?,
+        AppMode::Minimal => hide_main_window(app)?,
     }
 
     Ok(())
