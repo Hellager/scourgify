@@ -2,9 +2,11 @@
 compile_error!("Scourgify is Windows-only because wincent targets Windows Quick Access.");
 
 mod alert;
+mod commands;
 mod config;
 mod i18n;
 mod privacy;
+mod quick_access;
 mod theme;
 mod tray;
 
@@ -50,7 +52,9 @@ pub fn run() {
             current_language,
             privacy_enter,
             privacy_exit,
-            privacy_state
+            privacy_state,
+            commands::list_qa_items,
+            commands::get_qa_counts
         ])
         .setup(|app| {
             let mut config = config::load(app.handle())?;
