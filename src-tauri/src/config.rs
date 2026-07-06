@@ -6,8 +6,23 @@ use tauri::{AppHandle, Manager, Runtime};
 const CONFIG_FILE: &str = "config.json";
 const FALLBACK_LANGUAGE: &str = "en-US";
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AppMode {
+    Minimal,
+    Dashboard,
+}
+
+impl Default for AppMode {
+    fn default() -> Self {
+        Self::Dashboard
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
+    #[serde(default)]
+    pub app_mode: AppMode,
     #[serde(default = "default_language")]
     pub language: String,
     #[serde(default)]
@@ -21,6 +36,7 @@ pub struct Config {
 impl Config {
     fn new(language: String) -> Self {
         Self {
+            app_mode: AppMode::Dashboard,
             language,
             auto_start: false,
             privacy_mode: false,
@@ -112,9 +128,21 @@ mod tests {
     fn fills_missing_config_fields() {
         let config: Config = serde_json::from_str(r#"{"language":"zh-TW"}"#).unwrap();
 
+        assert_eq!(config.app_mode, AppMode::Dashboard);
         assert_eq!(config.language, "zh-TW");
         assert!(!config.auto_start);
         assert!(!config.privacy_mode);
         assert!(config.privacy_mode_cleanup_links);
+    }
+
+    #[test]
+    fn serializes_app_mode_as_lowercase() {
+        assert_eq!(serde_json::to_string(&AppMode::Dashboard).unwrap(), r#""dashboard""#);
+        assert_eq!(serde_json::to_string(&AppMode::Minimal).unwrap(), r#""minimal""#);
+    }
+
+    #[test]
+    fn new_config_defaults_to_dashboard_mode() {
+        assert_eq!(Config::new("en-US".to_string()).app_mode, AppMode::Dashboard);
     }
 }

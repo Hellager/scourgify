@@ -13,7 +13,7 @@ use tauri::{Manager, Runtime, State};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
-use config::Config;
+use config::{AppMode, Config};
 use privacy::{LockResult, PrivacyManager, PrivacyModeState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -29,9 +29,23 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             log::info!("secondary instance requested");
-            alert::info(app, "Scourgify", "Scourgify is already running.");
+            let mode = app
+                .try_state::<Mutex<Config>>()
+                .and_then(|config| config.lock().ok().map(|config| config.app_mode))
+                .unwrap_or(AppMode::Minimal);
+            if matches!(mode, AppMode::Dashboard) {
+                if let Err(error) = apply_window_strategy(app, mode) {
+                    log::warn!("failed to focus dashboard for secondary instance: {error}");
+                }
+            } else {
+                alert::info(app, "Scourgify", "Scourgify is already running.");
+            }
         }))
         .invoke_handler(tauri::generate_handler![
+            get_config,
+            update_config,
+            get_app_mode,
+            set_app_mode,
             hide_about,
             current_language,
             privacy_enter,
@@ -65,6 +79,11 @@ pub fn run() {
             }
             app.manage(Mutex::new(config));
             app.manage(privacy_manager);
+            let mode = app.state::<Mutex<Config>>()
+                .lock()
+                .map(|config| config.app_mode)
+                .unwrap_or(AppMode::Dashboard);
+            apply_window_strategy(app.handle(), mode)?;
             tray::build(app.handle())?;
             theme::spawn_theme_watcher(app.handle().clone());
             Ok(())
@@ -96,9 +115,63 @@ fn build_logger() -> tauri_plugin_log::Builder {
 }
 
 #[tauri::command]
+fn get_config(config: State<'_, Mutex<Config>>) -> Result<Config, String> {
+    Ok(config.lock().map_err(|error| error.to_string())?.clone())
+}
+
+#[tauri::command]
+fn update_config(
+    app: tauri::AppHandle,
+    config: State<'_, Mutex<Config>>,
+    mut next_config: Config,
+) -> Result<Config, String> {
+    next_config.language = config::normalize_language(&next_config.language);
+    config::save(&app, &next_config).map_err(|error| error.to_string())?;
+    {
+        let mut config = config.lock().map_err(|error| error.to_string())?;
+        *config = next_config.clone();
+    }
+    apply_window_strategy(&app, next_config.app_mode).map_err(|error| error.to_string())?;
+    Ok(next_config)
+}
+
+#[tauri::command]
+fn get_app_mode(config: State<'_, Mutex<Config>>) -> Result<AppMode, String> {
+    Ok(config
+        .lock()
+        .map_err(|error| error.to_string())?
+        .app_mode)
+}
+
+#[tauri::command]
+fn set_app_mode(
+    app: tauri::AppHandle,
+    config: State<'_, Mutex<Config>>,
+    mode: AppMode,
+) -> Result<AppMode, String> {
+    {
+        let mut config = config.lock().map_err(|error| error.to_string())?;
+        config.app_mode = mode;
+        config::save(&app, &config).map_err(|error| error.to_string())?;
+    }
+    apply_window_strategy(&app, mode).map_err(|error| error.to_string())?;
+    Ok(mode)
+}
+
+#[tauri::command]
 fn hide_about(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
-        window.hide().map_err(|error| error.to_string())?;
+        let mode = app
+            .try_state::<Mutex<Config>>()
+            .and_then(|config| config.lock().ok().map(|config| config.app_mode))
+            .unwrap_or(AppMode::Minimal);
+        if matches!(mode, AppMode::Dashboard) {
+            window
+                .eval("window.location.hash = '#/'")
+                .map_err(|error| error.to_string())?;
+        } else {
+            window.hide().map_err(|error| error.to_string())?;
+        }
     }
     Ok(())
 }
@@ -177,4 +250,37 @@ fn sync_auto_start_config<R: Runtime>(app: &tauri::AppHandle<R>, config: &mut Co
         Ok(_) => {}
         Err(error) => log::warn!("failed to read autostart state: {error}"),
     }
+}
+
+pub(crate) fn show_about<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.eval("window.location.hash = '#/about'")?;
+        window.center()?;
+        window.show()?;
+        window.set_focus()?;
+    }
+    Ok(())
+}
+
+fn apply_window_strategy<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    mode: AppMode,
+) -> Result<(), tauri::Error> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+
+    match mode {
+        AppMode::Dashboard => {
+            window.eval("window.location.hash = '#/'")?;
+            window.center()?;
+            window.show()?;
+            window.set_focus()?;
+        }
+        AppMode::Minimal => {
+            window.hide()?;
+        }
+    }
+
+    Ok(())
 }

@@ -13,11 +13,11 @@
     "windows": [
       {
         "title": "Scourgify",
-        "width": 380,
-        "height": 300,
+        "width": 1040,
+        "height": 720,
         "visible": false,
-        "decorations": false,
-        "resizable": false
+        "decorations": true,
+        "resizable": true
       }
     ],
     "security": {

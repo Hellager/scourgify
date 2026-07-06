@@ -137,16 +137,8 @@ fn language_item<R: Runtime>(
 }
 
 fn show_about<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
-        if let Err(error) = window.center() {
-            log::warn!("failed to center about window: {error}");
-        }
-        if let Err(error) = window.show() {
-            log::error!("failed to show about window: {error}");
-        }
-        if let Err(error) = window.set_focus() {
-            log::warn!("failed to focus about window: {error}");
-        }
+    if let Err(error) = crate::show_about(app) {
+        log::error!("failed to show about window: {error}");
     }
 }
 
