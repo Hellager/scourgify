@@ -56,7 +56,8 @@ pub fn run() {
             commands::list_qa_items,
             commands::get_qa_counts,
             commands::remove_qa_items,
-            commands::empty_qa_items
+            commands::empty_qa_items,
+            commands::open_in_explorer
         ])
         .setup(|app| {
             let mut config = config::load(app.handle())?;

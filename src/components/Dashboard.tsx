@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Link } from "react-router-dom";
-import { RefreshCw, Search, Trash2 } from "lucide-react";
+import { FolderOpen, RefreshCw, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -225,6 +225,14 @@ export function Dashboard() {
     }
   };
 
+  const openLocation = async (path: string) => {
+    try {
+      await invoke("open_in_explorer", { path });
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
+
   const tableState = getTableState({
     error,
     filteredCount: filteredItems.length,
@@ -334,6 +342,7 @@ export function Dashboard() {
                   </TableHead>
                   <TableHead className="w-64">Name</TableHead>
                   <TableHead>Path</TableHead>
+                  <TableHead className="w-24 text-right">Location</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -341,7 +350,7 @@ export function Dashboard() {
                   <TableRow>
                     <TableCell
                       className="h-40 text-center text-muted-foreground"
-                      colSpan={3}
+                      colSpan={4}
                     >
                       <div className="flex flex-col items-center gap-3">
                         <span>{tableState}</span>
@@ -380,6 +389,18 @@ export function Dashboard() {
                       </TableCell>
                       <TableCell className="max-w-[560px] truncate text-muted-foreground">
                         {item.path}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          aria-label={`Open location for ${item.name}`}
+                          onClick={() => void openLocation(item.path)}
+                          size="icon-sm"
+                          title="Open location"
+                          type="button"
+                          variant="ghost"
+                        >
+                          <FolderOpen />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))

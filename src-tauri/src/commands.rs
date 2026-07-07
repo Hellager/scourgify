@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use tauri::State;
 
 use crate::{
@@ -37,6 +38,32 @@ pub(crate) fn empty_qa_items(
     quick_access::empty_items(&qa_type).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+pub(crate) fn open_in_explorer(path: String) -> Result<(), String> {
+    let path = match validate_open_path(&path) {
+        Ok(path) => path,
+        Err(error) => {
+            log::warn!("open in explorer rejected error={error}");
+            return Err(error);
+        }
+    };
+    log::info!("open in explorer started path={}", path.display());
+
+    match tauri_plugin_opener::reveal_item_in_dir(&path) {
+        Ok(()) => {
+            log::info!("open in explorer succeeded path={}", path.display());
+            Ok(())
+        }
+        Err(error) => {
+            log::error!(
+                "open in explorer failed path={} error={error}",
+                path.display()
+            );
+            Err(error.to_string())
+        }
+    }
+}
+
 fn ensure_quick_access_write_allowed(state: PrivacyModeState) -> Result<(), String> {
     if matches!(state, PrivacyModeState::Inactive) {
         Ok(())
@@ -44,6 +71,19 @@ fn ensure_quick_access_write_allowed(state: PrivacyModeState) -> Result<(), Stri
         log::warn!("Quick Access write operation blocked because privacy mode is active");
         Err(PRIVACY_WRITE_ERROR.to_string())
     }
+}
+
+fn validate_open_path(path: &str) -> Result<PathBuf, String> {
+    if path.trim().is_empty() {
+        return Err("Path is empty.".to_string());
+    }
+
+    let path = PathBuf::from(path);
+    if !path.exists() {
+        return Err(format!("Path does not exist: {}", path.display()));
+    }
+
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -61,5 +101,21 @@ mod tests {
             ensure_quick_access_write_allowed(PrivacyModeState::ActiveFull).unwrap_err(),
             PRIVACY_WRITE_ERROR
         );
+    }
+
+    #[test]
+    fn rejects_empty_open_path() {
+        assert_eq!(validate_open_path("   ").unwrap_err(), "Path is empty.");
+    }
+
+    #[test]
+    fn rejects_missing_open_path() {
+        let path = std::env::temp_dir().join(format!(
+            "scourgify-missing-open-path-{}",
+            std::process::id()
+        ));
+        let error = validate_open_path(path.to_string_lossy().as_ref()).unwrap_err();
+
+        assert!(error.contains("Path does not exist:"));
     }
 }
