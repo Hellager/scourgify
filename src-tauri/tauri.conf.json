@@ -28,8 +28,8 @@
     "active": true,
     "targets": ["msi"],
     "icon": [
-      "icons/tray-light.ico",
-      "icons/tray-dark.ico"
+      "icons/light/icon.ico",
+      "icons/dark/icon.ico"
     ]
   }
 }

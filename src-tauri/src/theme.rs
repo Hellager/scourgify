@@ -4,8 +4,8 @@ use winreg::{enums::*, RegKey};
 
 pub const MAIN_TRAY_ID: &str = "main-tray";
 
-const LIGHT_ICON: &[u8] = include_bytes!("../icons/tray-light.ico");
-const DARK_ICON: &[u8] = include_bytes!("../icons/tray-dark.ico");
+const LIGHT_ICON: &[u8] = include_bytes!("../icons/light/icon.ico");
+const DARK_ICON: &[u8] = include_bytes!("../icons/dark/icon.ico");
 
 pub fn spawn_theme_watcher<R: Runtime>(app: AppHandle<R>) {
     std::thread::spawn(move || {
