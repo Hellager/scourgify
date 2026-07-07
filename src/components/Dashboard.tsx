@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Link } from "react-router-dom";
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -27,6 +38,19 @@ interface QaCounts {
   all: number;
 }
 
+interface QaBatchResult {
+  total: number;
+  succeeded: string[];
+  failed: Array<{ path: string; error: string }>;
+}
+
+type PrivacyState =
+  | "Inactive"
+  | "ActiveFull"
+  | { ActivePartial: { recent: boolean; frequent: boolean } };
+
+type PendingAction = "remove" | "empty" | null;
+
 const tabs: Array<{ value: QaType; label: string }> = [
   { value: "recent", label: "Recent Files" },
   { value: "frequent", label: "Frequent Folders" },
@@ -45,7 +69,10 @@ export function Dashboard() {
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [privacyActive, setPrivacyActive] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
 
   const filteredItems = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -86,17 +113,28 @@ export function Dashboard() {
     }
   }, []);
 
+  const syncPrivacyState = useCallback(async () => {
+    const state = await invoke<PrivacyState>("privacy_state");
+    const active = state !== "Inactive";
+    setPrivacyActive(active);
+    return active;
+  }, []);
+
   const refresh = useCallback(async () => {
     setSelectedPaths(new Set());
-    const [countsResult] = await Promise.allSettled([
+    const [countsResult, privacyResult] = await Promise.allSettled([
       loadCounts(),
+      syncPrivacyState(),
       loadItems(activeTab),
     ]);
     if (countsResult.status === "rejected") {
       setCounts(emptyCounts);
       setError(errorMessage(countsResult.reason));
     }
-  }, [activeTab, loadCounts, loadItems]);
+    if (privacyResult.status === "rejected") {
+      setPrivacyActive(false);
+    }
+  }, [activeTab, loadCounts, loadItems, syncPrivacyState]);
 
   useEffect(() => {
     void refresh();
@@ -133,6 +171,58 @@ export function Dashboard() {
       }
       return next;
     });
+  };
+
+  const selectedCount = selectedPaths.size;
+  const currentLabel = activeTab === "recent" ? "Recent Files" : "Frequent Folders";
+  const currentCount = activeTab === "recent" ? counts.recent : counts.frequent;
+  const actionsDisabled = loading || mutating || privacyActive;
+  const removeDisabled = actionsDisabled || selectedCount === 0;
+  const emptyDisabled = actionsDisabled || currentCount === 0;
+
+  const openAction = async (action: Exclude<PendingAction, null>) => {
+    try {
+      if (await syncPrivacyState()) {
+        toast.warning("Privacy mode is active; write operations are disabled.");
+        return;
+      }
+      setPendingAction(action);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
+
+  const confirmPendingAction = async () => {
+    if (!pendingAction) {
+      return;
+    }
+
+    const action = pendingAction;
+    setPendingAction(null);
+    setMutating(true);
+    try {
+      if (await syncPrivacyState()) {
+        toast.warning("Privacy mode is active; write operations are disabled.");
+        return;
+      }
+
+      if (action === "remove") {
+        const result = await invoke<QaBatchResult>("remove_qa_items", {
+          qaType: activeTab,
+          paths: Array.from(selectedPaths),
+        });
+        showRemoveToast(result);
+      } else {
+        await invoke("empty_qa_items", { qaType: activeTab });
+        toast.success(`Cleared ${currentLabel}.`);
+      }
+
+      await refresh();
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setMutating(false);
+    }
   };
 
   const tableState = getTableState({
@@ -180,24 +270,52 @@ export function Dashboard() {
       <section className="px-6 pb-6">
         <Tabs value={activeTab} onValueChange={switchTab}>
           <div className="flex flex-col gap-3 border-b pb-4 md:flex-row md:items-center md:justify-between">
-            <TabsList>
-              {tabs.map((tab) => (
-                <TabsTrigger key={tab.value} value={tab.value}>
-                  {tab.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-            <label className="relative w-full md:w-80">
-              <span className="sr-only">Search Quick Access</span>
-              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search name or path"
-                type="search"
-                value={query}
-              />
-            </label>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center">
+              <TabsList>
+                {tabs.map((tab) => (
+                  <TabsTrigger key={tab.value} value={tab.value}>
+                    {tab.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              <label className="relative w-full md:w-80">
+                <span className="sr-only">Search Quick Access</span>
+                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search name or path"
+                  type="search"
+                  value={query}
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {privacyActive ? (
+                <span className="text-xs text-muted-foreground">
+                  Privacy mode active
+                </span>
+              ) : null}
+              <Button
+                disabled={removeDisabled}
+                onClick={() => void openAction("remove")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <Trash2 />
+                Remove selected
+              </Button>
+              <Button
+                disabled={emptyDisabled}
+                onClick={() => void openAction("empty")}
+                size="sm"
+                type="button"
+                variant="destructive"
+              >
+                Clear {currentLabel}
+              </Button>
+            </div>
           </div>
 
           <TabsContent className="pt-4" value={activeTab}>
@@ -271,7 +389,60 @@ export function Dashboard() {
           </TabsContent>
         </Tabs>
       </section>
+      <ConfirmActionDialog
+        action={pendingAction}
+        currentLabel={currentLabel}
+        onClose={() => setPendingAction(null)}
+        onConfirm={() => void confirmPendingAction()}
+        selectedCount={selectedCount}
+      />
     </main>
+  );
+}
+
+function ConfirmActionDialog({
+  action,
+  currentLabel,
+  onClose,
+  onConfirm,
+  selectedCount,
+}: {
+  action: PendingAction;
+  currentLabel: string;
+  onClose: () => void;
+  onConfirm: () => void;
+  selectedCount: number;
+}) {
+  const isEmpty = action === "empty";
+
+  return (
+    <AlertDialog open={action !== null} onOpenChange={(open) => !open && onClose()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {isEmpty ? `Clear ${currentLabel}?` : "Remove selected items?"}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {isEmpty
+              ? `This will clear ${currentLabel} from Quick Access.`
+              : `This will remove ${selectedCount} selected item(s) from Quick Access.`}
+            {isEmpty && currentLabel === "Frequent Folders"
+              ? " Windows may rebuild default Explorer folder entries after this operation."
+              : ""}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            type="button"
+            variant="destructive"
+          >
+            {isEmpty ? "Clear" : "Remove"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -290,6 +461,22 @@ function toQaType(value: unknown): QaType {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function showRemoveToast(result: QaBatchResult) {
+  if (result.failed.length === 0) {
+    toast.success(`Removed ${result.succeeded.length} item(s).`);
+    return;
+  }
+
+  if (result.succeeded.length > 0) {
+    toast.warning(
+      `Removed ${result.succeeded.length} of ${result.total} item(s); ${result.failed.length} failed.`,
+    );
+    return;
+  }
+
+  toast.error(`Failed to remove ${result.failed.length} item(s).`);
 }
 
 function getTableState({

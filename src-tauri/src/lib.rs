@@ -54,7 +54,9 @@ pub fn run() {
             privacy_exit,
             privacy_state,
             commands::list_qa_items,
-            commands::get_qa_counts
+            commands::get_qa_counts,
+            commands::remove_qa_items,
+            commands::empty_qa_items
         ])
         .setup(|app| {
             let mut config = config::load(app.handle())?;
