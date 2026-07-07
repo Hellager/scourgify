@@ -92,6 +92,7 @@ pub fn run() {
                 .unwrap_or(AppMode::Dashboard);
             apply_window_strategy(app.handle(), mode)?;
             tray::build(app.handle())?;
+            theme::update_current_window_icon(app.handle());
             theme::spawn_theme_watcher(app.handle().clone());
             Ok(())
         })

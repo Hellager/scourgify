@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tauri::{image::Image, AppHandle, Runtime};
+use tauri::{image::Image, AppHandle, Manager, Runtime};
 use winreg::{enums::*, RegKey};
 
 pub const MAIN_TRAY_ID: &str = "main-tray";
@@ -20,16 +20,7 @@ pub fn spawn_theme_watcher<R: Runtime>(app: AppHandle<R>) {
             }
 
             last_theme = current_theme;
-            if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
-                match tray_icon(current_theme) {
-                    Ok(icon) => {
-                        if let Err(error) = tray.set_icon(Some(icon)) {
-                            log::warn!("failed to update tray icon: {error}");
-                        }
-                    }
-                    Err(error) => log::warn!("failed to load tray icon: {error}"),
-                }
-            }
+            update_runtime_icons(&app, current_theme);
         }
     });
 }
@@ -51,8 +42,45 @@ pub fn current_tray_icon() -> Result<Image<'static>> {
     tray_icon(is_system_light_theme())
 }
 
+pub fn update_current_window_icon<R: Runtime>(app: &AppHandle<R>) {
+    update_window_icon(app, is_system_light_theme());
+}
+
 pub fn tray_icon(light: bool) -> Result<Image<'static>> {
     Ok(Image::from_bytes(if light { LIGHT_ICON } else { DARK_ICON })?.to_owned())
+}
+
+fn update_runtime_icons<R: Runtime>(app: &AppHandle<R>, light: bool) {
+    update_tray_icon(app, light);
+    update_window_icon(app, light);
+}
+
+fn update_tray_icon<R: Runtime>(app: &AppHandle<R>, light: bool) {
+    if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
+        match tray_icon(light) {
+            Ok(icon) => {
+                if let Err(error) = tray.set_icon(Some(icon)) {
+                    log::warn!("failed to update tray icon: {error}");
+                }
+            }
+            Err(error) => log::warn!("failed to load tray icon: {error}"),
+        }
+    }
+}
+
+fn update_window_icon<R: Runtime>(app: &AppHandle<R>, light: bool) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    match tray_icon(light) {
+        Ok(icon) => {
+            if let Err(error) = window.set_icon(icon) {
+                log::warn!("failed to update window icon: {error}");
+            }
+        }
+        Err(error) => log::warn!("failed to load window icon: {error}"),
+    }
 }
 
 fn is_light_theme_value(value: Option<u32>) -> bool {
