@@ -4900,9 +4900,9 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "wincent"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfc268bf79413b2553c5d4ef3fbe86adb398aaaa50334f3d35f2177e05838dca"
+checksum = "e1997c518b1dbfad933a1390efd98d02dd8caeb7cd322ffacd051d7c2b4c37a4"
 dependencies = [
  "md5",
  "rand 0.10.1",

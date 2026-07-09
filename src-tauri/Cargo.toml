@@ -31,5 +31,5 @@ tauri-plugin-os = "2.0.0"
 tauri-plugin-single-instance = "2.0.0"
 
 [target.'cfg(windows)'.dependencies]
-wincent = "0.2.5"
+wincent = "0.2.6"
 winreg = "0.56.0"
