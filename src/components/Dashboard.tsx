@@ -22,6 +22,13 @@ import {
   type VisibilityState,
 } from "@tanstack/react-table";
 import {
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+} from "recharts";
+import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -144,6 +151,22 @@ interface QaRestoreSectionResult {
   error: string | null;
 }
 
+interface OperationSummary {
+  action: string;
+  failed: number;
+  message: string;
+  succeeded: number;
+  target: string;
+  total: number;
+  updatedAt: string;
+}
+
+interface QuickAccessChartItem {
+  color: string;
+  name: string;
+  value: number;
+}
+
 type PrivacyState =
   | "Inactive"
   | "ActiveFull"
@@ -169,6 +192,8 @@ const columnLabels: Record<string, string> = {
   location: "Location",
 };
 
+const quickAccessChartColors = ["#2563eb", "#16a34a"];
+
 export function Dashboard() {
   const [config, setConfig] = useState<ConfigForm>(defaultConfig);
   const [activeTab, setActiveTab] = useState<QaType>("recent");
@@ -183,6 +208,8 @@ export function Dashboard() {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [pinFolderPath, setPinFolderPath] = useState("");
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  const [lastOperationSummary, setLastOperationSummary] =
+    useState<OperationSummary | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
@@ -203,6 +230,23 @@ export function Dashboard() {
       );
     });
   }, [items, query]);
+
+  const quickAccessChartData = useMemo(
+    () => [
+      {
+        color: quickAccessChartColors[0],
+        name: "Recent Files",
+        value: counts.recent,
+      },
+      {
+        color: quickAccessChartColors[1],
+        name: "Frequent Folders",
+        value: counts.frequent,
+      },
+    ],
+    [counts.frequent, counts.recent],
+  );
+  const quickAccessTotal = counts.recent + counts.frequent;
 
   const tableData = useMemo<QaTableRow[]>(
     () =>
@@ -461,6 +505,19 @@ export function Dashboard() {
           qaType: activeTab,
           paths: Array.from(selectedPaths),
         });
+        setLastOperationSummary(
+          createOperationSummary({
+            action: "Remove selected",
+            failed: result.failed.length,
+            message:
+              result.failed.length > 0
+                ? `Removed ${result.succeeded.length} of ${result.total} item(s); ${result.failed.length} failed.`
+                : `Removed ${result.succeeded.length} item(s).`,
+            succeeded: result.succeeded.length,
+            target: currentLabel,
+            total: result.total,
+          }),
+        );
         showRemoveToast(result);
         if (result.failed.length > 0) {
           void notifyPartialFailure(
@@ -474,13 +531,30 @@ export function Dashboard() {
           );
         }
       } else if (action === "empty") {
+        const total = currentCount;
         await invoke("empty_qa_items", { qaType: activeTab });
+        setLastOperationSummary(
+          createOperationSummary({
+            action: "Clear",
+            failed: 0,
+            message: `Cleared ${currentLabel}.`,
+            succeeded: total,
+            target: currentLabel,
+            total,
+          }),
+        );
         toast.success(`Cleared ${currentLabel}.`);
         void notifyOperationComplete("Scourgify", `Cleared ${currentLabel}.`);
       } else {
         const result = await invoke<QaRestoreResult>("restore_qa_defaults", {
           qaType: action === "restore-all" ? "all" : activeTab,
         });
+        setLastOperationSummary(
+          createRestoreOperationSummary(
+            result,
+            action === "restore-all" ? "All" : currentLabel,
+          ),
+        );
         showRestoreToast(result);
         if (result.success) {
           void notifyOperationComplete("Scourgify", "Restored defaults.");
@@ -494,6 +568,9 @@ export function Dashboard() {
 
       await refresh();
     } catch (error) {
+      setLastOperationSummary(
+        createFailedOperationSummary(action, currentLabel, error),
+      );
       toast.error(errorMessage(error));
     } finally {
       setMutating(false);
@@ -662,6 +739,11 @@ export function Dashboard() {
         <CountCard label="Frequent Folders" value={counts.frequent} />
         <CountCard label="Visible" value={filteredItems.length} />
         <CountCard label="Selected" value={selectedPaths.size} />
+      </section>
+
+      <section className="grid gap-4 px-6 pb-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+        <OverviewChart data={quickAccessChartData} total={quickAccessTotal} />
+        <OperationSummaryPanel summary={lastOperationSummary} />
       </section>
 
       <section className="grid gap-3 px-6 pb-6 md:grid-cols-[1fr_auto_auto]">
@@ -1004,6 +1086,125 @@ function CountCard({ label, value }: { label: string; value: number }) {
   );
 }
 
+function OverviewChart({
+  data,
+  total,
+}: {
+  data: QuickAccessChartItem[];
+  total: number;
+}) {
+  return (
+    <div className="rounded-md border bg-card p-4 text-card-foreground">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-sm font-semibold">Quick Access composition</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Current Recent/Frequent split
+          </p>
+        </div>
+        <span className="text-2xl font-semibold tabular-nums">{total}</span>
+      </div>
+      {total === 0 ? (
+        <div className="grid h-48 place-items-center text-sm text-muted-foreground">
+          No Quick Access items found.
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-4 md:grid-cols-[240px_1fr] md:items-center">
+          <div className="h-48">
+            <ResponsiveContainer height="100%" width="100%">
+              <PieChart>
+                <Pie
+                  data={data}
+                  dataKey="value"
+                  innerRadius={54}
+                  nameKey="name"
+                  outerRadius={78}
+                  paddingAngle={2}
+                >
+                  {data.map((item) => (
+                    <Cell fill={item.color} key={item.name} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="grid gap-3">
+            {data.map((item) => (
+              <div
+                className="flex items-center justify-between gap-3 text-sm"
+                key={item.name}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span
+                    className="size-2.5 rounded-full"
+                    style={{ backgroundColor: item.color }}
+                  />
+                  <span className="truncate">{item.name}</span>
+                </span>
+                <span className="font-medium tabular-nums">
+                  {item.value} / {Math.round((item.value / total) * 100)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OperationSummaryPanel({
+  summary,
+}: {
+  summary: OperationSummary | null;
+}) {
+  return (
+    <div className="rounded-md border bg-card p-4 text-card-foreground">
+      <div>
+        <h2 className="text-sm font-semibold">Last operation</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Latest batch operation result
+        </p>
+      </div>
+      {summary ? (
+        <div className="mt-5 grid gap-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium">{summary.action}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {summary.target} / {summary.updatedAt}
+              </p>
+            </div>
+            <span className="rounded-sm border px-2 py-1 text-xs">
+              {summary.failed > 0 ? "Needs attention" : "Complete"}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-2 border-y py-3 text-center">
+            <SummaryMetric label="Succeeded" value={summary.succeeded} />
+            <SummaryMetric label="Failed" value={summary.failed} />
+            <SummaryMetric label="Total" value={summary.total} />
+          </div>
+          <p className="text-sm text-muted-foreground">{summary.message}</p>
+        </div>
+      ) : (
+        <div className="grid h-48 place-items-center text-sm text-muted-foreground">
+          No operations yet.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <p className="text-lg font-semibold tabular-nums">{value}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
 function SortableHeader({
   children,
   column,
@@ -1080,6 +1281,72 @@ function showRestoreToast(result: QaRestoreResult) {
   toast.warning(
     `Restored defaults with ${getRestoreFailedCount(result)} failed section(s).`,
   );
+}
+
+function createOperationSummary({
+  action,
+  failed,
+  message,
+  succeeded,
+  target,
+  total,
+}: Omit<OperationSummary, "updatedAt">): OperationSummary {
+  return {
+    action,
+    failed,
+    message,
+    succeeded,
+    target,
+    total,
+    updatedAt: new Date().toLocaleTimeString(),
+  };
+}
+
+function createRestoreOperationSummary(
+  result: QaRestoreResult,
+  target: string,
+): OperationSummary {
+  const sections = [result.recent, result.frequent].filter(
+    (section): section is QaRestoreSectionResult => section !== null,
+  );
+  const succeeded = sections.filter((section) => section.success).length;
+  const failed = sections.length - succeeded;
+  return createOperationSummary({
+    action: "Restore defaults",
+    failed,
+    message:
+      failed > 0
+        ? `Restored defaults with ${failed} failed section(s).`
+        : "Restored defaults.",
+    succeeded,
+    target,
+    total: sections.length,
+  });
+}
+
+function createFailedOperationSummary(
+  action: Exclude<PendingAction, null>,
+  target: string,
+  error: unknown,
+): OperationSummary {
+  return createOperationSummary({
+    action: getOperationLabel(action),
+    failed: 1,
+    message: errorMessage(error),
+    succeeded: 0,
+    target,
+    total: 1,
+  });
+}
+
+function getOperationLabel(action: Exclude<PendingAction, null>) {
+  if (action === "remove") {
+    return "Remove selected";
+  }
+  if (action === "empty") {
+    return "Clear";
+  }
+  return "Restore defaults";
 }
 
 function getRestoreFailedCount(result: QaRestoreResult) {
