@@ -19,6 +19,47 @@ impl Default for AppMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CloseBehavior {
+    Hide,
+    Quit,
+}
+
+impl Default for CloseBehavior {
+    fn default() -> Self {
+        Self::Hide
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePreference {
+    System,
+    Light,
+    Dark,
+}
+
+impl Default for ThemePreference {
+    fn default() -> Self {
+        Self::System
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarVariant {
+    Sidebar,
+    Inset,
+    Floating,
+}
+
+impl Default for SidebarVariant {
+    fn default() -> Self {
+        Self::Sidebar
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
     #[serde(default)]
@@ -31,6 +72,24 @@ pub struct Config {
     pub privacy_mode: bool,
     #[serde(default = "default_true")]
     pub privacy_mode_cleanup_links: bool,
+    #[serde(default)]
+    pub close_behavior: CloseBehavior,
+    #[serde(default)]
+    pub theme: ThemePreference,
+    #[serde(default)]
+    pub sidebar_variant: SidebarVariant,
+    #[serde(default = "default_true")]
+    pub show_recent_files: bool,
+    #[serde(default = "default_true")]
+    pub show_frequent_folders: bool,
+    #[serde(default = "default_true")]
+    pub notifications_enabled: bool,
+    #[serde(default = "default_true")]
+    pub notify_operation_complete: bool,
+    #[serde(default = "default_true")]
+    pub notify_partial_failure: bool,
+    #[serde(default = "default_true")]
+    pub confirm_destructive_actions: bool,
 }
 
 impl Config {
@@ -41,6 +100,15 @@ impl Config {
             auto_start: false,
             privacy_mode: false,
             privacy_mode_cleanup_links: true,
+            close_behavior: CloseBehavior::Hide,
+            theme: ThemePreference::System,
+            sidebar_variant: SidebarVariant::Sidebar,
+            show_recent_files: true,
+            show_frequent_folders: true,
+            notifications_enabled: true,
+            notify_operation_complete: true,
+            notify_partial_failure: true,
+            confirm_destructive_actions: true,
         }
     }
 }
@@ -133,12 +201,31 @@ mod tests {
         assert!(!config.auto_start);
         assert!(!config.privacy_mode);
         assert!(config.privacy_mode_cleanup_links);
+        assert_eq!(config.close_behavior, CloseBehavior::Hide);
+        assert_eq!(config.theme, ThemePreference::System);
+        assert_eq!(config.sidebar_variant, SidebarVariant::Sidebar);
+        assert!(config.show_recent_files);
+        assert!(config.show_frequent_folders);
+        assert!(config.notifications_enabled);
+        assert!(config.notify_operation_complete);
+        assert!(config.notify_partial_failure);
+        assert!(config.confirm_destructive_actions);
     }
 
     #[test]
     fn serializes_app_mode_as_lowercase() {
         assert_eq!(serde_json::to_string(&AppMode::Dashboard).unwrap(), r#""dashboard""#);
         assert_eq!(serde_json::to_string(&AppMode::Minimal).unwrap(), r#""minimal""#);
+    }
+
+    #[test]
+    fn serializes_settings_enums_as_lowercase() {
+        assert_eq!(serde_json::to_string(&CloseBehavior::Hide).unwrap(), r#""hide""#);
+        assert_eq!(serde_json::to_string(&ThemePreference::System).unwrap(), r#""system""#);
+        assert_eq!(
+            serde_json::to_string(&SidebarVariant::Floating).unwrap(),
+            r#""floating""#
+        );
     }
 
     #[test]

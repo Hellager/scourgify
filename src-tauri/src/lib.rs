@@ -134,6 +134,13 @@ fn update_config(
     mut next_config: Config,
 ) -> Result<Config, String> {
     next_config.language = config::normalize_language(&next_config.language);
+    let current_auto_start = config
+        .lock()
+        .map_err(|error| error.to_string())?
+        .auto_start;
+    if current_auto_start != next_config.auto_start {
+        set_auto_start_preference(&app, next_config.auto_start)?;
+    }
     config::save(&app, &next_config).map_err(|error| error.to_string())?;
     {
         let mut config = config.lock().map_err(|error| error.to_string())?;
@@ -264,6 +271,20 @@ fn sync_auto_start_config<R: Runtime>(app: &tauri::AppHandle<R>, config: &mut Co
         Ok(_) => {}
         Err(error) => log::warn!("failed to read autostart state: {error}"),
     }
+}
+
+fn set_auto_start_preference<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    enabled: bool,
+) -> Result<(), String> {
+    let manager = app.autolaunch();
+    let result = if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    };
+
+    result.map_err(|error| error.to_string())
 }
 
 pub(crate) fn show_dashboard<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {

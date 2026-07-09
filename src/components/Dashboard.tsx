@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Link } from "react-router-dom";
-import { FolderOpen, RefreshCw, Search, Trash2 } from "lucide-react";
+import { FolderOpen, RefreshCw, Search, Settings, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -258,6 +258,15 @@ export function Dashboard() {
             variant="outline"
           >
             <RefreshCw className={loading ? "animate-spin" : ""} />
+          </Button>
+          <Button
+            aria-label="Open settings"
+            render={<Link to="/settings" />}
+            size="icon-sm"
+            type="button"
+            variant="outline"
+          >
+            <Settings />
           </Button>
           <Link
             className="text-sm text-muted-foreground hover:text-foreground"
