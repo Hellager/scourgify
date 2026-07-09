@@ -55,8 +55,12 @@ pub fn run() {
             privacy_state,
             commands::list_qa_items,
             commands::get_qa_counts,
+            commands::pin_qa_folder,
             commands::remove_qa_items,
             commands::empty_qa_items,
+            commands::restore_qa_defaults,
+            commands::get_qa_visibility,
+            commands::set_qa_visibility,
             commands::open_in_explorer
         ])
         .setup(|app| {

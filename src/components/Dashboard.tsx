@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { Link } from "react-router-dom";
-import { FolderOpen, RefreshCw, Search, Settings, Trash2 } from "lucide-react";
+import {
+  FolderOpen,
+  FolderPlus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Settings,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -15,6 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -44,12 +54,24 @@ interface QaBatchResult {
   failed: Array<{ path: string; error: string }>;
 }
 
+interface QaRestoreResult {
+  success: boolean;
+  recent: QaRestoreSectionResult | null;
+  frequent: QaRestoreSectionResult | null;
+}
+
+interface QaRestoreSectionResult {
+  success: boolean;
+  deleted_lnk_count: number;
+  error: string | null;
+}
+
 type PrivacyState =
   | "Inactive"
   | "ActiveFull"
   | { ActivePartial: { recent: boolean; frequent: boolean } };
 
-type PendingAction = "remove" | "empty" | null;
+type PendingAction = "remove" | "empty" | "restore-current" | "restore-all" | null;
 
 const tabs: Array<{ value: QaType; label: string }> = [
   { value: "recent", label: "Recent Files" },
@@ -73,6 +95,7 @@ export function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [privacyActive, setPrivacyActive] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [pinFolderPath, setPinFolderPath] = useState("");
 
   const filteredItems = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -179,6 +202,7 @@ export function Dashboard() {
   const actionsDisabled = loading || mutating || privacyActive;
   const removeDisabled = actionsDisabled || selectedCount === 0;
   const emptyDisabled = actionsDisabled || currentCount === 0;
+  const pinDisabled = actionsDisabled || pinFolderPath.trim() === "";
 
   const openAction = async (action: Exclude<PendingAction, null>) => {
     try {
@@ -212,11 +236,50 @@ export function Dashboard() {
           paths: Array.from(selectedPaths),
         });
         showRemoveToast(result);
-      } else {
+      } else if (action === "empty") {
         await invoke("empty_qa_items", { qaType: activeTab });
         toast.success(`Cleared ${currentLabel}.`);
+      } else {
+        const result = await invoke<QaRestoreResult>("restore_qa_defaults", {
+          qaType: action === "restore-all" ? "all" : activeTab,
+        });
+        showRestoreToast(result);
       }
 
+      await refresh();
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  const choosePinFolder = async () => {
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected === "string") {
+        setPinFolderPath(selected);
+      }
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
+
+  const pinFolder = async () => {
+    const path = pinFolderPath.trim();
+    if (!path) {
+      return;
+    }
+
+    setMutating(true);
+    try {
+      if (await syncPrivacyState()) {
+        toast.warning("Privacy mode is active; write operations are disabled.");
+        return;
+      }
+      await invoke("pin_qa_folder", { path });
+      setPinFolderPath("");
+      toast.success("Pinned folder.");
       await refresh();
     } catch (error) {
       toast.error(errorMessage(error));
@@ -284,6 +347,34 @@ export function Dashboard() {
         <CountCard label="Selected" value={selectedPaths.size} />
       </section>
 
+      <section className="grid gap-3 px-6 pb-6 md:grid-cols-[1fr_auto_auto]">
+        <label className="min-w-0">
+          <span className="sr-only">Folder path to pin</span>
+          <Input
+            disabled={actionsDisabled}
+            onChange={(event) => setPinFolderPath(event.target.value)}
+            placeholder="Folder path to pin"
+            value={pinFolderPath}
+          />
+        </label>
+        <Button
+          disabled={actionsDisabled}
+          onClick={() => void choosePinFolder()}
+          type="button"
+          variant="outline"
+        >
+          Browse
+        </Button>
+        <Button
+          disabled={pinDisabled}
+          onClick={() => void pinFolder()}
+          type="button"
+        >
+          <FolderPlus />
+          Pin folder
+        </Button>
+      </section>
+
       <section className="px-6 pb-6">
         <Tabs value={activeTab} onValueChange={switchTab}>
           <div className="flex flex-col gap-3 border-b pb-4 md:flex-row md:items-center md:justify-between">
@@ -331,6 +422,25 @@ export function Dashboard() {
                 variant="destructive"
               >
                 Clear {currentLabel}
+              </Button>
+              <Button
+                disabled={actionsDisabled}
+                onClick={() => void openAction("restore-current")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <RotateCcw />
+                Restore {currentLabel}
+              </Button>
+              <Button
+                disabled={actionsDisabled}
+                onClick={() => void openAction("restore-all")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Restore All
               </Button>
             </div>
           </div>
@@ -444,18 +554,29 @@ function ConfirmActionDialog({
   selectedCount: number;
 }) {
   const isEmpty = action === "empty";
+  const isRestore = action === "restore-current" || action === "restore-all";
+  const title = isEmpty
+    ? `Clear ${currentLabel}?`
+    : isRestore
+      ? action === "restore-all"
+        ? "Restore all defaults?"
+        : `Restore ${currentLabel} defaults?`
+      : "Remove selected items?";
+  const description = isEmpty
+    ? `This will clear ${currentLabel} from Quick Access.`
+    : isRestore
+      ? action === "restore-all"
+        ? "This will restore Recent Files and Frequent Folders to their default state."
+        : `This will restore ${currentLabel} to its default state.`
+      : `This will remove ${selectedCount} selected item(s) from Quick Access.`;
 
   return (
     <AlertDialog open={action !== null} onOpenChange={(open) => !open && onClose()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>
-            {isEmpty ? `Clear ${currentLabel}?` : "Remove selected items?"}
-          </AlertDialogTitle>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>
-            {isEmpty
-              ? `This will clear ${currentLabel} from Quick Access.`
-              : `This will remove ${selectedCount} selected item(s) from Quick Access.`}
+            {description}
             {isEmpty && currentLabel === "Frequent Folders"
               ? " Windows may rebuild default Explorer folder entries after this operation."
               : ""}
@@ -468,7 +589,7 @@ function ConfirmActionDialog({
             type="button"
             variant="destructive"
           >
-            {isEmpty ? "Clear" : "Remove"}
+            {isEmpty ? "Clear" : isRestore ? "Restore" : "Remove"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -507,6 +628,18 @@ function showRemoveToast(result: QaBatchResult) {
   }
 
   toast.error(`Failed to remove ${result.failed.length} item(s).`);
+}
+
+function showRestoreToast(result: QaRestoreResult) {
+  if (result.success) {
+    toast.success("Restored defaults.");
+    return;
+  }
+
+  const failedCount = [result.recent, result.frequent].filter(
+    (section) => section && !section.success,
+  ).length;
+  toast.warning(`Restored defaults with ${failedCount} failed section(s).`);
 }
 
 function getTableState({

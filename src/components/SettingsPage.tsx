@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Controller, type Control, useForm } from "react-hook-form";
@@ -49,6 +49,16 @@ type SwitchField = {
   description?: string;
 };
 
+interface QaVisibility {
+  recent: boolean;
+  frequent: boolean;
+}
+
+type PrivacyState =
+  | "Inactive"
+  | "ActiveFull"
+  | { ActivePartial: { recent: boolean; frequent: boolean } };
+
 const defaultConfig: ConfigForm = {
   app_mode: "dashboard",
   language: "en-US",
@@ -68,6 +78,8 @@ const defaultConfig: ConfigForm = {
 
 export function SettingsPage() {
   const [loading, setLoading] = useState(true);
+  const [privacyActive, setPrivacyActive] = useState(false);
+  const originalVisibility = useRef<QaVisibility | null>(null);
   const {
     control,
     formState,
@@ -81,10 +93,22 @@ export function SettingsPage() {
   useEffect(() => {
     let active = true;
 
-    invoke<ConfigForm>("get_config")
-      .then((config) => {
+    Promise.all([
+      invoke<ConfigForm>("get_config"),
+      invoke<QaVisibility>("get_qa_visibility"),
+      invoke<PrivacyState>("privacy_state"),
+    ])
+      .then(([config, visibility, privacyState]) => {
         if (active) {
-          reset(configSchema.parse(config));
+          originalVisibility.current = visibility;
+          setPrivacyActive(privacyState !== "Inactive");
+          reset(
+            configSchema.parse({
+              ...config,
+              show_recent_files: visibility.recent,
+              show_frequent_folders: visibility.frequent,
+            }),
+          );
         }
       })
       .catch((error) => toast.error(errorMessage(error)))
@@ -101,10 +125,37 @@ export function SettingsPage() {
 
   const save = handleSubmit(async (values) => {
     try {
+      const visibilityChanged =
+        originalVisibility.current &&
+        (originalVisibility.current.recent !== values.show_recent_files ||
+          originalVisibility.current.frequent !== values.show_frequent_folders);
+      if (privacyActive && visibilityChanged) {
+        toast.warning("Privacy mode is active; visibility changes are disabled.");
+        return;
+      }
+      if (originalVisibility.current?.recent !== values.show_recent_files) {
+        await invoke("set_qa_visibility", {
+          qaType: "recent",
+          visible: values.show_recent_files,
+        });
+      }
+      if (originalVisibility.current?.frequent !== values.show_frequent_folders) {
+        await invoke("set_qa_visibility", {
+          qaType: "frequent",
+          visible: values.show_frequent_folders,
+        });
+      }
       const saved = await invoke<ConfigForm>("update_config", {
         nextConfig: values,
       });
       reset(configSchema.parse(saved));
+      originalVisibility.current = {
+        recent: values.show_recent_files,
+        frequent: values.show_frequent_folders,
+      };
+      if (visibilityChanged) {
+        toast.success("Quick Access visibility updated.");
+      }
       toast.success("Settings saved.");
     } catch (error) {
       toast.error(errorMessage(error));
@@ -234,10 +285,12 @@ export function SettingsPage() {
           />
           <SwitchControl
             control={control}
+            disabled={privacyActive}
             field={{ label: "Show recent files", name: "show_recent_files" }}
           />
           <SwitchControl
             control={control}
+            disabled={privacyActive}
             field={{
               label: "Show frequent folders",
               name: "show_frequent_folders",
@@ -349,9 +402,11 @@ function SelectControl({
 
 function SwitchControl({
   control,
+  disabled,
   field,
 }: {
   control: Control<ConfigForm>;
+  disabled?: boolean;
   field: SwitchField;
 }) {
   return (
@@ -370,6 +425,7 @@ function SwitchControl({
           </span>
           <Switch
             checked={Boolean(formField.value)}
+            disabled={disabled}
             onCheckedChange={formField.onChange}
           />
         </label>

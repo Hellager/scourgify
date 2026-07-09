@@ -3,7 +3,9 @@ use tauri::State;
 
 use crate::{
     privacy::{PrivacyManager, PrivacyModeState},
-    quick_access::{self, QaBatchResult, QaCounts, QaItem},
+    quick_access::{
+        self, QaBatchResult, QaCounts, QaItem, QaRestoreResult, QaVisibility,
+    },
 };
 
 const PRIVACY_WRITE_ERROR: &str =
@@ -17,6 +19,15 @@ pub(crate) fn list_qa_items(qa_type: String) -> Result<Vec<QaItem>, String> {
 #[tauri::command]
 pub(crate) fn get_qa_counts() -> Result<QaCounts, String> {
     quick_access::get_counts().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn pin_qa_folder(
+    privacy: State<'_, PrivacyManager>,
+    path: String,
+) -> Result<(), String> {
+    ensure_quick_access_write_allowed(privacy.state())?;
+    quick_access::pin_folder(&path).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -36,6 +47,30 @@ pub(crate) fn empty_qa_items(
 ) -> Result<(), String> {
     ensure_quick_access_write_allowed(privacy.state())?;
     quick_access::empty_items(&qa_type).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn restore_qa_defaults(
+    privacy: State<'_, PrivacyManager>,
+    qa_type: String,
+) -> Result<QaRestoreResult, String> {
+    ensure_quick_access_write_allowed(privacy.state())?;
+    quick_access::restore_defaults(&qa_type).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn get_qa_visibility() -> Result<QaVisibility, String> {
+    quick_access::get_visibility().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn set_qa_visibility(
+    privacy: State<'_, PrivacyManager>,
+    qa_type: String,
+    visible: bool,
+) -> Result<(), String> {
+    ensure_quick_access_write_allowed(privacy.state())?;
+    quick_access::set_visibility(&qa_type, visible).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
