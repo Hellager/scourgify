@@ -6,7 +6,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Save } from "lucide-react";
 import { toast } from "sonner";
-import { z } from "zod";
 import packageJson from "../../package.json";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,30 +16,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { configSchema, defaultConfig, type ConfigForm } from "@/lib/config";
 import { requestNotificationPermission } from "@/lib/notifications";
 
 const GITHUB_URL = "https://github.com/hellager/scourgify";
 
-const configSchema = z.object({
-  app_mode: z.enum(["minimal", "dashboard"]),
-  language: z.enum(["en-US", "zh-CN", "zh-TW", "fr-FR", "ru-RU"]),
-  auto_start: z.boolean(),
-  privacy_mode: z.boolean(),
-  privacy_mode_cleanup_links: z.boolean(),
-  close_behavior: z.enum(["hide", "quit"]),
-  theme: z.enum(["system", "light", "dark"]),
-  sidebar_variant: z.enum(["sidebar", "inset", "floating"]),
-  show_recent_files: z.boolean(),
-  show_frequent_folders: z.boolean(),
-  notifications_enabled: z.boolean(),
-  notify_operation_complete: z.boolean(),
-  notify_inactive_operation_complete: z.boolean(),
-  notify_active_operation_complete: z.boolean(),
-  notify_partial_failure: z.boolean(),
-  confirm_destructive_actions: z.boolean(),
-});
-
-type ConfigForm = z.infer<typeof configSchema>;
 type SelectField = {
   label: string;
   name: keyof ConfigForm;
@@ -62,25 +42,6 @@ type PrivacyState =
   | "Inactive"
   | "ActiveFull"
   | { ActivePartial: { recent: boolean; frequent: boolean } };
-
-const defaultConfig: ConfigForm = {
-  app_mode: "dashboard",
-  language: "en-US",
-  auto_start: false,
-  privacy_mode: false,
-  privacy_mode_cleanup_links: true,
-  close_behavior: "hide",
-  theme: "system",
-  sidebar_variant: "sidebar",
-  show_recent_files: true,
-  show_frequent_folders: true,
-  notifications_enabled: true,
-  notify_operation_complete: true,
-  notify_inactive_operation_complete: true,
-  notify_active_operation_complete: false,
-  notify_partial_failure: true,
-  confirm_destructive_actions: true,
-};
 
 export function SettingsPage() {
   const [loading, setLoading] = useState(true);

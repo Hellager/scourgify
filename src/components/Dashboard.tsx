@@ -3,12 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Link } from "react-router-dom";
 import {
+  Gauge,
   FolderOpen,
   FolderPlus,
+  Info,
+  Paintbrush,
   RefreshCw,
   RotateCcw,
   Search,
   Settings,
+  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -26,6 +30,21 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarSeparator,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+import {
   Table,
   TableBody,
   TableCell,
@@ -38,6 +57,17 @@ import {
   notifyOperationComplete,
   notifyPartialFailure,
 } from "@/lib/notifications";
+import {
+  OPEN_CONFIG_DRAWER_EVENT,
+  REFRESH_DASHBOARD_EVENT,
+} from "@/lib/app-events";
+import {
+  configSchema,
+  defaultConfig,
+  type ConfigForm,
+  type SidebarVariant,
+} from "@/lib/config";
+import { ConfigDrawer } from "@/components/ConfigDrawer";
 
 type QaType = "recent" | "frequent";
 
@@ -89,6 +119,7 @@ const emptyCounts: QaCounts = {
 };
 
 export function Dashboard() {
+  const [config, setConfig] = useState<ConfigForm>(defaultConfig);
   const [activeTab, setActiveTab] = useState<QaType>("recent");
   const [counts, setCounts] = useState<QaCounts>(emptyCounts);
   const [items, setItems] = useState<QaItem[]>([]);
@@ -100,6 +131,7 @@ export function Dashboard() {
   const [privacyActive, setPrivacyActive] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [pinFolderPath, setPinFolderPath] = useState("");
+  const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
 
   const filteredItems = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -125,6 +157,14 @@ export function Dashboard() {
 
   const loadCounts = useCallback(async () => {
     setCounts(await invoke<QaCounts>("get_qa_counts"));
+  }, []);
+
+  const loadConfig = useCallback(async () => {
+    try {
+      setConfig(configSchema.parse(await invoke<ConfigForm>("get_config")));
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
   }, []);
 
   const loadItems = useCallback(async (qaType: QaType) => {
@@ -165,6 +205,22 @@ export function Dashboard() {
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    void loadConfig();
+  }, [loadConfig]);
+
+  useEffect(() => {
+    const openConfigDrawer = () => setConfigDrawerOpen(true);
+    const refreshDashboard = () => void refresh();
+
+    window.addEventListener(OPEN_CONFIG_DRAWER_EVENT, openConfigDrawer);
+    window.addEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
+    return () => {
+      window.removeEventListener(OPEN_CONFIG_DRAWER_EVENT, openConfigDrawer);
+      window.removeEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
+    };
   }, [refresh]);
 
   const switchTab = (value: unknown) => {
@@ -329,13 +385,84 @@ export function Dashboard() {
   });
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    <SidebarProvider>
+      <Sidebar
+        collapsible="icon"
+        variant={config.sidebar_variant as SidebarVariant}
+      >
+        <SidebarHeader>
+          <div className="px-2 py-1">
+            <div className="text-sm font-semibold">Scourgify</div>
+            <div className="text-xs text-muted-foreground">Quick Access</div>
+          </div>
+        </SidebarHeader>
+        <SidebarSeparator />
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton render={<Link to="/" />}>
+                    <Gauge />
+                    <span>Dashboard</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton render={<Link to="/settings" />}>
+                    <Settings />
+                    <span>Settings</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton render={<Link to="/about" />}>
+                    <Info />
+                    <span>About</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    onClick={() => setConfigDrawerOpen(true)}
+                    type="button"
+                  >
+                    <Paintbrush />
+                    <span>Appearance</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+          <SidebarGroup>
+            <SidebarGroupLabel>Counts</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <div className="grid gap-1 px-2 text-xs text-muted-foreground">
+                <span>Recent: {counts.recent}</span>
+                <span>Frequent: {counts.frequent}</span>
+                <span>Selected: {selectedPaths.size}</span>
+              </div>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+      </Sidebar>
+      <SidebarInset className="min-h-screen bg-background text-foreground">
       <header className="flex h-14 items-center justify-between border-b px-6">
-        <div>
-          <h1 className="text-base font-semibold">Scourgify</h1>
-          <p className="text-xs text-muted-foreground">Dashboard</p>
+        <div className="flex items-center gap-3">
+          <SidebarTrigger />
+          <div>
+            <h1 className="text-base font-semibold">Scourgify</h1>
+            <p className="text-xs text-muted-foreground">Dashboard</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            aria-label="Open appearance drawer"
+            onClick={() => setConfigDrawerOpen(true)}
+            size="icon-sm"
+            type="button"
+            variant="outline"
+          >
+            <SlidersHorizontal />
+          </Button>
           <Button
             aria-label="Refresh Quick Access"
             disabled={loading}
@@ -560,7 +687,15 @@ export function Dashboard() {
         onConfirm={() => void confirmPendingAction()}
         selectedCount={selectedCount}
       />
-    </main>
+      <ConfigDrawer
+        config={config}
+        onConfigSaved={setConfig}
+        onOpenChange={setConfigDrawerOpen}
+        open={configDrawerOpen}
+        privacyActive={privacyActive}
+      />
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 
