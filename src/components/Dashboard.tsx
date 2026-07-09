@@ -1,8 +1,33 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Link } from "react-router-dom";
 import {
+  type Column,
+  type ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  type PaginationState,
+  type RowSelectionState,
+  type SortingState,
+  useReactTable,
+  type VisibilityState,
+} from "@tanstack/react-table";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Columns3,
   Gauge,
   FolderOpen,
   FolderPlus,
@@ -28,7 +53,22 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Sidebar,
   SidebarContent,
@@ -76,6 +116,10 @@ interface QaItem {
   name: string;
 }
 
+interface QaTableRow extends QaItem {
+  type: string;
+}
+
 interface QaCounts {
   recent: number;
   frequent: number;
@@ -118,6 +162,13 @@ const emptyCounts: QaCounts = {
   all: 0,
 };
 
+const columnLabels: Record<string, string> = {
+  name: "Name",
+  path: "Path",
+  type: "Type",
+  location: "Location",
+};
+
 export function Dashboard() {
   const [config, setConfig] = useState<ConfigForm>(defaultConfig);
   const [activeTab, setActiveTab] = useState<QaType>("recent");
@@ -132,6 +183,12 @@ export function Dashboard() {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [pinFolderPath, setPinFolderPath] = useState("");
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 20,
+  });
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
 
   const filteredItems = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -147,13 +204,114 @@ export function Dashboard() {
     });
   }, [items, query]);
 
-  const selectedVisibleCount = filteredItems.filter((item) =>
-    selectedPaths.has(item.path),
-  ).length;
-  const allVisibleSelected =
-    filteredItems.length > 0 && selectedVisibleCount === filteredItems.length;
-  const someVisibleSelected =
-    selectedVisibleCount > 0 && selectedVisibleCount < filteredItems.length;
+  const tableData = useMemo<QaTableRow[]>(
+    () =>
+      filteredItems.map((item) => ({
+        ...item,
+        type: activeTab === "recent" ? "Recent File" : "Frequent Folder",
+      })),
+    [activeTab, filteredItems],
+  );
+
+  const rowSelection = useMemo<RowSelectionState>(
+    () =>
+      Object.fromEntries(Array.from(selectedPaths).map((path) => [path, true])),
+    [selectedPaths],
+  );
+
+  const columns = useMemo<ColumnDef<QaTableRow>[]>(
+    () => [
+      {
+        id: "select",
+        enableHiding: false,
+        enableSorting: false,
+        header: "Select",
+        cell: ({ row }) => (
+          <Checkbox
+            aria-label={`Select ${row.original.name}`}
+            checked={selectedPaths.has(row.original.path)}
+            onCheckedChange={(checked) =>
+              togglePath(row.original.path, checked)
+            }
+          />
+        ),
+      },
+      {
+        accessorKey: "name",
+        header: "Name",
+        cell: ({ row }) => (
+          <span className="block max-w-64 truncate font-medium">
+            {row.original.name}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "path",
+        header: "Path",
+        cell: ({ row }) => (
+          <span className="block max-w-[560px] truncate text-muted-foreground">
+            {row.original.path}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "type",
+        header: "Type",
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap text-muted-foreground">
+            {row.original.type}
+          </span>
+        ),
+      },
+      {
+        id: "location",
+        enableSorting: false,
+        header: "Location",
+        cell: ({ row }) => (
+          <div className="text-right">
+            <Button
+              aria-label={`Open location for ${row.original.name}`}
+              onClick={() => void openLocation(row.original.path)}
+              size="icon-sm"
+              title="Open location"
+              type="button"
+              variant="ghost"
+            >
+              <FolderOpen />
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [selectedPaths],
+  );
+
+  const table = useReactTable({
+    data: tableData,
+    columns,
+    state: {
+      sorting,
+      pagination,
+      columnVisibility,
+      rowSelection,
+    },
+    enableRowSelection: true,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getRowId: (row) => row.path,
+    getSortedRowModel: getSortedRowModel(),
+    onColumnVisibilityChange: setColumnVisibility,
+    onPaginationChange: setPagination,
+    onSortingChange: setSorting,
+  });
+
+  const pageRows = table.getRowModel().rows;
+  const allPageSelected =
+    pageRows.length > 0 && pageRows.every((row) => selectedPaths.has(row.id));
+  const somePageSelected =
+    pageRows.some((row) => selectedPaths.has(row.id)) && !allPageSelected;
+  const visibleColumnCount = table.getVisibleLeafColumns().length;
+  const pageCount = table.getPageCount();
 
   const loadCounts = useCallback(async () => {
     setCounts(await invoke<QaCounts>("get_qa_counts"));
@@ -189,6 +347,7 @@ export function Dashboard() {
 
   const refresh = useCallback(async () => {
     setSelectedPaths(new Set());
+    setPagination((current) => ({ ...current, pageIndex: 0 }));
     const [countsResult, privacyResult] = await Promise.allSettled([
       loadCounts(),
       syncPrivacyState(),
@@ -212,6 +371,12 @@ export function Dashboard() {
   }, [loadConfig]);
 
   useEffect(() => {
+    setPagination((current) =>
+      current.pageIndex === 0 ? current : { ...current, pageIndex: 0 },
+    );
+  }, [activeTab, query, items.length]);
+
+  useEffect(() => {
     const openConfigDrawer = () => setConfigDrawerOpen(true);
     const refreshDashboard = () => void refresh();
 
@@ -228,6 +393,7 @@ export function Dashboard() {
     setActiveTab(nextTab);
     setSelectedPaths(new Set());
     setQuery("");
+    setPagination((current) => ({ ...current, pageIndex: 0 }));
   };
 
   const togglePath = (path: string, checked: boolean) => {
@@ -242,14 +408,14 @@ export function Dashboard() {
     });
   };
 
-  const toggleVisible = (checked: boolean) => {
+  const toggleCurrentPage = (checked: boolean) => {
     setSelectedPaths((current) => {
       const next = new Set(current);
-      for (const item of filteredItems) {
+      for (const row of pageRows) {
         if (checked) {
-          next.add(item.path);
+          next.add(row.id);
         } else {
-          next.delete(item.path);
+          next.delete(row.id);
         }
       }
       return next;
@@ -555,6 +721,34 @@ export function Dashboard() {
                   Privacy mode active
                 </span>
               ) : null}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button size="sm" type="button" variant="outline">
+                      <Columns3 />
+                      Columns
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuLabel>Visible columns</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {table
+                    .getAllLeafColumns()
+                    .filter((column) => column.getCanHide())
+                    .map((column) => (
+                      <DropdownMenuCheckboxItem
+                        checked={column.getIsVisible()}
+                        key={column.id}
+                        onCheckedChange={(checked) =>
+                          column.toggleVisibility(checked)
+                        }
+                      >
+                        {columnLabels[column.id] ?? column.id}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 disabled={removeDisabled}
                 onClick={() => void openAction("remove")}
@@ -599,28 +793,46 @@ export function Dashboard() {
           <TabsContent className="pt-4" value={activeTab}>
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10">
-                    <Checkbox
-                      aria-label="Select visible items"
-                      checked={allVisibleSelected}
-                      disabled={filteredItems.length === 0}
-                      indeterminate={someVisibleSelected}
-                      onCheckedChange={toggleVisible}
-                      parent
-                    />
-                  </TableHead>
-                  <TableHead className="w-64">Name</TableHead>
-                  <TableHead>Path</TableHead>
-                  <TableHead className="w-24 text-right">Location</TableHead>
-                </TableRow>
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <TableRow key={headerGroup.id}>
+                    {headerGroup.headers.map((header) => (
+                      <TableHead
+                        className={getHeaderClassName(header.column.id)}
+                        key={header.id}
+                      >
+                        {header.column.id === "select" ? (
+                          <Checkbox
+                            aria-label="Select current page items"
+                            checked={allPageSelected}
+                            disabled={pageRows.length === 0}
+                            indeterminate={somePageSelected}
+                            onCheckedChange={toggleCurrentPage}
+                            parent
+                          />
+                        ) : header.isPlaceholder ? null : header.column.getCanSort() ? (
+                          <SortableHeader column={header.column}>
+                            {flexRender(
+                              header.column.columnDef.header,
+                              header.getContext(),
+                            )}
+                          </SortableHeader>
+                        ) : (
+                          flexRender(
+                            header.column.columnDef.header,
+                            header.getContext(),
+                          )
+                        )}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                ))}
               </TableHeader>
               <TableBody>
                 {tableState ? (
                   <TableRow>
                     <TableCell
                       className="h-40 text-center text-muted-foreground"
-                      colSpan={4}
+                      colSpan={visibleColumnCount}
                     >
                       <div className="flex flex-col items-center gap-3">
                         <span>{tableState}</span>
@@ -638,45 +850,72 @@ export function Dashboard() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredItems.map((item) => (
+                  table.getRowModel().rows.map((row) => (
                     <TableRow
                       data-state={
-                        selectedPaths.has(item.path) ? "selected" : undefined
+                        selectedPaths.has(row.id) ? "selected" : undefined
                       }
-                      key={item.path}
+                      key={row.id}
                     >
-                      <TableCell>
-                        <Checkbox
-                          aria-label={`Select ${item.name}`}
-                          checked={selectedPaths.has(item.path)}
-                          onCheckedChange={(checked) =>
-                            togglePath(item.path, checked)
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className="max-w-64 truncate font-medium">
-                        {item.name}
-                      </TableCell>
-                      <TableCell className="max-w-[560px] truncate text-muted-foreground">
-                        {item.path}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          aria-label={`Open location for ${item.name}`}
-                          onClick={() => void openLocation(item.path)}
-                          size="icon-sm"
-                          title="Open location"
-                          type="button"
-                          variant="ghost"
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell
+                          className={getCellClassName(cell.column.id)}
+                          key={cell.id}
                         >
-                          <FolderOpen />
-                        </Button>
-                      </TableCell>
+                          {flexRender(
+                            cell.column.columnDef.cell,
+                            cell.getContext(),
+                          )}
+                        </TableCell>
+                      ))}
                     </TableRow>
                   ))
                 )}
               </TableBody>
             </Table>
+            <div className="flex flex-col gap-3 border-t py-4 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+              <div>
+                Page {pageCount === 0 ? 0 : pagination.pageIndex + 1} of{" "}
+                {pageCount} / {filteredItems.length} result
+                {filteredItems.length === 1 ? "" : "s"}
+              </div>
+              <div className="flex items-center gap-2">
+                <span>Rows per page</span>
+                <Select
+                  onValueChange={(value) => table.setPageSize(Number(value))}
+                  value={String(pagination.pageSize)}
+                >
+                  <SelectTrigger className="h-8 w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="20">20</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  disabled={!table.getCanPreviousPage()}
+                  onClick={() => table.previousPage()}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <ChevronLeft />
+                  Previous
+                </Button>
+                <Button
+                  disabled={!table.getCanNextPage()}
+                  onClick={() => table.nextPage()}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Next
+                  <ChevronRight />
+                </Button>
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
       </section>
@@ -763,6 +1002,49 @@ function CountCard({ label, value }: { label: string; value: number }) {
       <p className="mt-3 text-2xl font-semibold tabular-nums">{value}</p>
     </div>
   );
+}
+
+function SortableHeader({
+  children,
+  column,
+}: {
+  children: ReactNode;
+  column: Column<QaTableRow>;
+}) {
+  const sorted = column.getIsSorted();
+  const SortIcon =
+    sorted === "asc" ? ArrowUp : sorted === "desc" ? ArrowDown : ArrowUpDown;
+
+  return (
+    <button
+      className="flex h-8 items-center gap-1.5 rounded-sm text-left text-sm font-medium hover:text-foreground"
+      onClick={column.getToggleSortingHandler()}
+      type="button"
+    >
+      {children}
+      <SortIcon className="size-4 text-muted-foreground" />
+    </button>
+  );
+}
+
+function getHeaderClassName(columnId: string) {
+  if (columnId === "select") {
+    return "w-10";
+  }
+  if (columnId === "name") {
+    return "w-64";
+  }
+  if (columnId === "type") {
+    return "w-36";
+  }
+  if (columnId === "location") {
+    return "w-24 text-right";
+  }
+  return undefined;
+}
+
+function getCellClassName(columnId: string) {
+  return columnId === "location" ? "text-right" : undefined;
 }
 
 function toQaType(value: unknown): QaType {
