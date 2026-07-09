@@ -34,6 +34,8 @@ const configSchema = z.object({
   show_frequent_folders: z.boolean(),
   notifications_enabled: z.boolean(),
   notify_operation_complete: z.boolean(),
+  notify_inactive_operation_complete: z.boolean(),
+  notify_active_operation_complete: z.boolean(),
   notify_partial_failure: z.boolean(),
   confirm_destructive_actions: z.boolean(),
 });
@@ -74,6 +76,8 @@ const defaultConfig: ConfigForm = {
   show_frequent_folders: true,
   notifications_enabled: true,
   notify_operation_complete: true,
+  notify_inactive_operation_complete: true,
+  notify_active_operation_complete: false,
   notify_partial_failure: true,
   confirm_destructive_actions: true,
 };
@@ -94,6 +98,7 @@ export function SettingsPage() {
     defaultValues: defaultConfig,
   });
   const notificationsEnabled = watch("notifications_enabled");
+  const notifyOperationComplete = watch("notify_operation_complete");
 
   useEffect(() => {
     let active = true;
@@ -357,6 +362,23 @@ export function SettingsPage() {
             field={{
               label: "Notify operation complete",
               name: "notify_operation_complete",
+            }}
+          />
+          <SwitchControl
+            control={control}
+            disabled={!notificationsEnabled || !notifyOperationComplete}
+            field={{
+              label: "Notify when app is inactive",
+              name: "notify_inactive_operation_complete",
+            }}
+          />
+          <SwitchControl
+            control={control}
+            disabled={!notificationsEnabled || !notifyOperationComplete}
+            field={{
+              label: "Notify when app is active",
+              name: "notify_active_operation_complete",
+              description: "For development testing.",
             }}
           />
           <SwitchControl

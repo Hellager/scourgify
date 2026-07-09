@@ -9,6 +9,8 @@ import {
 interface NotificationConfig {
   notifications_enabled: boolean;
   notify_operation_complete: boolean;
+  notify_inactive_operation_complete: boolean;
+  notify_active_operation_complete: boolean;
   notify_partial_failure: boolean;
 }
 
@@ -29,7 +31,7 @@ export async function notifyOperationComplete(
   await notifySystem({
     body,
     kind: "operation_complete",
-    requireInactiveWindow: true,
+    respectWindowActivity: true,
     title,
   });
 }
@@ -44,12 +46,12 @@ export async function notifyPartialFailure(
 async function notifySystem({
   body,
   kind,
-  requireInactiveWindow = false,
+  respectWindowActivity = false,
   title,
 }: {
   body: string;
   kind: NotificationKind;
-  requireInactiveWindow?: boolean;
+  respectWindowActivity?: boolean;
   title: string;
 }) {
   try {
@@ -63,8 +65,14 @@ async function notifySystem({
     if (kind === "partial_failure" && !config.notify_partial_failure) {
       return;
     }
-    if (requireInactiveWindow && !(await isCurrentWindowInactive())) {
-      return;
+    if (respectWindowActivity) {
+      const inactive = await isCurrentWindowInactive();
+      if (inactive && !config.notify_inactive_operation_complete) {
+        return;
+      }
+      if (!inactive && !config.notify_active_operation_complete) {
+        return;
+      }
     }
     if (!(await requestNotificationPermission())) {
       return;

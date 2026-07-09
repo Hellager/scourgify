@@ -87,6 +87,10 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub notify_operation_complete: bool,
     #[serde(default = "default_true")]
+    pub notify_inactive_operation_complete: bool,
+    #[serde(default)]
+    pub notify_active_operation_complete: bool,
+    #[serde(default = "default_true")]
     pub notify_partial_failure: bool,
     #[serde(default = "default_true")]
     pub confirm_destructive_actions: bool,
@@ -107,6 +111,8 @@ impl Config {
             show_frequent_folders: true,
             notifications_enabled: true,
             notify_operation_complete: true,
+            notify_inactive_operation_complete: true,
+            notify_active_operation_complete: false,
             notify_partial_failure: true,
             confirm_destructive_actions: true,
         }
@@ -208,6 +214,8 @@ mod tests {
         assert!(config.show_frequent_folders);
         assert!(config.notifications_enabled);
         assert!(config.notify_operation_complete);
+        assert!(config.notify_inactive_operation_complete);
+        assert!(!config.notify_active_operation_complete);
         assert!(config.notify_partial_failure);
         assert!(config.confirm_destructive_actions);
     }
