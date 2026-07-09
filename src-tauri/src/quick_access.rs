@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use wincent::prelude::{
     AddOptions, BatchOptions, EmptyOptions, FrequentRestoreReport, QuickAccess, QuickAccessItem,
     QuickAccessManager, RecentRestoreReport, RemoveOptions, RestoreDefaultsOptions,
-    RestoreDefaultsReport,
+    RestoreDefaultsReport, VisibilityOptions,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -178,12 +178,31 @@ pub fn get_visibility() -> Result<QaVisibility> {
 pub fn set_visibility(qa_type: &str, visible: bool) -> Result<()> {
     let qa_type = parse_visibility_qa_type(qa_type)?;
     log::info!(
-        "wincent set visibility started qa_type={} visible={visible}",
+        "Quick Access visibility update started qa_type={} visible={visible}",
         qa_name(qa_type)
     );
 
-    QuickAccessManager::new().set_visible(qa_type, visible)?;
-    Ok(())
+    let manager = QuickAccessManager::new();
+    match manager.set_visible_with_options(
+        qa_type,
+        visible,
+        VisibilityOptions::new().refresh_explorer(),
+    ) {
+        Ok(()) => {
+            log::info!(
+                "Quick Access visibility update succeeded qa_type={} visible={visible}",
+                qa_name(qa_type)
+            );
+            Ok(())
+        }
+        Err(error) => {
+            log::error!(
+                "Quick Access visibility update failed qa_type={} visible={visible} error={error}",
+                qa_name(qa_type)
+            );
+            Err(error.into())
+        }
+    }
 }
 
 fn parse_qa_type(qa_type: &str) -> Result<QuickAccess> {

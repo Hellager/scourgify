@@ -48,6 +48,7 @@ type SwitchField = {
   name: keyof ConfigForm;
   description?: string;
 };
+type VisibilityQaType = "recent" | "frequent";
 
 interface QaVisibility {
   recent: boolean;
@@ -85,6 +86,7 @@ export function SettingsPage() {
     formState,
     handleSubmit,
     reset,
+    setValue,
   } = useForm<ConfigForm>({
     resolver: zodResolver(configSchema),
     defaultValues: defaultConfig,
@@ -122,6 +124,34 @@ export function SettingsPage() {
       active = false;
     };
   }, [reset]);
+
+  const updateVisibility = async (qaType: VisibilityQaType, visible: boolean) => {
+    const fieldName =
+      qaType === "recent" ? "show_recent_files" : "show_frequent_folders";
+
+    if (privacyActive) {
+      setValue(fieldName, originalVisibility.current?.[qaType] ?? !visible, {
+        shouldValidate: true,
+      });
+      toast.warning("Privacy mode is active; visibility changes are disabled.");
+      return;
+    }
+
+    try {
+      await invoke("set_qa_visibility", { qaType, visible });
+      originalVisibility.current = {
+        recent: originalVisibility.current?.recent ?? true,
+        frequent: originalVisibility.current?.frequent ?? true,
+        [qaType]: visible,
+      };
+      toast.success("Quick Access visibility updated.");
+    } catch (error) {
+      setValue(fieldName, originalVisibility.current?.[qaType] ?? !visible, {
+        shouldValidate: true,
+      });
+      toast.error(errorMessage(error));
+    }
+  };
 
   const save = handleSubmit(async (values) => {
     try {
@@ -285,16 +315,22 @@ export function SettingsPage() {
           />
           <SwitchControl
             control={control}
-            disabled={privacyActive}
+            disabled={loading || privacyActive}
             field={{ label: "Show recent files", name: "show_recent_files" }}
+            onCheckedChange={(checked) =>
+              void updateVisibility("recent", checked)
+            }
           />
           <SwitchControl
             control={control}
-            disabled={privacyActive}
+            disabled={loading || privacyActive}
             field={{
               label: "Show frequent folders",
               name: "show_frequent_folders",
             }}
+            onCheckedChange={(checked) =>
+              void updateVisibility("frequent", checked)
+            }
           />
         </Section>
 
@@ -404,10 +440,12 @@ function SwitchControl({
   control,
   disabled,
   field,
+  onCheckedChange,
 }: {
   control: Control<ConfigForm>;
   disabled?: boolean;
   field: SwitchField;
+  onCheckedChange?: (checked: boolean) => void;
 }) {
   return (
     <Controller
@@ -426,7 +464,13 @@ function SwitchControl({
           <Switch
             checked={Boolean(formField.value)}
             disabled={disabled}
-            onCheckedChange={formField.onChange}
+            inputRef={formField.ref}
+            name={formField.name}
+            onBlur={formField.onBlur}
+            onCheckedChange={(checked) => {
+              formField.onChange(checked);
+              onCheckedChange?.(checked);
+            }}
           />
         </label>
       )}
