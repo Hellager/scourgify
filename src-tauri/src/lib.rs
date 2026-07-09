@@ -5,6 +5,7 @@ mod alert;
 mod commands;
 mod config;
 mod i18n;
+mod notifier;
 mod privacy;
 mod quick_access;
 mod theme;
@@ -23,6 +24,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(build_logger().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
@@ -77,6 +79,11 @@ pub fn run() {
                             "Scourgify",
                             "Privacy mode was restored with partial protection.",
                         );
+                        notifier::notify_partial_failure(
+                            app.handle(),
+                            &config,
+                            "Privacy mode was restored with partial protection.",
+                        );
                     }
                     Err(error) => {
                         log::error!("failed to restore privacy mode: {error}");
@@ -84,6 +91,11 @@ pub fn run() {
                             app.handle(),
                             "Scourgify",
                             &format!("Failed to restore privacy mode.\n\n{error}"),
+                        );
+                        notifier::notify_partial_failure(
+                            app.handle(),
+                            &config,
+                            &format!("Failed to restore privacy mode: {error}"),
                         );
                     }
                 }

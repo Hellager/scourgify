@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { requestNotificationPermission } from "@/lib/notifications";
 
 const GITHUB_URL = "https://github.com/hellager/scourgify";
 
@@ -87,10 +88,12 @@ export function SettingsPage() {
     handleSubmit,
     reset,
     setValue,
+    watch,
   } = useForm<ConfigForm>({
     resolver: zodResolver(configSchema),
     defaultValues: defaultConfig,
   });
+  const notificationsEnabled = watch("notifications_enabled");
 
   useEffect(() => {
     let active = true;
@@ -185,6 +188,12 @@ export function SettingsPage() {
       };
       if (visibilityChanged) {
         toast.success("Quick Access visibility updated.");
+      }
+      if (
+        values.notifications_enabled &&
+        !(await requestNotificationPermission())
+      ) {
+        toast.warning("System notification permission was not granted.");
       }
       toast.success("Settings saved.");
     } catch (error) {
@@ -344,6 +353,7 @@ export function SettingsPage() {
           />
           <SwitchControl
             control={control}
+            disabled={!notificationsEnabled}
             field={{
               label: "Notify operation complete",
               name: "notify_operation_complete",
@@ -351,6 +361,7 @@ export function SettingsPage() {
           />
           <SwitchControl
             control={control}
+            disabled={!notificationsEnabled}
             field={{
               label: "Notify partial failures",
               name: "notify_partial_failure",

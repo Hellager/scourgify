@@ -3,9 +3,7 @@ use tauri::State;
 
 use crate::{
     privacy::{PrivacyManager, PrivacyModeState},
-    quick_access::{
-        self, QaBatchResult, QaCounts, QaItem, QaRestoreResult, QaVisibility,
-    },
+    quick_access::{self, QaBatchResult, QaCounts, QaItem, QaRestoreResult, QaVisibility},
 };
 
 const PRIVACY_WRITE_ERROR: &str =

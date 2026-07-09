@@ -34,6 +34,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  notifyOperationComplete,
+  notifyPartialFailure,
+} from "@/lib/notifications";
 
 type QaType = "recent" | "frequent";
 
@@ -236,14 +240,34 @@ export function Dashboard() {
           paths: Array.from(selectedPaths),
         });
         showRemoveToast(result);
+        if (result.failed.length > 0) {
+          void notifyPartialFailure(
+            "Scourgify",
+            `Removed ${result.succeeded.length} of ${result.total} item(s); ${result.failed.length} failed.`,
+          );
+        } else {
+          void notifyOperationComplete(
+            "Scourgify",
+            `Removed ${result.succeeded.length} item(s).`,
+          );
+        }
       } else if (action === "empty") {
         await invoke("empty_qa_items", { qaType: activeTab });
         toast.success(`Cleared ${currentLabel}.`);
+        void notifyOperationComplete("Scourgify", `Cleared ${currentLabel}.`);
       } else {
         const result = await invoke<QaRestoreResult>("restore_qa_defaults", {
           qaType: action === "restore-all" ? "all" : activeTab,
         });
         showRestoreToast(result);
+        if (result.success) {
+          void notifyOperationComplete("Scourgify", "Restored defaults.");
+        } else {
+          void notifyPartialFailure(
+            "Scourgify",
+            `Restored defaults with ${getRestoreFailedCount(result)} failed section(s).`,
+          );
+        }
       }
 
       await refresh();
@@ -636,10 +660,15 @@ function showRestoreToast(result: QaRestoreResult) {
     return;
   }
 
-  const failedCount = [result.recent, result.frequent].filter(
+  toast.warning(
+    `Restored defaults with ${getRestoreFailedCount(result)} failed section(s).`,
+  );
+}
+
+function getRestoreFailedCount(result: QaRestoreResult) {
+  return [result.recent, result.frequent].filter(
     (section) => section && !section.success,
   ).length;
-  toast.warning(`Restored defaults with ${failedCount} failed section(s).`);
 }
 
 function getTableState({

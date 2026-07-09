@@ -76,7 +76,11 @@ pub fn get_counts() -> Result<QaCounts> {
     let all = get_items_logged(&manager, QuickAccess::All, "count")?.len();
 
     log::debug!("wincent counts succeeded recent={recent} frequent={frequent} all={all}");
-    Ok(QaCounts { recent, frequent, all })
+    Ok(QaCounts {
+        recent,
+        frequent,
+        all,
+    })
 }
 
 pub fn pin_folder(path: &str) -> Result<()> {
@@ -144,7 +148,10 @@ pub fn empty_items(qa_type: &str) -> Result<()> {
 
 pub fn restore_defaults(qa_type: &str) -> Result<QaRestoreResult> {
     let qa_type = parse_qa_type(qa_type)?;
-    log::info!("wincent restore defaults started qa_type={}", qa_name(qa_type));
+    log::info!(
+        "wincent restore defaults started qa_type={}",
+        qa_name(qa_type)
+    );
 
     match QuickAccessManager::new().restore_defaults(qa_type, RestoreDefaultsOptions::new()) {
         Ok(report) => {
@@ -293,10 +300,7 @@ fn get_items_logged(
     qa_type: QuickAccess,
     operation: &str,
 ) -> Result<Vec<String>> {
-    log::debug!(
-        "wincent {operation} started qa_type={}",
-        qa_name(qa_type)
-    );
+    log::debug!("wincent {operation} started qa_type={}", qa_name(qa_type));
     match manager.get_items(qa_type) {
         Ok(items) => {
             log::debug!(
@@ -382,7 +386,10 @@ mod tests {
 
     #[test]
     fn parses_supported_write_qa_types() {
-        assert_eq!(parse_write_qa_type("recent").unwrap(), QuickAccess::RecentFiles);
+        assert_eq!(
+            parse_write_qa_type("recent").unwrap(),
+            QuickAccess::RecentFiles
+        );
         assert_eq!(
             parse_write_qa_type("frequent").unwrap(),
             QuickAccess::FrequentFolders
@@ -453,10 +460,8 @@ mod tests {
 
     #[test]
     fn rejects_file_pin_folder_path() {
-        let path = std::env::temp_dir().join(format!(
-            "scourgify-pin-folder-file-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("scourgify-pin-folder-file-{}", std::process::id()));
         std::fs::write(&path, b"test").unwrap();
         let error = validate_pin_folder_path(path.to_string_lossy().as_ref())
             .unwrap_err()
@@ -468,9 +473,7 @@ mod tests {
 
     #[test]
     fn accepts_existing_pin_folder_path() {
-        assert!(
-            validate_pin_folder_path(std::env::temp_dir().to_string_lossy().as_ref()).is_ok()
-        );
+        assert!(validate_pin_folder_path(std::env::temp_dir().to_string_lossy().as_ref()).is_ok());
     }
 
     #[test]
