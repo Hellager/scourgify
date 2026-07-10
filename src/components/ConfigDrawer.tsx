@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { configSchema, type ConfigForm } from "@/lib/config";
+import { useI18n } from "@/lib/i18n";
 
 type VisibilityQaType = "recent" | "frequent";
 
@@ -42,6 +43,7 @@ export function ConfigDrawer({
   open,
   privacyActive,
 }: ConfigDrawerProps) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState(config);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -93,7 +95,7 @@ export function ConfigDrawer({
 
     if (privacyActive) {
       updateDraft(fieldName, originalVisibility.current?.[qaType] ?? !visible);
-      toast.warning("Privacy mode is active; visibility changes are disabled.");
+      toast.warning(t("privacyWriteDisabled"));
       return;
     }
 
@@ -105,7 +107,7 @@ export function ConfigDrawer({
         frequent: originalVisibility.current?.frequent ?? true,
         [qaType]: visible,
       };
-      toast.success("Quick Access visibility updated.");
+      toast.success(t("quickAccessVisibilityUpdated"));
     } catch (error) {
       updateDraft(fieldName, originalVisibility.current?.[qaType] ?? !visible);
       toast.error(errorMessage(error));
@@ -122,7 +124,7 @@ export function ConfigDrawer({
       );
       setDraft(saved);
       onConfigSaved(saved);
-      toast.success("Appearance saved.");
+      toast.success(t("appearanceSaved"));
       onOpenChange(false);
     } catch (error) {
       toast.error(errorMessage(error));
@@ -135,11 +137,11 @@ export function ConfigDrawer({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-md">
         <SheetHeader>
-          <SheetTitle>Appearance</SheetTitle>
+          <SheetTitle>{t("appearance")}</SheetTitle>
         </SheetHeader>
         <div className="grid gap-1 px-4">
           <label className="flex items-center justify-between gap-4 py-3">
-            <span className="text-sm">Theme</span>
+            <span className="text-sm">{t("theme")}</span>
             <Select
               disabled={loading || saving}
               onValueChange={(value) =>
@@ -151,14 +153,14 @@ export function ConfigDrawer({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="system">System</SelectItem>
-                <SelectItem value="light">Light</SelectItem>
-                <SelectItem value="dark">Dark</SelectItem>
+                <SelectItem value="system">{t("system")}</SelectItem>
+                <SelectItem value="light">{t("light")}</SelectItem>
+                <SelectItem value="dark">{t("dark")}</SelectItem>
               </SelectContent>
             </Select>
           </label>
           <label className="flex items-center justify-between gap-4 border-t py-3">
-            <span className="text-sm">Sidebar style</span>
+            <span className="text-sm">{t("sidebarStyle")}</span>
             <Select
               disabled={loading || saving}
               onValueChange={(value) =>
@@ -173,16 +175,16 @@ export function ConfigDrawer({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="sidebar">Sidebar</SelectItem>
-                <SelectItem value="inset">Inset</SelectItem>
-                <SelectItem value="floating">Floating</SelectItem>
+                <SelectItem value="sidebar">{t("sidebar")}</SelectItem>
+                <SelectItem value="inset">{t("inset")}</SelectItem>
+                <SelectItem value="floating">{t("floating")}</SelectItem>
               </SelectContent>
             </Select>
           </label>
           <SwitchRow
             checked={draft.show_recent_files}
             disabled={loading || saving || privacyActive}
-            label="Show recent files"
+            label={t("showRecentFiles")}
             onCheckedChange={(checked) =>
               void updateVisibility("recent", checked)
             }
@@ -190,7 +192,7 @@ export function ConfigDrawer({
           <SwitchRow
             checked={draft.show_frequent_folders}
             disabled={loading || saving || privacyActive}
-            label="Show frequent folders"
+            label={t("showFrequentFolders")}
             onCheckedChange={(checked) =>
               void updateVisibility("frequent", checked)
             }
@@ -199,7 +201,7 @@ export function ConfigDrawer({
         <SheetFooter>
           <Button disabled={loading || saving} onClick={() => void save()}>
             <Save />
-            Save
+            {t("save")}
           </Button>
         </SheetFooter>
       </SheetContent>

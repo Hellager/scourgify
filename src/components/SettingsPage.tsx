@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { configSchema, defaultConfig, type ConfigForm } from "@/lib/config";
+import { useI18n } from "@/lib/i18n";
 import { requestNotificationPermission } from "@/lib/notifications";
 
 const GITHUB_URL = "https://github.com/hellager/scourgify";
@@ -44,6 +45,7 @@ type PrivacyState =
   | { ActivePartial: { recent: boolean; frequent: boolean } };
 
 export function SettingsPage() {
+  const { t } = useI18n();
   const [loading, setLoading] = useState(true);
   const [privacyActive, setPrivacyActive] = useState(false);
   const originalVisibility = useRef<QaVisibility | null>(null);
@@ -102,7 +104,7 @@ export function SettingsPage() {
       setValue(fieldName, originalVisibility.current?.[qaType] ?? !visible, {
         shouldValidate: true,
       });
-      toast.warning("Privacy mode is active; visibility changes are disabled.");
+      toast.warning(t("privacyWriteDisabled"));
       return;
     }
 
@@ -113,7 +115,7 @@ export function SettingsPage() {
         frequent: originalVisibility.current?.frequent ?? true,
         [qaType]: visible,
       };
-      toast.success("Quick Access visibility updated.");
+      toast.success(t("quickAccessVisibilityUpdated"));
     } catch (error) {
       setValue(fieldName, originalVisibility.current?.[qaType] ?? !visible, {
         shouldValidate: true,
@@ -129,7 +131,7 @@ export function SettingsPage() {
         (originalVisibility.current.recent !== values.show_recent_files ||
           originalVisibility.current.frequent !== values.show_frequent_folders);
       if (privacyActive && visibilityChanged) {
-        toast.warning("Privacy mode is active; visibility changes are disabled.");
+        toast.warning(t("privacyWriteDisabled"));
         return;
       }
       if (originalVisibility.current?.recent !== values.show_recent_files) {
@@ -153,15 +155,15 @@ export function SettingsPage() {
         frequent: values.show_frequent_folders,
       };
       if (visibilityChanged) {
-        toast.success("Quick Access visibility updated.");
+        toast.success(t("quickAccessVisibilityUpdated"));
       }
       if (
         values.notifications_enabled &&
         !(await requestNotificationPermission())
       ) {
-        toast.warning("System notification permission was not granted.");
+        toast.warning(t("notificationPermissionDenied"));
       }
-      toast.success("Settings saved.");
+      toast.success(t("settingsSaved"));
     } catch (error) {
       toast.error(errorMessage(error));
     }
@@ -178,12 +180,12 @@ export function SettingsPage() {
             variant="ghost"
           >
             <ArrowLeft />
-            <span className="sr-only">Back to Dashboard</span>
+            <span className="sr-only">{t("backToDashboard")}</span>
           </Button>
           <div>
-            <h1 className="text-base font-semibold">Settings</h1>
+            <h1 className="text-base font-semibold">{t("settings")}</h1>
             <p className="text-xs text-muted-foreground">
-              Scourgify preferences
+              {t("settingsSubtitle")}
             </p>
           </div>
         </div>
@@ -193,7 +195,7 @@ export function SettingsPage() {
           type="submit"
         >
           <Save />
-          Save
+          {t("save")}
         </Button>
       </header>
 
@@ -202,22 +204,22 @@ export function SettingsPage() {
         id="settings-form"
         onSubmit={(event) => void save(event)}
       >
-        <Section title="General">
+        <Section title={t("general")}>
           <SelectControl
             control={control}
             field={{
-              label: "Run mode",
+              label: t("appMode"),
               name: "app_mode",
               options: [
-                { label: "Dashboard", value: "dashboard" },
-                { label: "Minimal", value: "minimal" },
+                { label: t("appModeDashboard"), value: "dashboard" },
+                { label: t("appModeMinimal"), value: "minimal" },
               ],
             }}
           />
           <SelectControl
             control={control}
             field={{
-              label: "Language",
+              label: t("language"),
               name: "language",
               options: [
                 { label: "English", value: "en-US" },
@@ -231,67 +233,67 @@ export function SettingsPage() {
           <SelectControl
             control={control}
             field={{
-              label: "Close window",
+              label: t("closeWindow"),
               name: "close_behavior",
               options: [
-                { label: "Hide to tray", value: "hide" },
-                { label: "Quit app", value: "quit" },
+                { label: t("hideToTray"), value: "hide" },
+                { label: t("quitApp"), value: "quit" },
               ],
             }}
           />
           <SwitchControl
             control={control}
-            field={{ label: "Auto start", name: "auto_start" }}
+            field={{ label: t("autoStart"), name: "auto_start" }}
           />
         </Section>
 
-        <Section title="Privacy">
+        <Section title={t("privacy")}>
           <SwitchControl
             control={control}
             field={{
-              label: "Restore privacy mode on startup",
+              label: t("restorePrivacyOnStartup"),
               name: "privacy_mode",
-              description: "Does not toggle the current lock immediately.",
+              description: t("restorePrivacyDescription"),
             }}
           />
           <SwitchControl
             control={control}
             field={{
-              label: "Clean new .lnk files on unlock",
+              label: t("cleanLinks"),
               name: "privacy_mode_cleanup_links",
             }}
           />
         </Section>
 
-        <Section title="Appearance">
+        <Section title={t("appearance")}>
           <SelectControl
             control={control}
             field={{
-              label: "Theme",
+              label: t("theme"),
               name: "theme",
               options: [
-                { label: "System", value: "system" },
-                { label: "Light", value: "light" },
-                { label: "Dark", value: "dark" },
+                { label: t("system"), value: "system" },
+                { label: t("light"), value: "light" },
+                { label: t("dark"), value: "dark" },
               ],
             }}
           />
           <SelectControl
             control={control}
             field={{
-              label: "Sidebar style",
+              label: t("sidebarStyle"),
               name: "sidebar_variant",
               options: [
-                { label: "Sidebar", value: "sidebar" },
-                { label: "Inset", value: "inset" },
-                { label: "Floating", value: "floating" },
+                { label: t("sidebar"), value: "sidebar" },
+                { label: t("inset"), value: "inset" },
+                { label: t("floating"), value: "floating" },
               ],
             }}
           />
           <SwitchControl
             control={control}
             disabled={loading || privacyActive}
-            field={{ label: "Show recent files", name: "show_recent_files" }}
+            field={{ label: t("showRecentFiles"), name: "show_recent_files" }}
             onCheckedChange={(checked) =>
               void updateVisibility("recent", checked)
             }
@@ -300,7 +302,7 @@ export function SettingsPage() {
             control={control}
             disabled={loading || privacyActive}
             field={{
-              label: "Show frequent folders",
+              label: t("showFrequentFolders"),
               name: "show_frequent_folders",
             }}
             onCheckedChange={(checked) =>
@@ -309,11 +311,11 @@ export function SettingsPage() {
           />
         </Section>
 
-        <Section title="Notifications">
+        <Section title={t("notifications")}>
           <SwitchControl
             control={control}
             field={{
-              label: "Enable notifications",
+              label: t("enableNotifications"),
               name: "notifications_enabled",
             }}
           />
@@ -321,7 +323,7 @@ export function SettingsPage() {
             control={control}
             disabled={!notificationsEnabled}
             field={{
-              label: "Notify operation complete",
+              label: t("notifyComplete"),
               name: "notify_operation_complete",
             }}
           />
@@ -329,7 +331,7 @@ export function SettingsPage() {
             control={control}
             disabled={!notificationsEnabled || !notifyOperationComplete}
             field={{
-              label: "Notify when app is inactive",
+              label: t("inactiveNotification"),
               name: "notify_inactive_operation_complete",
             }}
           />
@@ -337,41 +339,41 @@ export function SettingsPage() {
             control={control}
             disabled={!notificationsEnabled || !notifyOperationComplete}
             field={{
-              label: "Notify when app is active",
+              label: t("notifyActive"),
               name: "notify_active_operation_complete",
-              description: "For development testing.",
+              description: t("notifyActiveDescription"),
             }}
           />
           <SwitchControl
             control={control}
             disabled={!notificationsEnabled}
             field={{
-              label: "Notify partial failures",
+              label: t("notifyPartialFailure"),
               name: "notify_partial_failure",
             }}
           />
           <SwitchControl
             control={control}
             field={{
-              label: "Confirm destructive actions",
+              label: t("confirmDestructiveActions"),
               name: "confirm_destructive_actions",
             }}
           />
         </Section>
 
-        <Section title="About">
-          <InfoRow label="Version" value={packageJson.version} />
-          <InfoRow label="Author" value="Stein Gu" />
-          <InfoRow label="License" value="MIT" />
+        <Section title={t("about")}>
+          <InfoRow label={t("version")} value={packageJson.version} />
+          <InfoRow label={t("author")} value="Stein Gu" />
+          <InfoRow label={t("license")} value="MIT" />
           <div className="flex items-center justify-between gap-4 py-2">
-            <span className="text-sm text-muted-foreground">GitHub</span>
+            <span className="text-sm text-muted-foreground">{t("github")}</span>
             <Button
               onClick={() => void openUrl(GITHUB_URL)}
               size="sm"
               type="button"
               variant="outline"
             >
-              Open
+              {t("open")}
             </Button>
           </div>
         </Section>

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 - 2026-07-10
+
+- Added a full Settings page with persistent app, privacy, appearance, notification, and Quick Access visibility preferences.
+- Added Quick Access folder pinning, default restore actions, and Explorer Recent/Frequent visibility controls.
+- Added system notification support with active/inactive operation-complete preferences and partial-failure alerts.
+- Added Cmd/Ctrl+K command palette, appearance drawer, and configurable sidebar variants.
+- Upgraded the Dashboard table with sorting, pagination, column visibility, and stable selection across pages.
+- Added Dashboard overview chart and last-operation summary for Quick Access state.
+- Completed five-language frontend coverage for Dashboard, Settings, ConfigDrawer, command palette, and About.
+
 ## 0.2.0 - 2026-07-07
 
 - Added Dashboard mode with startup/window strategy, tray mode switching, and left-click open behavior.

@@ -23,8 +23,10 @@ import {
   OPEN_CONFIG_DRAWER_EVENT,
   REFRESH_DASHBOARD_EVENT,
 } from "@/lib/app-events";
+import { useI18n } from "@/lib/i18n";
 
 export function AppCommandPalette() {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -60,35 +62,35 @@ export function AppCommandPalette() {
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
       <Command>
-        <CommandInput placeholder="Search commands" />
+        <CommandInput placeholder={t("searchCommands")} />
         <CommandList>
-          <CommandEmpty>No commands found.</CommandEmpty>
-          <CommandGroup heading="Navigation">
+          <CommandEmpty>{t("noCommands")}</CommandEmpty>
+          <CommandGroup heading={t("commandNavigation")}>
             <CommandItem onSelect={() => run(() => navigate("/"))}>
               <Gauge />
-              Go to Dashboard
+              {t("goToDashboard")}
             </CommandItem>
             <CommandItem onSelect={() => run(() => navigate("/settings"))}>
               <Settings />
-              Go to Settings
+              {t("goToSettings")}
             </CommandItem>
             <CommandItem onSelect={() => run(() => navigate("/about"))}>
               <Info />
-              Open About
+              {t("openAbout")}
             </CommandItem>
           </CommandGroup>
           <CommandSeparator />
-          <CommandGroup heading="Appearance">
+          <CommandGroup heading={t("commandAppearance")}>
             <CommandItem
               onSelect={() => run(openConfigDrawer)}
             >
               <Paintbrush />
-              Open Config Drawer
-              <CommandShortcut>Drawer</CommandShortcut>
+              {t("openConfigDrawer")}
+              <CommandShortcut>{t("drawerShortcut")}</CommandShortcut>
             </CommandItem>
           </CommandGroup>
           <CommandSeparator />
-          <CommandGroup heading="Dashboard">
+          <CommandGroup heading={t("commandDashboard")}>
             <CommandItem
               disabled={!onDashboard}
               onSelect={() =>
@@ -96,8 +98,8 @@ export function AppCommandPalette() {
               }
             >
               <RefreshCw />
-              Refresh Quick Access
-              <CommandShortcut>Dashboard</CommandShortcut>
+              {t("refreshDashboard")}
+              <CommandShortcut>{t("dashboard")}</CommandShortcut>
             </CommandItem>
           </CommandGroup>
         </CommandList>

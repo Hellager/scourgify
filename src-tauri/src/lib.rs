@@ -12,12 +12,14 @@ mod theme;
 mod tray;
 
 use std::sync::Mutex;
-use tauri::{Manager, Runtime, State};
+use tauri::{Emitter, Manager, Runtime, State};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 use config::{AppMode, Config};
 use privacy::{LockResult, PrivacyManager, PrivacyModeState};
+
+const LANGUAGE_CHANGED_EVENT: &str = "language-changed";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -150,10 +152,10 @@ fn update_config(
     mut next_config: Config,
 ) -> Result<Config, String> {
     next_config.language = config::normalize_language(&next_config.language);
-    let current_auto_start = config
-        .lock()
-        .map_err(|error| error.to_string())?
-        .auto_start;
+    let (current_auto_start, current_language) = {
+        let config = config.lock().map_err(|error| error.to_string())?;
+        (config.auto_start, config.language.clone())
+    };
     if current_auto_start != next_config.auto_start {
         set_auto_start_preference(&app, next_config.auto_start)?;
     }
@@ -163,6 +165,14 @@ fn update_config(
         *config = next_config.clone();
     }
     apply_window_strategy(&app, next_config.app_mode).map_err(|error| error.to_string())?;
+    if current_language != next_config.language {
+        if let Err(error) = app.emit(
+            LANGUAGE_CHANGED_EVENT,
+            i18n::language_event(&next_config.language),
+        ) {
+            log::warn!("failed to emit language change: {error}");
+        }
+    }
     Ok(next_config)
 }
 

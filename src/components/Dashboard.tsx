@@ -114,6 +114,7 @@ import {
   type ConfigForm,
   type SidebarVariant,
 } from "@/lib/config";
+import { type I18nKey, useI18n } from "@/lib/i18n";
 import { ConfigDrawer } from "@/components/ConfigDrawer";
 
 type QaType = "recent" | "frequent";
@@ -174,27 +175,16 @@ type PrivacyState =
 
 type PendingAction = "remove" | "empty" | "restore-current" | "restore-all" | null;
 
-const tabs: Array<{ value: QaType; label: string }> = [
-  { value: "recent", label: "Recent Files" },
-  { value: "frequent", label: "Frequent Folders" },
-];
-
 const emptyCounts: QaCounts = {
   recent: 0,
   frequent: 0,
   all: 0,
 };
 
-const columnLabels: Record<string, string> = {
-  name: "Name",
-  path: "Path",
-  type: "Type",
-  location: "Location",
-};
-
 const quickAccessChartColors = ["#2563eb", "#16a34a"];
 
 export function Dashboard() {
+  const { t } = useI18n();
   const [config, setConfig] = useState<ConfigForm>(defaultConfig);
   const [activeTab, setActiveTab] = useState<QaType>("recent");
   const [counts, setCounts] = useState<QaCounts>(emptyCounts);
@@ -235,16 +225,16 @@ export function Dashboard() {
     () => [
       {
         color: quickAccessChartColors[0],
-        name: "Recent Files",
+        name: t("recentFiles"),
         value: counts.recent,
       },
       {
         color: quickAccessChartColors[1],
-        name: "Frequent Folders",
+        name: t("frequentFolders"),
         value: counts.frequent,
       },
     ],
-    [counts.frequent, counts.recent],
+    [counts.frequent, counts.recent, t],
   );
   const quickAccessTotal = counts.recent + counts.frequent;
 
@@ -252,9 +242,9 @@ export function Dashboard() {
     () =>
       filteredItems.map((item) => ({
         ...item,
-        type: activeTab === "recent" ? "Recent File" : "Frequent Folder",
+        type: activeTab === "recent" ? t("recentFile") : t("frequentFolders"),
       })),
-    [activeTab, filteredItems],
+    [activeTab, filteredItems, t],
   );
 
   const rowSelection = useMemo<RowSelectionState>(
@@ -269,10 +259,10 @@ export function Dashboard() {
         id: "select",
         enableHiding: false,
         enableSorting: false,
-        header: "Select",
+        header: t("selected"),
         cell: ({ row }) => (
           <Checkbox
-            aria-label={`Select ${row.original.name}`}
+            aria-label={t("selectItem", { name: row.original.name })}
             checked={selectedPaths.has(row.original.path)}
             onCheckedChange={(checked) =>
               togglePath(row.original.path, checked)
@@ -282,7 +272,7 @@ export function Dashboard() {
       },
       {
         accessorKey: "name",
-        header: "Name",
+        header: t("name"),
         cell: ({ row }) => (
           <span className="block max-w-64 truncate font-medium">
             {row.original.name}
@@ -291,7 +281,7 @@ export function Dashboard() {
       },
       {
         accessorKey: "path",
-        header: "Path",
+        header: t("path"),
         cell: ({ row }) => (
           <span className="block max-w-[560px] truncate text-muted-foreground">
             {row.original.path}
@@ -300,7 +290,7 @@ export function Dashboard() {
       },
       {
         accessorKey: "type",
-        header: "Type",
+        header: t("type"),
         cell: ({ row }) => (
           <span className="whitespace-nowrap text-muted-foreground">
             {row.original.type}
@@ -310,14 +300,14 @@ export function Dashboard() {
       {
         id: "location",
         enableSorting: false,
-        header: "Location",
+        header: t("location"),
         cell: ({ row }) => (
           <div className="text-right">
             <Button
-              aria-label={`Open location for ${row.original.name}`}
+              aria-label={t("openLocationFor", { name: row.original.name })}
               onClick={() => void openLocation(row.original.path)}
               size="icon-sm"
-              title="Open location"
+              title={t("openLocation")}
               type="button"
               variant="ghost"
             >
@@ -327,7 +317,7 @@ export function Dashboard() {
         ),
       },
     ],
-    [selectedPaths],
+    [selectedPaths, t],
   );
 
   const table = useReactTable({
@@ -467,7 +457,8 @@ export function Dashboard() {
   };
 
   const selectedCount = selectedPaths.size;
-  const currentLabel = activeTab === "recent" ? "Recent Files" : "Frequent Folders";
+  const currentLabel =
+    activeTab === "recent" ? t("recentFiles") : t("frequentFolders");
   const currentCount = activeTab === "recent" ? counts.recent : counts.frequent;
   const actionsDisabled = loading || mutating || privacyActive;
   const removeDisabled = actionsDisabled || selectedCount === 0;
@@ -477,7 +468,7 @@ export function Dashboard() {
   const openAction = async (action: Exclude<PendingAction, null>) => {
     try {
       if (await syncPrivacyState()) {
-        toast.warning("Privacy mode is active; write operations are disabled.");
+        toast.warning(t("privacyWriteDisabled"));
         return;
       }
       setPendingAction(action);
@@ -496,7 +487,7 @@ export function Dashboard() {
     setMutating(true);
     try {
       if (await syncPrivacyState()) {
-        toast.warning("Privacy mode is active; write operations are disabled.");
+        toast.warning(t("privacyWriteDisabled"));
         return;
       }
 
@@ -507,27 +498,35 @@ export function Dashboard() {
         });
         setLastOperationSummary(
           createOperationSummary({
-            action: "Remove selected",
+            action: t("actionRemoveSelected"),
             failed: result.failed.length,
             message:
               result.failed.length > 0
-                ? `Removed ${result.succeeded.length} of ${result.total} item(s); ${result.failed.length} failed.`
-                : `Removed ${result.succeeded.length} item(s).`,
+                ? t("removedItemsPartial", {
+                    failed: result.failed.length,
+                    succeeded: result.succeeded.length,
+                    total: result.total,
+                  })
+                : t("removedItems", { succeeded: result.succeeded.length }),
             succeeded: result.succeeded.length,
             target: currentLabel,
             total: result.total,
           }),
         );
-        showRemoveToast(result);
+        showRemoveToast(result, t);
         if (result.failed.length > 0) {
           void notifyPartialFailure(
             "Scourgify",
-            `Removed ${result.succeeded.length} of ${result.total} item(s); ${result.failed.length} failed.`,
+            t("removedItemsPartial", {
+              failed: result.failed.length,
+              succeeded: result.succeeded.length,
+              total: result.total,
+            }),
           );
         } else {
           void notifyOperationComplete(
             "Scourgify",
-            `Removed ${result.succeeded.length} item(s).`,
+            t("removedItems", { succeeded: result.succeeded.length }),
           );
         }
       } else if (action === "empty") {
@@ -535,16 +534,19 @@ export function Dashboard() {
         await invoke("empty_qa_items", { qaType: activeTab });
         setLastOperationSummary(
           createOperationSummary({
-            action: "Clear",
+            action: t("actionClear"),
             failed: 0,
-            message: `Cleared ${currentLabel}.`,
+            message: t("clearedLabel", { label: currentLabel }),
             succeeded: total,
             target: currentLabel,
             total,
           }),
         );
-        toast.success(`Cleared ${currentLabel}.`);
-        void notifyOperationComplete("Scourgify", `Cleared ${currentLabel}.`);
+        toast.success(t("clearedLabel", { label: currentLabel }));
+        void notifyOperationComplete(
+          "Scourgify",
+          t("clearedLabel", { label: currentLabel }),
+        );
       } else {
         const result = await invoke<QaRestoreResult>("restore_qa_defaults", {
           qaType: action === "restore-all" ? "all" : activeTab,
@@ -552,16 +554,17 @@ export function Dashboard() {
         setLastOperationSummary(
           createRestoreOperationSummary(
             result,
-            action === "restore-all" ? "All" : currentLabel,
+            action === "restore-all" ? t("all") : currentLabel,
+            t,
           ),
         );
-        showRestoreToast(result);
+        showRestoreToast(result, t);
         if (result.success) {
-          void notifyOperationComplete("Scourgify", "Restored defaults.");
+          void notifyOperationComplete("Scourgify", t("restoredDefaults"));
         } else {
           void notifyPartialFailure(
             "Scourgify",
-            `Restored defaults with ${getRestoreFailedCount(result)} failed section(s).`,
+            t("partialRestore", { failed: getRestoreFailedCount(result) }),
           );
         }
       }
@@ -569,7 +572,7 @@ export function Dashboard() {
       await refresh();
     } catch (error) {
       setLastOperationSummary(
-        createFailedOperationSummary(action, currentLabel, error),
+        createFailedOperationSummary(action, currentLabel, error, t),
       );
       toast.error(errorMessage(error));
     } finally {
@@ -597,12 +600,12 @@ export function Dashboard() {
     setMutating(true);
     try {
       if (await syncPrivacyState()) {
-        toast.warning("Privacy mode is active; write operations are disabled.");
+        toast.warning(t("privacyWriteDisabled"));
         return;
       }
       await invoke("pin_qa_folder", { path });
       setPinFolderPath("");
-      toast.success("Pinned folder.");
+      toast.success(t("pinnedFolder"));
       await refresh();
     } catch (error) {
       toast.error(errorMessage(error));
@@ -625,6 +628,7 @@ export function Dashboard() {
     itemCount: items.length,
     loading,
     query,
+    t,
   });
 
   return (
@@ -636,31 +640,33 @@ export function Dashboard() {
         <SidebarHeader>
           <div className="px-2 py-1">
             <div className="text-sm font-semibold">Scourgify</div>
-            <div className="text-xs text-muted-foreground">Quick Access</div>
+            <div className="text-xs text-muted-foreground">
+              {t("quickAccess")}
+            </div>
           </div>
         </SidebarHeader>
         <SidebarSeparator />
         <SidebarContent>
           <SidebarGroup>
-            <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+            <SidebarGroupLabel>{t("commandNavigation")}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton render={<Link to="/" />}>
                     <Gauge />
-                    <span>Dashboard</span>
+                    <span>{t("dashboard")}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton render={<Link to="/settings" />}>
                     <Settings />
-                    <span>Settings</span>
+                    <span>{t("settings")}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton render={<Link to="/about" />}>
                     <Info />
-                    <span>About</span>
+                    <span>{t("about")}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
@@ -669,19 +675,25 @@ export function Dashboard() {
                     type="button"
                   >
                     <Paintbrush />
-                    <span>Appearance</span>
+                    <span>{t("appearance")}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
           <SidebarGroup>
-            <SidebarGroupLabel>Counts</SidebarGroupLabel>
+            <SidebarGroupLabel>{t("counts")}</SidebarGroupLabel>
             <SidebarGroupContent>
               <div className="grid gap-1 px-2 text-xs text-muted-foreground">
-                <span>Recent: {counts.recent}</span>
-                <span>Frequent: {counts.frequent}</span>
-                <span>Selected: {selectedPaths.size}</span>
+                <span>
+                  {t("recent")}: {counts.recent}
+                </span>
+                <span>
+                  {t("frequent")}: {counts.frequent}
+                </span>
+                <span>
+                  {t("selected")}: {selectedPaths.size}
+                </span>
               </div>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -693,12 +705,12 @@ export function Dashboard() {
           <SidebarTrigger />
           <div>
             <h1 className="text-base font-semibold">Scourgify</h1>
-            <p className="text-xs text-muted-foreground">Dashboard</p>
+            <p className="text-xs text-muted-foreground">{t("dashboard")}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <Button
-            aria-label="Open appearance drawer"
+            aria-label={t("openAppearanceDrawer")}
             onClick={() => setConfigDrawerOpen(true)}
             size="icon-sm"
             type="button"
@@ -707,7 +719,7 @@ export function Dashboard() {
             <SlidersHorizontal />
           </Button>
           <Button
-            aria-label="Refresh Quick Access"
+            aria-label={t("refreshQuickAccess")}
             disabled={loading}
             onClick={() => void refresh()}
             size="icon-sm"
@@ -717,7 +729,7 @@ export function Dashboard() {
             <RefreshCw className={loading ? "animate-spin" : ""} />
           </Button>
           <Button
-            aria-label="Open settings"
+            aria-label={t("openSettings")}
             render={<Link to="/settings" />}
             size="icon-sm"
             type="button"
@@ -729,30 +741,30 @@ export function Dashboard() {
             className="text-sm text-muted-foreground hover:text-foreground"
             to="/about"
           >
-            About
+            {t("about")}
           </Link>
         </div>
       </header>
 
       <section className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
-        <CountCard label="Recent Files" value={counts.recent} />
-        <CountCard label="Frequent Folders" value={counts.frequent} />
-        <CountCard label="Visible" value={filteredItems.length} />
-        <CountCard label="Selected" value={selectedPaths.size} />
+        <CountCard label={t("recentFiles")} value={counts.recent} />
+        <CountCard label={t("frequentFolders")} value={counts.frequent} />
+        <CountCard label={t("visible")} value={filteredItems.length} />
+        <CountCard label={t("selected")} value={selectedPaths.size} />
       </section>
 
       <section className="grid gap-4 px-6 pb-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-        <OverviewChart data={quickAccessChartData} total={quickAccessTotal} />
-        <OperationSummaryPanel summary={lastOperationSummary} />
+        <OverviewChart data={quickAccessChartData} t={t} total={quickAccessTotal} />
+        <OperationSummaryPanel summary={lastOperationSummary} t={t} />
       </section>
 
       <section className="grid gap-3 px-6 pb-6 md:grid-cols-[1fr_auto_auto]">
         <label className="min-w-0">
-          <span className="sr-only">Folder path to pin</span>
+          <span className="sr-only">{t("pinFolderPath")}</span>
           <Input
             disabled={actionsDisabled}
             onChange={(event) => setPinFolderPath(event.target.value)}
-            placeholder="Folder path to pin"
+            placeholder={t("pinFolderPath")}
             value={pinFolderPath}
           />
         </label>
@@ -762,7 +774,7 @@ export function Dashboard() {
           type="button"
           variant="outline"
         >
-          Browse
+          {t("browse")}
         </Button>
         <Button
           disabled={pinDisabled}
@@ -770,7 +782,7 @@ export function Dashboard() {
           type="button"
         >
           <FolderPlus />
-          Pin folder
+          {t("pinFolder")}
         </Button>
       </section>
 
@@ -779,19 +791,19 @@ export function Dashboard() {
           <div className="flex flex-col gap-3 border-b pb-4 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-col gap-3 md:flex-row md:items-center">
               <TabsList>
-                {tabs.map((tab) => (
-                  <TabsTrigger key={tab.value} value={tab.value}>
-                    {tab.label}
+                {(["recent", "frequent"] as const).map((tab) => (
+                  <TabsTrigger key={tab} value={tab}>
+                    {tab === "recent" ? t("recentFiles") : t("frequentFolders")}
                   </TabsTrigger>
                 ))}
               </TabsList>
               <label className="relative w-full md:w-80">
-                <span className="sr-only">Search Quick Access</span>
+                <span className="sr-only">{t("searchQuickAccess")}</span>
                 <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search name or path"
+                  placeholder={t("searchPlaceholder")}
                   type="search"
                   value={query}
                 />
@@ -800,7 +812,7 @@ export function Dashboard() {
             <div className="flex flex-wrap items-center gap-2">
               {privacyActive ? (
                 <span className="text-xs text-muted-foreground">
-                  Privacy mode active
+                  {t("privacyActive")}
                 </span>
               ) : null}
               <DropdownMenu>
@@ -808,12 +820,12 @@ export function Dashboard() {
                   render={
                     <Button size="sm" type="button" variant="outline">
                       <Columns3 />
-                      Columns
+                      {t("columns")}
                     </Button>
                   }
                 />
                 <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuLabel>Visible columns</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t("visibleColumns")}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {table
                     .getAllLeafColumns()
@@ -826,7 +838,7 @@ export function Dashboard() {
                           column.toggleVisibility(checked)
                         }
                       >
-                        {columnLabels[column.id] ?? column.id}
+                        {getColumnLabel(column.id, t)}
                       </DropdownMenuCheckboxItem>
                     ))}
                 </DropdownMenuContent>
@@ -839,7 +851,7 @@ export function Dashboard() {
                 variant="outline"
               >
                 <Trash2 />
-                Remove selected
+                {t("actionRemoveSelected")}
               </Button>
               <Button
                 disabled={emptyDisabled}
@@ -848,7 +860,7 @@ export function Dashboard() {
                 type="button"
                 variant="destructive"
               >
-                Clear {currentLabel}
+                {t("clearCurrent", { label: currentLabel })}
               </Button>
               <Button
                 disabled={actionsDisabled}
@@ -858,7 +870,7 @@ export function Dashboard() {
                 variant="outline"
               >
                 <RotateCcw />
-                Restore {currentLabel}
+                {t("restoreCurrent", { label: currentLabel })}
               </Button>
               <Button
                 disabled={actionsDisabled}
@@ -867,7 +879,7 @@ export function Dashboard() {
                 type="button"
                 variant="outline"
               >
-                Restore All
+                {t("restoreAll")}
               </Button>
             </div>
           </div>
@@ -884,7 +896,7 @@ export function Dashboard() {
                       >
                         {header.column.id === "select" ? (
                           <Checkbox
-                            aria-label="Select current page items"
+                            aria-label={t("selectCurrentPage")}
                             checked={allPageSelected}
                             disabled={pageRows.length === 0}
                             indeterminate={somePageSelected}
@@ -925,7 +937,7 @@ export function Dashboard() {
                             type="button"
                             variant="outline"
                           >
-                            Retry
+                            {t("refreshQuickAccess")}
                           </Button>
                         ) : null}
                       </div>
@@ -957,12 +969,14 @@ export function Dashboard() {
             </Table>
             <div className="flex flex-col gap-3 border-t py-4 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
               <div>
-                Page {pageCount === 0 ? 0 : pagination.pageIndex + 1} of{" "}
-                {pageCount} / {filteredItems.length} result
-                {filteredItems.length === 1 ? "" : "s"}
+                {t("pageStatus", {
+                  count: filteredItems.length,
+                  page: pageCount === 0 ? 0 : pagination.pageIndex + 1,
+                  pageCount,
+                })}
               </div>
               <div className="flex items-center gap-2">
-                <span>Rows per page</span>
+                <span>{t("rowsPerPage")}</span>
                 <Select
                   onValueChange={(value) => table.setPageSize(Number(value))}
                   value={String(pagination.pageSize)}
@@ -984,7 +998,7 @@ export function Dashboard() {
                   variant="outline"
                 >
                   <ChevronLeft />
-                  Previous
+                  {t("previous")}
                 </Button>
                 <Button
                   disabled={!table.getCanNextPage()}
@@ -993,7 +1007,7 @@ export function Dashboard() {
                   type="button"
                   variant="outline"
                 >
-                  Next
+                  {t("next")}
                   <ChevronRight />
                 </Button>
               </div>
@@ -1004,9 +1018,11 @@ export function Dashboard() {
       <ConfirmActionDialog
         action={pendingAction}
         currentLabel={currentLabel}
+        isFrequent={activeTab === "frequent"}
         onClose={() => setPendingAction(null)}
         onConfirm={() => void confirmPendingAction()}
         selectedCount={selectedCount}
+        t={t}
       />
       <ConfigDrawer
         config={config}
@@ -1023,32 +1039,36 @@ export function Dashboard() {
 function ConfirmActionDialog({
   action,
   currentLabel,
+  isFrequent,
   onClose,
   onConfirm,
   selectedCount,
+  t,
 }: {
   action: PendingAction;
   currentLabel: string;
+  isFrequent: boolean;
   onClose: () => void;
   onConfirm: () => void;
   selectedCount: number;
+  t: (key: I18nKey, values?: Record<string, string | number>) => string;
 }) {
   const isEmpty = action === "empty";
   const isRestore = action === "restore-current" || action === "restore-all";
   const title = isEmpty
-    ? `Clear ${currentLabel}?`
+    ? t("clearCurrentQuestion", { label: currentLabel })
     : isRestore
       ? action === "restore-all"
-        ? "Restore all defaults?"
-        : `Restore ${currentLabel} defaults?`
-      : "Remove selected items?";
+        ? t("restoreAllDefaultsQuestion")
+        : t("restoreCurrentDefaultsQuestion", { label: currentLabel })
+      : t("removeSelectedQuestion");
   const description = isEmpty
-    ? `This will clear ${currentLabel} from Quick Access.`
+    ? t("emptyCurrentDescription", { label: currentLabel })
     : isRestore
       ? action === "restore-all"
-        ? "This will restore Recent Files and Frequent Folders to their default state."
-        : `This will restore ${currentLabel} to its default state.`
-      : `This will remove ${selectedCount} selected item(s) from Quick Access.`;
+        ? t("restoreAllDescription")
+        : t("restoreCurrentDescription", { label: currentLabel })
+      : t("removeSelectedDescription", { count: selectedCount });
 
   return (
     <AlertDialog open={action !== null} onOpenChange={(open) => !open && onClose()}>
@@ -1057,19 +1077,19 @@ function ConfirmActionDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>
             {description}
-            {isEmpty && currentLabel === "Frequent Folders"
-              ? " Windows may rebuild default Explorer folder entries after this operation."
+            {isEmpty && isFrequent
+              ? t("emptyFrequentWarning")
               : ""}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             type="button"
             variant="destructive"
           >
-            {isEmpty ? "Clear" : isRestore ? "Restore" : "Remove"}
+            {isEmpty ? t("actionClear") : isRestore ? t("restore") : t("actionRemoveSelected")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -1088,25 +1108,29 @@ function CountCard({ label, value }: { label: string; value: number }) {
 
 function OverviewChart({
   data,
+  t,
   total,
 }: {
   data: QuickAccessChartItem[];
+  t: (key: I18nKey, values?: Record<string, string | number>) => string;
   total: number;
 }) {
   return (
     <div className="rounded-md border bg-card p-4 text-card-foreground">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-sm font-semibold">Quick Access composition</h2>
+          <h2 className="text-sm font-semibold">
+            {t("quickAccessComposition")}
+          </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Current Recent/Frequent split
+            {t("currentSplit")}
           </p>
         </div>
         <span className="text-2xl font-semibold tabular-nums">{total}</span>
       </div>
       {total === 0 ? (
         <div className="grid h-48 place-items-center text-sm text-muted-foreground">
-          No Quick Access items found.
+          {t("noItems")}
         </div>
       ) : (
         <div className="mt-4 grid gap-4 md:grid-cols-[240px_1fr] md:items-center">
@@ -1156,15 +1180,17 @@ function OverviewChart({
 
 function OperationSummaryPanel({
   summary,
+  t,
 }: {
   summary: OperationSummary | null;
+  t: (key: I18nKey, values?: Record<string, string | number>) => string;
 }) {
   return (
     <div className="rounded-md border bg-card p-4 text-card-foreground">
       <div>
-        <h2 className="text-sm font-semibold">Last operation</h2>
+        <h2 className="text-sm font-semibold">{t("lastOperation")}</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Latest batch operation result
+          {t("latestBatchResult")}
         </p>
       </div>
       {summary ? (
@@ -1177,19 +1203,19 @@ function OperationSummaryPanel({
               </p>
             </div>
             <span className="rounded-sm border px-2 py-1 text-xs">
-              {summary.failed > 0 ? "Needs attention" : "Complete"}
+              {summary.failed > 0 ? t("needsAttention") : t("complete")}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-2 border-y py-3 text-center">
-            <SummaryMetric label="Succeeded" value={summary.succeeded} />
-            <SummaryMetric label="Failed" value={summary.failed} />
-            <SummaryMetric label="Total" value={summary.total} />
+            <SummaryMetric label={t("succeeded")} value={summary.succeeded} />
+            <SummaryMetric label={t("failed")} value={summary.failed} />
+            <SummaryMetric label={t("total")} value={summary.total} />
           </div>
           <p className="text-sm text-muted-foreground">{summary.message}</p>
         </div>
       ) : (
         <div className="grid h-48 place-items-center text-sm text-muted-foreground">
-          No operations yet.
+          {t("noOperations")}
         </div>
       )}
     </div>
@@ -1248,6 +1274,19 @@ function getCellClassName(columnId: string) {
   return columnId === "location" ? "text-right" : undefined;
 }
 
+function getColumnLabel(
+  columnId: string,
+  t: (key: I18nKey, values?: Record<string, string | number>) => string,
+) {
+  const labels: Record<string, I18nKey> = {
+    location: "location",
+    name: "name",
+    path: "path",
+    type: "type",
+  };
+  return labels[columnId] ? t(labels[columnId]) : columnId;
+}
+
 function toQaType(value: unknown): QaType {
   return value === "frequent" ? "frequent" : "recent";
 }
@@ -1256,31 +1295,39 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function showRemoveToast(result: QaBatchResult) {
+function showRemoveToast(
+  result: QaBatchResult,
+  t: (key: I18nKey, values?: Record<string, string | number>) => string,
+) {
   if (result.failed.length === 0) {
-    toast.success(`Removed ${result.succeeded.length} item(s).`);
+    toast.success(t("removedItems", { succeeded: result.succeeded.length }));
     return;
   }
 
   if (result.succeeded.length > 0) {
     toast.warning(
-      `Removed ${result.succeeded.length} of ${result.total} item(s); ${result.failed.length} failed.`,
+      t("removedItemsPartial", {
+        failed: result.failed.length,
+        succeeded: result.succeeded.length,
+        total: result.total,
+      }),
     );
     return;
   }
 
-  toast.error(`Failed to remove ${result.failed.length} item(s).`);
+  toast.error(t("failedRemoveItems", { failed: result.failed.length }));
 }
 
-function showRestoreToast(result: QaRestoreResult) {
+function showRestoreToast(
+  result: QaRestoreResult,
+  t: (key: I18nKey, values?: Record<string, string | number>) => string,
+) {
   if (result.success) {
-    toast.success("Restored defaults.");
+    toast.success(t("restoredDefaults"));
     return;
   }
 
-  toast.warning(
-    `Restored defaults with ${getRestoreFailedCount(result)} failed section(s).`,
-  );
+  toast.warning(t("partialRestore", { failed: getRestoreFailedCount(result) }));
 }
 
 function createOperationSummary({
@@ -1305,6 +1352,7 @@ function createOperationSummary({
 function createRestoreOperationSummary(
   result: QaRestoreResult,
   target: string,
+  t: (key: I18nKey, values?: Record<string, string | number>) => string,
 ): OperationSummary {
   const sections = [result.recent, result.frequent].filter(
     (section): section is QaRestoreSectionResult => section !== null,
@@ -1312,12 +1360,12 @@ function createRestoreOperationSummary(
   const succeeded = sections.filter((section) => section.success).length;
   const failed = sections.length - succeeded;
   return createOperationSummary({
-    action: "Restore defaults",
+    action: t("actionRestoreDefaults"),
     failed,
     message:
       failed > 0
-        ? `Restored defaults with ${failed} failed section(s).`
-        : "Restored defaults.",
+        ? t("partialRestore", { failed })
+        : t("restoredDefaults"),
     succeeded,
     target,
     total: sections.length,
@@ -1328,9 +1376,10 @@ function createFailedOperationSummary(
   action: Exclude<PendingAction, null>,
   target: string,
   error: unknown,
+  t: (key: I18nKey, values?: Record<string, string | number>) => string,
 ): OperationSummary {
   return createOperationSummary({
-    action: getOperationLabel(action),
+    action: getOperationLabel(action, t),
     failed: 1,
     message: errorMessage(error),
     succeeded: 0,
@@ -1339,14 +1388,17 @@ function createFailedOperationSummary(
   });
 }
 
-function getOperationLabel(action: Exclude<PendingAction, null>) {
+function getOperationLabel(
+  action: Exclude<PendingAction, null>,
+  t: (key: I18nKey, values?: Record<string, string | number>) => string,
+) {
   if (action === "remove") {
-    return "Remove selected";
+    return t("actionRemoveSelected");
   }
   if (action === "empty") {
-    return "Clear";
+    return t("actionClear");
   }
-  return "Restore defaults";
+  return t("actionRestoreDefaults");
 }
 
 function getRestoreFailedCount(result: QaRestoreResult) {
@@ -1361,24 +1413,26 @@ function getTableState({
   itemCount,
   loading,
   query,
+  t,
 }: {
   error: string | null;
   filteredCount: number;
   itemCount: number;
   loading: boolean;
   query: string;
+  t: (key: I18nKey, values?: Record<string, string | number>) => string;
 }) {
   if (loading) {
-    return "Loading Quick Access items...";
+    return t("loadingItems");
   }
   if (error) {
     return error;
   }
   if (itemCount === 0) {
-    return "No Quick Access items found.";
+    return t("noItems");
   }
   if (query.trim() && filteredCount === 0) {
-    return "No matching items found.";
+    return t("noMatches");
   }
   return null;
 }

@@ -1,6 +1,6 @@
 [package]
 name = "Scourgify"
-version = "0.2.0"
+version = "0.3.0"
 description = "Windows tray privacy control for Quick Access"
 authors = ["Stein Gu"]
 edition = "2021"
