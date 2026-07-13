@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -101,6 +102,10 @@ import {
 } from "@/lib/app-events";
 import { type I18nKey, useI18n } from "@/lib/i18n";
 import { PageHeader, useAppShell } from "@/components/AppShell";
+import {
+  DatabaseRecoveryPanel,
+  type DatabaseStatus,
+} from "@/components/DatabaseRecoveryPanel";
 
 type QaType = "recent" | "frequent";
 
@@ -133,10 +138,6 @@ interface QaBatchResult {
   failed: Array<{ path: string; error: string }>;
   skipped_protected: string[];
   history_error: string | null;
-}
-
-interface DatabaseStatus {
-  available: boolean;
 }
 
 interface QaRestoreResult {
@@ -220,7 +221,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [databaseAvailable, setDatabaseAvailable] = useState(true);
+  const [database, setDatabase] = useState<DatabaseStatus | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsRange, setStatsRange] = useState<StatsRange>("30d");
   const [statsLoading, setStatsLoading] = useState(true);
@@ -236,6 +237,9 @@ export function Dashboard() {
     pageSize: 20,
   });
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const refreshTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const actionTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const databaseAvailable = database?.available ?? true;
 
   const filteredItems = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -434,7 +438,7 @@ export function Dashboard() {
     setError(null);
     try {
       const database = await invoke<DatabaseStatus>("get_database_status");
-      setDatabaseAvailable(database.available);
+      setDatabase(database);
       if (database.available) {
         setItems(
           await invoke<QaItem[]>("list_qa_items_classified", { qaType }),
@@ -641,7 +645,10 @@ export function Dashboard() {
     }
   };
 
-  const openAction = async (action: Exclude<PendingAction, null>) => {
+  const openAction = async (
+    action: Exclude<PendingAction, null>,
+    trigger: HTMLButtonElement,
+  ) => {
     try {
       if (await syncPrivacyState()) {
         toast.warning(t("privacyWriteDisabled"));
@@ -655,6 +662,7 @@ export function Dashboard() {
         await executeAction(action);
         return;
       }
+      actionTriggerRef.current = trigger;
       setPendingAction(action);
     } catch (error) {
       toast.error(errorMessage(error));
@@ -736,6 +744,7 @@ export function Dashboard() {
             aria-label={t("refreshQuickAccess")}
             disabled={loading}
             onClick={() => void refreshAll()}
+            ref={refreshTriggerRef}
             size="icon-sm"
             type="button"
             variant="outline"
@@ -774,6 +783,15 @@ export function Dashboard() {
         <OverviewChart data={quickAccessChartData} t={t} total={quickAccessTotal} />
         <OperationSummaryPanel summary={lastOperationSummary} t={t} />
       </section>
+
+      {database && !database.available ? (
+        <div className="px-6 pb-6">
+          <DatabaseRecoveryPanel
+            onStatusChange={setDatabase}
+            status={database}
+          />
+        </div>
+      ) : null}
 
       <HistoryStats
         available={databaseAvailable}
@@ -877,7 +895,7 @@ export function Dashboard() {
               </DropdownMenu>
               <Button
                 disabled={smartDisabled}
-                onClick={() => void openAction("smart")}
+                onClick={(event) => void openAction("smart", event.currentTarget)}
                 size="sm"
                 type="button"
               >
@@ -886,7 +904,7 @@ export function Dashboard() {
               </Button>
               <Button
                 disabled={removeDisabled}
-                onClick={() => void openAction("remove")}
+                onClick={(event) => void openAction("remove", event.currentTarget)}
                 size="sm"
                 type="button"
                 variant="outline"
@@ -896,7 +914,7 @@ export function Dashboard() {
               </Button>
               <Button
                 disabled={emptyDisabled}
-                onClick={() => void openAction("empty")}
+                onClick={(event) => void openAction("empty", event.currentTarget)}
                 size="sm"
                 type="button"
                 variant="destructive"
@@ -905,7 +923,9 @@ export function Dashboard() {
               </Button>
               <Button
                 disabled={actionsDisabled}
-                onClick={() => void openAction("restore-current")}
+                onClick={(event) =>
+                  void openAction("restore-current", event.currentTarget)
+                }
                 size="sm"
                 type="button"
                 variant="outline"
@@ -915,7 +935,9 @@ export function Dashboard() {
               </Button>
               <Button
                 disabled={actionsDisabled}
-                onClick={() => void openAction("restore-all")}
+                onClick={(event) =>
+                  void openAction("restore-all", event.currentTarget)
+                }
                 size="sm"
                 type="button"
                 variant="outline"
@@ -1059,6 +1081,11 @@ export function Dashboard() {
       <ConfirmActionDialog
         action={pendingAction}
         currentLabel={currentLabel}
+        finalFocus={() =>
+          actionTriggerRef.current && !actionTriggerRef.current.disabled
+            ? actionTriggerRef.current
+            : refreshTriggerRef.current
+        }
         isFrequent={activeTab === "frequent"}
         onClose={() => setPendingAction(null)}
         onConfirm={() => void confirmPendingAction()}
@@ -1073,6 +1100,7 @@ export function Dashboard() {
 function ConfirmActionDialog({
   action,
   currentLabel,
+  finalFocus,
   isFrequent,
   onClose,
   onConfirm,
@@ -1082,6 +1110,7 @@ function ConfirmActionDialog({
 }: {
   action: PendingAction;
   currentLabel: string;
+  finalFocus: () => HTMLElement | null;
   isFrequent: boolean;
   onClose: () => void;
   onConfirm: () => void;
@@ -1113,7 +1142,10 @@ function ConfirmActionDialog({
 
   return (
     <AlertDialog open={action !== null} onOpenChange={(open) => !open && onClose()}>
-      <AlertDialogContent className={isSmart ? "sm:max-w-2xl" : undefined}>
+      <AlertDialogContent
+        className={isSmart ? "sm:max-w-2xl" : undefined}
+        finalFocus={finalFocus}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>

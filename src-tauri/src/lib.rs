@@ -61,6 +61,8 @@ pub fn run() {
             privacy_exit,
             privacy_state,
             commands::get_database_status,
+            commands::retry_database,
+            commands::open_database_directory,
             commands::get_rules,
             commands::add_rule,
             commands::update_rule,

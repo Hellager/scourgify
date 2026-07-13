@@ -13,6 +13,8 @@ pub(crate) mod rules;
 const DATABASE_FILE: &str = "scourgify.db";
 const SCHEMA_VERSION: u32 = 1;
 const BUILTIN_WHITELIST_RULES: &[&str] = &["Desktop", "Documents"];
+const DATABASE_PATH_UNAVAILABLE: &str = "Database path is unavailable.";
+const DATABASE_STATE_UNAVAILABLE: &str = "Database state could not be accessed.";
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE rules (
@@ -58,25 +60,58 @@ pub struct DbState {
 
 impl DbState {
     pub fn status(&self) -> DatabaseStatus {
-        let path = self
-            .path
-            .as_ref()
-            .map(|path| path.to_string_lossy().into_owned());
-
         match self.inner.lock() {
-            Ok(inner) => DatabaseStatus {
-                available: inner.connection.is_some(),
-                path,
-                schema_version: inner.schema_version,
-                error: inner.error.clone(),
-            },
-            Err(error) => DatabaseStatus {
-                available: false,
-                path,
-                schema_version: None,
-                error: Some(format!("database state lock poisoned: {error}")),
-            },
+            Ok(inner) => database_status(self.path.as_deref(), &inner),
+            Err(error) => {
+                log::error!("database state lock poisoned: {error}");
+                unavailable_status(self.path.as_deref(), DATABASE_STATE_UNAVAILABLE)
+            }
         }
+    }
+
+    pub fn retry(&self) -> DatabaseStatus {
+        let mut inner = match self.inner.lock() {
+            Ok(inner) => inner,
+            Err(error) => {
+                log::error!("database retry failed because state lock is poisoned: {error}");
+                return unavailable_status(self.path.as_deref(), DATABASE_STATE_UNAVAILABLE);
+            }
+        };
+        if inner.connection.is_some() {
+            return database_status(self.path.as_deref(), &inner);
+        }
+        let Some(path) = self.path.as_deref() else {
+            inner.error = Some(DATABASE_PATH_UNAVAILABLE.to_string());
+            return database_status(None, &inner);
+        };
+
+        log::info!("database retry started path={}", path.display());
+        match open_database(path) {
+            Ok((connection, schema_version)) => {
+                inner.connection = Some(connection);
+                inner.schema_version = Some(schema_version);
+                inner.error = None;
+                log::info!(
+                    "database retry succeeded path={} schema_version={schema_version}",
+                    path.display()
+                );
+            }
+            Err(error) => {
+                log::error!(
+                    "database retry failed path={} error={error:#}",
+                    path.display()
+                );
+                inner.connection = None;
+                inner.schema_version = None;
+                inner.error = Some(error_summary(&error));
+            }
+        }
+
+        database_status(Some(path), &inner)
+    }
+
+    pub fn directory(&self) -> Option<PathBuf> {
+        self.path.as_ref()?.parent().map(Path::to_path_buf)
     }
 
     pub(crate) fn with_connection<T>(
@@ -129,9 +164,8 @@ pub fn initialize<R: Runtime>(app: &AppHandle<R>) -> DbState {
     let path = match app.path().app_config_dir() {
         Ok(directory) => directory.join(DATABASE_FILE),
         Err(error) => {
-            let error = format!("failed to resolve app config directory: {error}");
             log::error!("database unavailable: {error}");
-            return DbState::unavailable(None, error);
+            return DbState::unavailable(None, DATABASE_PATH_UNAVAILABLE);
         }
     };
 
@@ -148,11 +182,36 @@ fn initialize_path(path: PathBuf) -> DbState {
             DbState::available(path, connection, schema_version)
         }
         Err(error) => {
-            let error = format!("{error:#}");
-            log::error!("database unavailable path={} error={error}", path.display());
-            DbState::unavailable(Some(path), error)
+            log::error!(
+                "database unavailable path={} error={error:#}",
+                path.display()
+            );
+            let summary = error_summary(&error);
+            DbState::unavailable(Some(path), summary)
         }
     }
+}
+
+fn database_status(path: Option<&Path>, inner: &DbInner) -> DatabaseStatus {
+    DatabaseStatus {
+        available: inner.connection.is_some(),
+        path: path.map(|path| path.to_string_lossy().into_owned()),
+        schema_version: inner.schema_version,
+        error: inner.error.clone(),
+    }
+}
+
+fn unavailable_status(path: Option<&Path>, error: &str) -> DatabaseStatus {
+    DatabaseStatus {
+        available: false,
+        path: path.map(|path| path.to_string_lossy().into_owned()),
+        schema_version: None,
+        error: Some(error.to_string()),
+    }
+}
+
+fn error_summary(error: &anyhow::Error) -> String {
+    error.root_cause().to_string()
 }
 
 fn open_database(path: &Path) -> Result<(Connection, u32)> {
@@ -326,6 +385,30 @@ mod tests {
         assert_eq!(status.schema_version, None);
         assert!(status.error.is_some());
         std::fs::remove_file(blocker).unwrap();
+    }
+
+    #[test]
+    fn retry_recovers_an_unavailable_database_in_place() {
+        let directory = unique_temp_path("database-retry");
+        let path = directory.join(DATABASE_FILE);
+        let state = DbState::unavailable(Some(path.clone()), "initial failure");
+
+        let status = state.retry();
+
+        assert!(status.available);
+        assert_eq!(status.path, Some(path.to_string_lossy().into_owned()));
+        assert_eq!(status.schema_version, Some(SCHEMA_VERSION));
+        assert_eq!(status.error, None);
+        assert!(state.with_connection(|_| Ok(())).is_ok());
+        drop(state);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn database_error_summary_uses_only_the_root_cause() {
+        let error = anyhow::anyhow!("access denied").context("failed at a private path");
+
+        assert_eq!(error_summary(&error), "access denied");
     }
 
     fn user_version(connection: &Connection) -> u32 {

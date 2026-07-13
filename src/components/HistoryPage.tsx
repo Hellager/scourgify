@@ -29,6 +29,10 @@ import {
 import { toast } from "sonner";
 import { PageHeader } from "@/components/AppShell";
 import {
+  DatabaseRecoveryPanel,
+  type DatabaseStatus,
+} from "@/components/DatabaseRecoveryPanel";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -74,11 +78,6 @@ interface CleanRecordPage {
   page_size: number;
 }
 
-interface DatabaseStatus {
-  available: boolean;
-  error: string | null;
-}
-
 type PrivacyState =
   | "Inactive"
   | "ActiveFull"
@@ -111,6 +110,8 @@ export function HistoryPage() {
   );
   const [dateRange, setDateRange] = useState<"all" | "7d" | "30d">("all");
   const requestId = useRef(0);
+  const refreshTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const clearTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const columns = useMemo<ColumnDef<CleanRecord>[]>(
     () => [
@@ -275,6 +276,7 @@ export function HistoryPage() {
             aria-label={t("refreshHistory")}
             disabled={loading}
             onClick={() => void loadRecords()}
+            ref={refreshTriggerRef}
             size="icon-sm"
             title={t("refreshHistory")}
             type="button"
@@ -285,6 +287,7 @@ export function HistoryPage() {
           <Button
             disabled={clearDisabled}
             onClick={() => setClearOpen(true)}
+            ref={clearTriggerRef}
             type="button"
             variant="destructive"
           >
@@ -299,17 +302,11 @@ export function HistoryPage() {
 
       <div className="mx-auto grid max-w-7xl gap-4 p-6">
         {database && !database.available ? (
-          <section className="border-l-2 border-destructive px-4 py-2">
-            <h2 className="text-sm font-semibold">{t("databaseUnavailable")}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("databaseUnavailableDescription")}
-            </p>
-            {database.error ? (
-              <p className="mt-2 break-all font-mono text-xs text-muted-foreground">
-                {database.error}
-              </p>
-            ) : null}
-          </section>
+          <DatabaseRecoveryPanel
+            onRecovered={loadRecords}
+            onStatusChange={setDatabase}
+            status={database}
+          />
         ) : null}
 
         {privacyActive ? (
@@ -512,7 +509,13 @@ export function HistoryPage() {
       </div>
 
       <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent
+          finalFocus={() =>
+            clearTriggerRef.current && !clearTriggerRef.current.disabled
+              ? clearTriggerRef.current
+              : refreshTriggerRef.current
+          }
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>{t("clearHistoryQuestion")}</AlertDialogTitle>
             <AlertDialogDescription>

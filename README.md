@@ -1,6 +1,6 @@
 # Scourgify
 
-Version: 0.4.0
+Version: 0.4.5
 
 Scourgify is a Windows-only tray app and dashboard for managing Windows Quick Access privacy and cleanup behavior. Its Quick Access integration uses `wincent`, which targets Windows Explorer Recent Files and Frequent Folders.
 

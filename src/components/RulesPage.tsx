@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { invoke } from "@tauri-apps/api/core";
 import { Controller, useForm } from "react-hook-form";
@@ -13,6 +13,10 @@ import {
 import { toast } from "sonner";
 import { z } from "zod";
 import { PageHeader } from "@/components/AppShell";
+import {
+  DatabaseRecoveryPanel,
+  type DatabaseStatus,
+} from "@/components/DatabaseRecoveryPanel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -65,13 +69,6 @@ interface Rule extends RuleForm {
   created_at: string;
 }
 
-interface DatabaseStatus {
-  available: boolean;
-  path: string | null;
-  schema_version: number | null;
-  error: string | null;
-}
-
 type PrivacyState =
   | "Inactive"
   | "ActiveFull"
@@ -101,6 +98,9 @@ export function RulesPage() {
   const [statusFilter, setStatusFilter] = useState<
     "all" | "enabled" | "disabled"
   >("all");
+  const refreshTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const formTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
   const {
     control,
     formState,
@@ -177,7 +177,8 @@ export function RulesPage() {
     setFormOpen(true);
   };
 
-  const openEdit = (rule: Rule) => {
+  const openEdit = (rule: Rule, trigger: HTMLButtonElement) => {
+    formTriggerRef.current = trigger;
     setEditingRule(rule);
     reset({
       keyword: rule.keyword,
@@ -254,6 +255,7 @@ export function RulesPage() {
             aria-label={t("refreshRules")}
             disabled={loading}
             onClick={() => void loadRules()}
+            ref={refreshTriggerRef}
             size="icon-sm"
             title={t("refreshRules")}
             type="button"
@@ -261,7 +263,14 @@ export function RulesPage() {
           >
             <RefreshCw className={loading ? "animate-spin" : ""} />
           </Button>
-          <Button disabled={writesDisabled} onClick={openCreate} type="button">
+          <Button
+            disabled={writesDisabled}
+            onClick={(event) => {
+              formTriggerRef.current = event.currentTarget;
+              openCreate();
+            }}
+            type="button"
+          >
             <Plus />
             {t("addRule")}
           </Button>
@@ -273,17 +282,11 @@ export function RulesPage() {
 
       <div className="mx-auto grid max-w-6xl gap-4 p-6">
         {database && !database.available ? (
-          <section className="border-l-2 border-destructive px-4 py-2">
-            <h2 className="text-sm font-semibold">{t("databaseUnavailable")}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("databaseUnavailableDescription")}
-            </p>
-            {database.error ? (
-              <p className="mt-2 break-all font-mono text-xs text-muted-foreground">
-                {database.error}
-              </p>
-            ) : null}
-          </section>
+          <DatabaseRecoveryPanel
+            onRecovered={loadRules}
+            onStatusChange={setDatabase}
+            status={database}
+          />
         ) : null}
 
         {privacyActive ? (
@@ -436,7 +439,7 @@ export function RulesPage() {
                           <Button
                             aria-label={t("editRule")}
                             disabled={writesDisabled}
-                            onClick={() => openEdit(rule)}
+                            onClick={(event) => openEdit(rule, event.currentTarget)}
                             size="icon-sm"
                             title={t("editRule")}
                             type="button"
@@ -447,7 +450,10 @@ export function RulesPage() {
                           <Button
                             aria-label={t("deleteRule")}
                             disabled={writesDisabled}
-                            onClick={() => setPendingDelete(rule)}
+                            onClick={(event) => {
+                              deleteTriggerRef.current = event.currentTarget;
+                              setPendingDelete(rule);
+                            }}
                             size="icon-sm"
                             title={t("deleteRule")}
                             type="button"
@@ -475,7 +481,15 @@ export function RulesPage() {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent
+          closeLabel={t("close")}
+          finalFocus={() =>
+            formTriggerRef.current?.isConnected &&
+            !formTriggerRef.current.disabled
+              ? formTriggerRef.current
+              : refreshTriggerRef.current
+          }
+        >
           <form onSubmit={(event) => void saveRule(event)}>
             <DialogHeader>
               <DialogTitle>
@@ -549,7 +563,14 @@ export function RulesPage() {
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
       >
-        <AlertDialogContent>
+        <AlertDialogContent
+          finalFocus={() =>
+            deleteTriggerRef.current?.isConnected &&
+            !deleteTriggerRef.current.disabled
+              ? deleteTriggerRef.current
+              : refreshTriggerRef.current
+          }
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>{t("deleteRule")}</AlertDialogTitle>
             <AlertDialogDescription>
