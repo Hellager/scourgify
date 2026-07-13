@@ -359,6 +359,14 @@ export function SettingsPage() {
               name: "confirm_destructive_actions",
             }}
           />
+          <SwitchControl
+            control={control}
+            field={{
+              label: t("confirmSmartClean"),
+              name: "smart_clean_confirm",
+              description: t("confirmSmartCleanDescription"),
+            }}
+          />
         </Section>
 
         <Section title={t("about")}>

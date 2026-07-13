@@ -45,7 +45,9 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Sparkles,
   SlidersHorizontal,
+  Target,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -120,9 +122,16 @@ import { ConfigDrawer } from "@/components/ConfigDrawer";
 
 type QaType = "recent" | "frequent";
 
+type QaMatch =
+  | { status: "protected"; rule_id: number; keyword: string }
+  | { status: "targeted"; rule_id: number; keyword: string }
+  | { status: "neutral" };
+
 interface QaItem {
   path: string;
   name: string;
+  item_type: "recent_file" | "frequent_folder";
+  match: QaMatch;
 }
 
 interface QaTableRow extends QaItem {
@@ -139,6 +148,12 @@ interface QaBatchResult {
   total: number;
   succeeded: string[];
   failed: Array<{ path: string; error: string }>;
+  skipped_protected: string[];
+  history_error: string | null;
+}
+
+interface DatabaseStatus {
+  available: boolean;
 }
 
 interface QaRestoreResult {
@@ -174,7 +189,13 @@ type PrivacyState =
   | "ActiveFull"
   | { ActivePartial: { recent: boolean; frequent: boolean } };
 
-type PendingAction = "remove" | "empty" | "restore-current" | "restore-all" | null;
+type PendingAction =
+  | "remove"
+  | "empty"
+  | "smart"
+  | "restore-current"
+  | "restore-all"
+  | null;
 
 const emptyCounts: QaCounts = {
   recent: 0,
@@ -195,6 +216,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [databaseAvailable, setDatabaseAvailable] = useState(true);
   const [privacyActive, setPrivacyActive] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [pinFolderPath, setPinFolderPath] = useState("");
@@ -238,6 +260,14 @@ export function Dashboard() {
     [counts.frequent, counts.recent, t],
   );
   const quickAccessTotal = counts.recent + counts.frequent;
+  const smartTargets = useMemo(
+    () => items.filter((item) => item.match.status === "targeted"),
+    [items],
+  );
+  const cleanableCount = useMemo(
+    () => items.filter((item) => item.match.status !== "protected").length,
+    [items],
+  );
 
   const tableData = useMemo<QaTableRow[]>(
     () =>
@@ -265,6 +295,7 @@ export function Dashboard() {
           <Checkbox
             aria-label={t("selectItem", { name: row.original.name })}
             checked={selectedPaths.has(row.original.path)}
+            disabled={row.original.match.status === "protected"}
             onCheckedChange={(checked) =>
               togglePath(row.original.path, checked)
             }
@@ -288,6 +319,12 @@ export function Dashboard() {
             {row.original.path}
           </span>
         ),
+      },
+      {
+        id: "match",
+        accessorFn: (row) => row.match.status,
+        header: t("ruleMatch"),
+        cell: ({ row }) => <MatchStatusLabel match={row.original.match} t={t} />,
       },
       {
         accessorKey: "type",
@@ -330,7 +367,7 @@ export function Dashboard() {
       columnVisibility,
       rowSelection,
     },
-    enableRowSelection: true,
+    enableRowSelection: (row) => row.original.match.status !== "protected",
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getRowId: (row) => row.path,
@@ -341,10 +378,15 @@ export function Dashboard() {
   });
 
   const pageRows = table.getRowModel().rows;
+  const selectablePageRows = pageRows.filter(
+    (row) => row.original.match.status !== "protected",
+  );
   const allPageSelected =
-    pageRows.length > 0 && pageRows.every((row) => selectedPaths.has(row.id));
+    selectablePageRows.length > 0 &&
+    selectablePageRows.every((row) => selectedPaths.has(row.id));
   const somePageSelected =
-    pageRows.some((row) => selectedPaths.has(row.id)) && !allPageSelected;
+    selectablePageRows.some((row) => selectedPaths.has(row.id)) &&
+    !allPageSelected;
   const visibleColumnCount = table.getVisibleLeafColumns().length;
   const pageCount = table.getPageCount();
 
@@ -364,7 +406,26 @@ export function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      setItems(await invoke<QaItem[]>("list_qa_items", { qaType }));
+      const database = await invoke<DatabaseStatus>("get_database_status");
+      setDatabaseAvailable(database.available);
+      if (database.available) {
+        setItems(
+          await invoke<QaItem[]>("list_qa_items_classified", { qaType }),
+        );
+      } else {
+        const legacyItems = await invoke<Array<{ path: string; name: string }>>(
+          "list_qa_items",
+          { qaType },
+        );
+        setItems(
+          legacyItems.map((item) => ({
+            ...item,
+            item_type:
+              qaType === "recent" ? "recent_file" : "frequent_folder",
+            match: { status: "neutral" },
+          })),
+        );
+      }
     } catch (error) {
       setItems([]);
       setError(errorMessage(error));
@@ -446,7 +507,7 @@ export function Dashboard() {
   const toggleCurrentPage = (checked: boolean) => {
     setSelectedPaths((current) => {
       const next = new Set(current);
-      for (const row of pageRows) {
+      for (const row of selectablePageRows) {
         if (checked) {
           next.add(row.id);
         } else {
@@ -460,30 +521,14 @@ export function Dashboard() {
   const selectedCount = selectedPaths.size;
   const currentLabel =
     activeTab === "recent" ? t("recentFiles") : t("frequentFolders");
-  const currentCount = activeTab === "recent" ? counts.recent : counts.frequent;
   const actionsDisabled = loading || mutating || privacyActive;
-  const removeDisabled = actionsDisabled || selectedCount === 0;
-  const emptyDisabled = actionsDisabled || currentCount === 0;
+  const cleanupActionsDisabled = actionsDisabled || !databaseAvailable;
+  const removeDisabled = cleanupActionsDisabled || selectedCount === 0;
+  const emptyDisabled = cleanupActionsDisabled || cleanableCount === 0;
+  const smartDisabled = cleanupActionsDisabled || smartTargets.length === 0;
   const pinDisabled = actionsDisabled || pinFolderPath.trim() === "";
 
-  const openAction = async (action: Exclude<PendingAction, null>) => {
-    try {
-      if (await syncPrivacyState()) {
-        toast.warning(t("privacyWriteDisabled"));
-        return;
-      }
-      setPendingAction(action);
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
-  };
-
-  const confirmPendingAction = async () => {
-    if (!pendingAction) {
-      return;
-    }
-
-    const action = pendingAction;
+  const executeAction = async (action: Exclude<PendingAction, null>) => {
     setPendingAction(null);
     setMutating(true);
     try {
@@ -492,62 +537,41 @@ export function Dashboard() {
         return;
       }
 
-      if (action === "remove") {
-        const result = await invoke<QaBatchResult>("remove_qa_items", {
-          qaType: activeTab,
-          paths: Array.from(selectedPaths),
-        });
+      if (action === "remove" || action === "empty" || action === "smart") {
+        const result =
+          action === "remove"
+            ? await invoke<QaBatchResult>("remove_qa_items", {
+                qaType: activeTab,
+                paths: Array.from(selectedPaths),
+              })
+            : action === "empty"
+              ? await invoke<QaBatchResult>("empty_qa_items", {
+                  qaType: activeTab,
+                })
+              : await invoke<QaBatchResult>("smart_clean", {
+                  qaType: activeTab,
+                });
+        const actionLabel = getOperationLabel(action, t);
+        const message = cleanupResultMessage(result, t);
         setLastOperationSummary(
           createOperationSummary({
-            action: t("actionRemoveSelected"),
+            action: actionLabel,
             failed: result.failed.length,
-            message:
-              result.failed.length > 0
-                ? t("removedItemsPartial", {
-                    failed: result.failed.length,
-                    succeeded: result.succeeded.length,
-                    total: result.total,
-                  })
-                : t("removedItems", { succeeded: result.succeeded.length }),
+            message,
             succeeded: result.succeeded.length,
             target: currentLabel,
             total: result.total,
           }),
         );
-        showRemoveToast(result, t);
-        if (result.failed.length > 0) {
+        showCleanupToast(result, t);
+        if (result.failed.length > 0 || result.history_error) {
           void notifyPartialFailure(
             "Scourgify",
-            t("removedItemsPartial", {
-              failed: result.failed.length,
-              succeeded: result.succeeded.length,
-              total: result.total,
-            }),
+            result.history_error ? t("cleanupHistoryWarning") : message,
           );
         } else {
-          void notifyOperationComplete(
-            "Scourgify",
-            t("removedItems", { succeeded: result.succeeded.length }),
-          );
+          void notifyOperationComplete("Scourgify", message);
         }
-      } else if (action === "empty") {
-        const total = currentCount;
-        await invoke("empty_qa_items", { qaType: activeTab });
-        setLastOperationSummary(
-          createOperationSummary({
-            action: t("actionClear"),
-            failed: 0,
-            message: t("clearedLabel", { label: currentLabel }),
-            succeeded: total,
-            target: currentLabel,
-            total,
-          }),
-        );
-        toast.success(t("clearedLabel", { label: currentLabel }));
-        void notifyOperationComplete(
-          "Scourgify",
-          t("clearedLabel", { label: currentLabel }),
-        );
       } else {
         const result = await invoke<QaRestoreResult>("restore_qa_defaults", {
           qaType: action === "restore-all" ? "all" : activeTab,
@@ -578,6 +602,32 @@ export function Dashboard() {
       toast.error(errorMessage(error));
     } finally {
       setMutating(false);
+    }
+  };
+
+  const openAction = async (action: Exclude<PendingAction, null>) => {
+    try {
+      if (await syncPrivacyState()) {
+        toast.warning(t("privacyWriteDisabled"));
+        return;
+      }
+      if (action === "smart" && smartTargets.length === 0) {
+        toast.info(t("noSmartCleanTargets"));
+        return;
+      }
+      if (action === "smart" && !config.smart_clean_confirm) {
+        await executeAction(action);
+        return;
+      }
+      setPendingAction(action);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
+
+  const confirmPendingAction = async () => {
+    if (pendingAction) {
+      await executeAction(pendingAction);
     }
   };
 
@@ -822,6 +872,11 @@ export function Dashboard() {
                   {t("privacyActive")}
                 </span>
               ) : null}
+              {!databaseAvailable ? (
+                <span className="text-xs text-destructive">
+                  {t("databaseUnavailable")}
+                </span>
+              ) : null}
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
@@ -850,6 +905,15 @@ export function Dashboard() {
                     ))}
                 </DropdownMenuContent>
               </DropdownMenu>
+              <Button
+                disabled={smartDisabled}
+                onClick={() => void openAction("smart")}
+                size="sm"
+                type="button"
+              >
+                <Sparkles />
+                {t("smartCleanCount", { count: smartTargets.length })}
+              </Button>
               <Button
                 disabled={removeDisabled}
                 onClick={() => void openAction("remove")}
@@ -905,7 +969,7 @@ export function Dashboard() {
                           <Checkbox
                             aria-label={t("selectCurrentPage")}
                             checked={allPageSelected}
-                            disabled={pageRows.length === 0}
+                            disabled={selectablePageRows.length === 0}
                             indeterminate={somePageSelected}
                             onCheckedChange={toggleCurrentPage}
                             parent
@@ -1029,6 +1093,7 @@ export function Dashboard() {
         onClose={() => setPendingAction(null)}
         onConfirm={() => void confirmPendingAction()}
         selectedCount={selectedCount}
+        smartTargets={smartTargets}
         t={t}
       />
       <ConfigDrawer
@@ -1050,6 +1115,7 @@ function ConfirmActionDialog({
   onClose,
   onConfirm,
   selectedCount,
+  smartTargets,
   t,
 }: {
   action: PendingAction;
@@ -1058,18 +1124,24 @@ function ConfirmActionDialog({
   onClose: () => void;
   onConfirm: () => void;
   selectedCount: number;
+  smartTargets: QaItem[];
   t: (key: I18nKey, values?: Record<string, string | number>) => string;
 }) {
   const isEmpty = action === "empty";
+  const isSmart = action === "smart";
   const isRestore = action === "restore-current" || action === "restore-all";
-  const title = isEmpty
+  const title = isSmart
+    ? t("smartCleanQuestion")
+    : isEmpty
     ? t("clearCurrentQuestion", { label: currentLabel })
     : isRestore
       ? action === "restore-all"
         ? t("restoreAllDefaultsQuestion")
         : t("restoreCurrentDefaultsQuestion", { label: currentLabel })
       : t("removeSelectedQuestion");
-  const description = isEmpty
+  const description = isSmart
+    ? t("smartCleanDescription", { count: smartTargets.length })
+    : isEmpty
     ? t("emptyCurrentDescription", { label: currentLabel })
     : isRestore
       ? action === "restore-all"
@@ -1079,7 +1151,7 @@ function ConfirmActionDialog({
 
   return (
     <AlertDialog open={action !== null} onOpenChange={(open) => !open && onClose()}>
-      <AlertDialogContent>
+      <AlertDialogContent className={isSmart ? "sm:max-w-2xl" : undefined}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>
@@ -1089,6 +1161,28 @@ function ConfirmActionDialog({
               : ""}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {isSmart ? (
+          <div className="max-h-64 overflow-y-auto rounded-md border">
+            {smartTargets.map((item) => (
+              <div
+                className="grid gap-1 border-b px-3 py-2 text-sm last:border-b-0"
+                key={item.path}
+              >
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <span className="truncate font-medium">{item.name}</span>
+                  {item.match.status === "targeted" ? (
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {item.match.keyword}
+                    </span>
+                  ) : null}
+                </div>
+                <span className="truncate text-xs text-muted-foreground">
+                  {item.path}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <AlertDialogFooter>
           <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
           <AlertDialogAction
@@ -1096,11 +1190,47 @@ function ConfirmActionDialog({
             type="button"
             variant="destructive"
           >
-            {isEmpty ? t("actionClear") : isRestore ? t("restore") : t("actionRemoveSelected")}
+            {isSmart
+              ? t("smartClean")
+              : isEmpty
+                ? t("actionClear")
+                : isRestore
+                  ? t("restore")
+                  : t("actionRemoveSelected")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function MatchStatusLabel({
+  match,
+  t,
+}: {
+  match: QaMatch;
+  t: (key: I18nKey, values?: Record<string, string | number>) => string;
+}) {
+  if (match.status === "neutral") {
+    return <span className="text-xs text-muted-foreground">{t("neutral")}</span>;
+  }
+
+  const Icon = match.status === "protected" ? ShieldCheck : Target;
+  return (
+    <span
+      className={
+        match.status === "protected"
+          ? "inline-flex max-w-48 items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400"
+          : "inline-flex max-w-48 items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400"
+      }
+      title={match.keyword}
+    >
+      <Icon className="size-3.5 shrink-0" />
+      <span className="shrink-0">
+        {t(match.status === "protected" ? "protected" : "targeted")}
+      </span>
+      <span className="truncate">{match.keyword}</span>
+    </span>
   );
 }
 
@@ -1268,6 +1398,9 @@ function getHeaderClassName(columnId: string) {
   if (columnId === "name") {
     return "w-64";
   }
+  if (columnId === "match") {
+    return "w-48";
+  }
   if (columnId === "type") {
     return "w-36";
   }
@@ -1287,6 +1420,7 @@ function getColumnLabel(
 ) {
   const labels: Record<string, I18nKey> = {
     location: "location",
+    match: "ruleMatch",
     name: "name",
     path: "path",
     type: "type",
@@ -1302,27 +1436,46 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function showRemoveToast(
+function cleanupResultMessage(
   result: QaBatchResult,
   t: (key: I18nKey, values?: Record<string, string | number>) => string,
 ) {
-  if (result.failed.length === 0) {
-    toast.success(t("removedItems", { succeeded: result.succeeded.length }));
-    return;
+  if (result.failed.length > 0) {
+    return t("removedItemsPartial", {
+      failed: result.failed.length,
+      succeeded: result.succeeded.length,
+      total: result.total,
+    });
   }
+  if (result.skipped_protected.length > 0) {
+    return t("cleanedItemsProtected", {
+      protected: result.skipped_protected.length,
+      succeeded: result.succeeded.length,
+    });
+  }
+  return t("removedItems", { succeeded: result.succeeded.length });
+}
 
+function showCleanupToast(
+  result: QaBatchResult,
+  t: (key: I18nKey, values?: Record<string, string | number>) => string,
+) {
+  const message = cleanupResultMessage(result, t);
   if (result.succeeded.length > 0) {
-    toast.warning(
-      t("removedItemsPartial", {
-        failed: result.failed.length,
-        succeeded: result.succeeded.length,
-        total: result.total,
-      }),
-    );
-    return;
+    if (result.failed.length > 0 || result.skipped_protected.length > 0) {
+      toast.warning(message);
+    } else {
+      toast.success(message);
+    }
+  } else if (result.failed.length > 0) {
+    toast.error(t("failedRemoveItems", { failed: result.failed.length }));
+  } else {
+    toast.info(message);
   }
 
-  toast.error(t("failedRemoveItems", { failed: result.failed.length }));
+  if (result.history_error) {
+    toast.warning(t("cleanupHistoryWarning"));
+  }
 }
 
 function showRestoreToast(
@@ -1404,6 +1557,9 @@ function getOperationLabel(
   }
   if (action === "empty") {
     return t("actionClear");
+  }
+  if (action === "smart") {
+    return t("actionSmartClean");
   }
   return t("actionRestoreDefaults");
 }
