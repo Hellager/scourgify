@@ -24,7 +24,7 @@ pub struct QaCounts {
     pub all: usize,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 pub struct QaBatchResult {
     pub total: usize,
     pub succeeded: Vec<String>,
@@ -33,7 +33,7 @@ pub struct QaBatchResult {
     pub history_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct QaBatchFailure {
     pub path: String,
     pub error: String,

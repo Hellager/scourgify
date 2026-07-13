@@ -20,6 +20,7 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 use config::{AppMode, Config};
+use cleanup::AutoCleanState;
 use privacy::{LockResult, PrivacyManager, PrivacyModeState};
 
 const LANGUAGE_CHANGED_EVENT: &str = "language-changed";
@@ -75,6 +76,7 @@ pub fn run() {
             commands::remove_qa_items,
             commands::empty_qa_items,
             commands::smart_clean,
+            commands::run_auto_clean_now,
             commands::get_clean_records,
             commands::clear_clean_records,
             commands::get_stats,
@@ -122,6 +124,7 @@ pub fn run() {
             app.manage(Mutex::new(config));
             app.manage(database);
             app.manage(privacy_manager);
+            app.manage(AutoCleanState::default());
             let mode = app.state::<Mutex<Config>>()
                 .lock()
                 .map(|config| config.app_mode)

@@ -1,8 +1,8 @@
 use std::{path::PathBuf, sync::Mutex};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::{
-    cleanup::{self, ClassifiedItem},
+    cleanup::{self, AutoCleanResult, AutoCleanState, ClassifiedItem},
     config::Config,
     db::{
         records::{self, CleanRecordPage, HistoryQuery, Stats, StatsRange},
@@ -163,8 +163,32 @@ pub(crate) fn smart_clean(
     qa_type: String,
 ) -> Result<QaBatchResult, String> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    cleanup::smart_clean(database.inner(), &qa_type, history_retention(&config)?)
-        .map_err(|error| error.to_string())
+    cleanup::smart_clean(
+        database.inner(),
+        &qa_type,
+        history_retention(&config)?,
+        records::CleanSource::Manual,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn run_auto_clean_now(
+    app: AppHandle,
+    database: State<'_, DbState>,
+    config: State<'_, Mutex<Config>>,
+    privacy: State<'_, PrivacyManager>,
+    auto_clean: State<'_, AutoCleanState>,
+) -> Result<AutoCleanResult, String> {
+    let config = config.lock().map_err(|error| error.to_string())?.clone();
+    cleanup::run_auto_clean(
+        &app,
+        database.inner(),
+        &config,
+        privacy.inner(),
+        auto_clean.inner(),
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
