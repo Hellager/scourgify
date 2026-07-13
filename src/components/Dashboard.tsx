@@ -44,6 +44,7 @@ import {
   RotateCcw,
   Search,
   Settings,
+  ShieldCheck,
   SlidersHorizontal,
   Trash2,
 } from "lucide-react";
@@ -655,6 +656,12 @@ export function Dashboard() {
                   <SidebarMenuButton render={<Link to="/" />}>
                     <Gauge />
                     <span>{t("dashboard")}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton render={<Link to="/rules" />}>
+                    <ShieldCheck />
+                    <span>{t("rules")}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>

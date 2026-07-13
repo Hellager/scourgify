@@ -6,6 +6,7 @@ import {
   Paintbrush,
   RefreshCw,
   Settings,
+  ShieldCheck,
 } from "lucide-react";
 import {
   Command,
@@ -69,6 +70,10 @@ export function AppCommandPalette() {
             <CommandItem onSelect={() => run(() => navigate("/"))}>
               <Gauge />
               {t("goToDashboard")}
+            </CommandItem>
+            <CommandItem onSelect={() => run(() => navigate("/rules"))}>
+              <ShieldCheck />
+              {t("goToRules")}
             </CommandItem>
             <CommandItem onSelect={() => run(() => navigate("/settings"))}>
               <Settings />
