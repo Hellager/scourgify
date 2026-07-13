@@ -1,9 +1,11 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Mutex};
 use tauri::State;
 
 use crate::{
     cleanup::{self, ClassifiedItem},
+    config::Config,
     db::{
+        records::{self, CleanRecordPage, HistoryQuery},
         rules::{self, NewRule, Rule},
         DatabaseStatus, DbState,
     },
@@ -106,32 +108,64 @@ pub(crate) fn pin_qa_folder(
 #[tauri::command]
 pub(crate) fn remove_qa_items(
     database: State<'_, DbState>,
+    config: State<'_, Mutex<Config>>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
     paths: Vec<String>,
 ) -> Result<QaBatchResult, String> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    cleanup::remove_selected(database.inner(), &qa_type, paths).map_err(|error| error.to_string())
+    cleanup::remove_selected(
+        database.inner(),
+        &qa_type,
+        paths,
+        history_retention(&config)?,
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub(crate) fn empty_qa_items(
     database: State<'_, DbState>,
+    config: State<'_, Mutex<Config>>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
 ) -> Result<QaBatchResult, String> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    cleanup::empty_current(database.inner(), &qa_type).map_err(|error| error.to_string())
+    cleanup::empty_current(database.inner(), &qa_type, history_retention(&config)?)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub(crate) fn smart_clean(
     database: State<'_, DbState>,
+    config: State<'_, Mutex<Config>>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
 ) -> Result<QaBatchResult, String> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    cleanup::smart_clean(database.inner(), &qa_type).map_err(|error| error.to_string())
+    cleanup::smart_clean(database.inner(), &qa_type, history_retention(&config)?)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn get_clean_records(
+    database: State<'_, DbState>,
+    query: HistoryQuery,
+) -> Result<CleanRecordPage, String> {
+    database
+        .with_connection(|connection| records::list(connection, query))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn clear_clean_records(
+    database: State<'_, DbState>,
+    privacy: State<'_, PrivacyManager>,
+) -> Result<(), String> {
+    ensure_quick_access_write_allowed(privacy.state())?;
+    database
+        .with_connection(|connection| records::clear(connection))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -191,6 +225,13 @@ fn ensure_quick_access_write_allowed(state: PrivacyModeState) -> Result<(), Stri
         log::warn!("Quick Access write operation blocked because privacy mode is active");
         Err(PRIVACY_WRITE_ERROR.to_string())
     }
+}
+
+fn history_retention(config: &State<'_, Mutex<Config>>) -> Result<usize, String> {
+    Ok(config
+        .lock()
+        .map_err(|error| error.to_string())?
+        .history_retention)
 }
 
 fn validate_open_path(path: &str) -> Result<PathBuf, String> {

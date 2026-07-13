@@ -58,14 +58,19 @@ pub fn remove_selected(
     database: &DbState,
     qa_type: &str,
     paths: Vec<String>,
+    history_retention: usize,
 ) -> Result<QaBatchResult> {
     let item_type = item_type_for(qa_type)?;
     let rules = load_rules(database)?;
     let prepared = prepare_cleanup(paths, &rules, Selection::AllUnprotected);
-    execute(database, qa_type, item_type, prepared)
+    execute(database, qa_type, item_type, prepared, history_retention)
 }
 
-pub fn empty_current(database: &DbState, qa_type: &str) -> Result<QaBatchResult> {
+pub fn empty_current(
+    database: &DbState,
+    qa_type: &str,
+    history_retention: usize,
+) -> Result<QaBatchResult> {
     let item_type = item_type_for(qa_type)?;
     let rules = load_rules(database)?;
     let paths = quick_access::list_items(qa_type)?
@@ -73,10 +78,14 @@ pub fn empty_current(database: &DbState, qa_type: &str) -> Result<QaBatchResult>
         .map(|item| item.path)
         .collect();
     let prepared = prepare_cleanup(paths, &rules, Selection::AllUnprotected);
-    execute(database, qa_type, item_type, prepared)
+    execute(database, qa_type, item_type, prepared, history_retention)
 }
 
-pub fn smart_clean(database: &DbState, qa_type: &str) -> Result<QaBatchResult> {
+pub fn smart_clean(
+    database: &DbState,
+    qa_type: &str,
+    history_retention: usize,
+) -> Result<QaBatchResult> {
     let item_type = item_type_for(qa_type)?;
     let rules = load_rules(database)?;
     let paths = quick_access::list_items(qa_type)?
@@ -84,7 +93,7 @@ pub fn smart_clean(database: &DbState, qa_type: &str) -> Result<QaBatchResult> {
         .map(|item| item.path)
         .collect();
     let prepared = prepare_cleanup(paths, &rules, Selection::TargetedOnly);
-    execute(database, qa_type, item_type, prepared)
+    execute(database, qa_type, item_type, prepared, history_retention)
 }
 
 fn execute(
@@ -92,6 +101,7 @@ fn execute(
     qa_type: &str,
     item_type: &str,
     prepared: PreparedCleanup,
+    history_retention: usize,
 ) -> Result<QaBatchResult> {
     let matches = prepared
         .candidates
@@ -122,9 +132,9 @@ fn execute(
             .iter()
             .map(|path| clean_record(path, item_type, matches.get(&path.to_lowercase())))
             .collect::<Vec<_>>();
-        if let Err(error) =
-            database.with_connection(|connection| records::insert_batch(connection, &records))
-        {
+        if let Err(error) = database.with_connection(|connection| {
+            records::insert_batch(connection, &records, history_retention)
+        }) {
             let error = format!("{error:#}");
             log::error!("cleanup history write failed error={error}");
             result.history_error = Some(error);

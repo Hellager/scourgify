@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Gauge,
+  History,
   Info,
   Paintbrush,
   RefreshCw,
@@ -74,6 +75,10 @@ export function AppCommandPalette() {
             <CommandItem onSelect={() => run(() => navigate("/rules"))}>
               <ShieldCheck />
               {t("goToRules")}
+            </CommandItem>
+            <CommandItem onSelect={() => run(() => navigate("/history"))}>
+              <History />
+              {t("goToHistory")}
             </CommandItem>
             <CommandItem onSelect={() => run(() => navigate("/settings"))}>
               <Settings />

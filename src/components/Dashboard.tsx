@@ -38,6 +38,7 @@ import {
   Gauge,
   FolderOpen,
   FolderPlus,
+  History,
   Info,
   Paintbrush,
   RefreshCw,
@@ -712,6 +713,12 @@ export function Dashboard() {
                   <SidebarMenuButton render={<Link to="/rules" />}>
                     <ShieldCheck />
                     <span>{t("rules")}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton render={<Link to="/history" />}>
+                    <History />
+                    <span>{t("history")}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>

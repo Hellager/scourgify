@@ -18,6 +18,7 @@ export const configSchema = z.object({
   notify_partial_failure: z.boolean(),
   confirm_destructive_actions: z.boolean(),
   smart_clean_confirm: z.boolean(),
+  history_retention: z.number().int().nonnegative(),
 });
 
 export type ConfigForm = z.infer<typeof configSchema>;
@@ -41,4 +42,5 @@ export const defaultConfig: ConfigForm = {
   notify_partial_failure: true,
   confirm_destructive_actions: true,
   smart_clean_confirm: true,
+  history_retention: 0,
 };

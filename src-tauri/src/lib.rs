@@ -73,6 +73,8 @@ pub fn run() {
             commands::remove_qa_items,
             commands::empty_qa_items,
             commands::smart_clean,
+            commands::get_clean_records,
+            commands::clear_clean_records,
             commands::restore_qa_defaults,
             commands::get_qa_visibility,
             commands::set_qa_visibility,
@@ -162,13 +164,28 @@ fn get_config(config: State<'_, Mutex<Config>>) -> Result<Config, String> {
 fn update_config(
     app: tauri::AppHandle,
     config: State<'_, Mutex<Config>>,
+    database: State<'_, db::DbState>,
     mut next_config: Config,
 ) -> Result<Config, String> {
     next_config.language = config::normalize_language(&next_config.language);
-    let (current_auto_start, current_language) = {
+    let (current_auto_start, current_language, current_history_retention) = {
         let config = config.lock().map_err(|error| error.to_string())?;
-        (config.auto_start, config.language.clone())
+        (
+            config.auto_start,
+            config.language.clone(),
+            config.history_retention,
+        )
     };
+    if next_config.history_retention > 0
+        && (current_history_retention == 0
+            || next_config.history_retention < current_history_retention)
+    {
+        database
+            .with_connection(|connection| {
+                db::records::trim_to(connection, next_config.history_retention)
+            })
+            .map_err(|error| error.to_string())?;
+    }
     if current_auto_start != next_config.auto_start {
         set_auto_start_preference(&app, next_config.auto_start)?;
     }

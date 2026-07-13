@@ -96,6 +96,8 @@ pub struct Config {
     pub confirm_destructive_actions: bool,
     #[serde(default = "default_true")]
     pub smart_clean_confirm: bool,
+    #[serde(default)]
+    pub history_retention: usize,
 }
 
 impl Config {
@@ -118,6 +120,7 @@ impl Config {
             notify_partial_failure: true,
             confirm_destructive_actions: true,
             smart_clean_confirm: true,
+            history_retention: 0,
         }
     }
 }
@@ -222,6 +225,7 @@ mod tests {
         assert!(config.notify_partial_failure);
         assert!(config.confirm_destructive_actions);
         assert!(config.smart_clean_confirm);
+        assert_eq!(config.history_retention, 0);
     }
 
     #[test]

@@ -8,6 +8,7 @@ import { ArrowLeft, Save } from "lucide-react";
 import { toast } from "sonner";
 import packageJson from "../../package.json";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -53,6 +54,7 @@ export function SettingsPage() {
     control,
     formState,
     handleSubmit,
+    register,
     reset,
     setValue,
     watch,
@@ -367,6 +369,23 @@ export function SettingsPage() {
               description: t("confirmSmartCleanDescription"),
             }}
           />
+        </Section>
+
+        <Section title={t("history")}>
+          <label className="flex items-center justify-between gap-4 py-3">
+            <span>
+              <span className="block text-sm">{t("historyRetention")}</span>
+              <span className="block text-xs text-muted-foreground">
+                {t("historyRetentionDescription")}
+              </span>
+            </span>
+            <Input
+              className="w-28"
+              min={0}
+              type="number"
+              {...register("history_retention", { valueAsNumber: true })}
+            />
+          </label>
         </Section>
 
         <Section title={t("about")}>
