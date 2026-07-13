@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, Runtime};
@@ -61,6 +62,38 @@ impl Default for SidebarVariant {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AutoCleanSchedule {
+    Disabled,
+    OnStartup,
+    EveryHours { hours: u32 },
+    DailyAt { hour: u8, minute: u8 },
+}
+
+impl Default for AutoCleanSchedule {
+    fn default() -> Self {
+        Self::Disabled
+    }
+}
+
+impl AutoCleanSchedule {
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Self::EveryHours { hours } if !(1..=168).contains(hours) => {
+                anyhow::bail!("auto-clean interval must be between 1 and 168 hours")
+            }
+            Self::DailyAt { hour, .. } if *hour > 23 => {
+                anyhow::bail!("auto-clean hour must be between 0 and 23")
+            }
+            Self::DailyAt { minute, .. } if *minute > 59 => {
+                anyhow::bail!("auto-clean minute must be between 0 and 59")
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
     #[serde(default)]
     pub app_mode: AppMode,
@@ -98,6 +131,10 @@ pub struct Config {
     pub smart_clean_confirm: bool,
     #[serde(default)]
     pub history_retention: usize,
+    #[serde(default)]
+    pub auto_clean: AutoCleanSchedule,
+    #[serde(default)]
+    pub auto_clean_last_run: Option<DateTime<Utc>>,
 }
 
 impl Config {
@@ -121,7 +158,13 @@ impl Config {
             confirm_destructive_actions: true,
             smart_clean_confirm: true,
             history_retention: 0,
+            auto_clean: AutoCleanSchedule::Disabled,
+            auto_clean_last_run: None,
         }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        self.auto_clean.validate()
     }
 }
 
@@ -137,11 +180,13 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> Result<Config> {
     };
 
     config.language = normalize_language(&config.language);
+    config.validate()?;
     save(app, &config)?;
     Ok(config)
 }
 
 pub fn save<R: Runtime>(app: &AppHandle<R>, config: &Config) -> Result<()> {
+    config.validate()?;
     let path = config_path(app)?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
@@ -226,6 +271,57 @@ mod tests {
         assert!(config.confirm_destructive_actions);
         assert!(config.smart_clean_confirm);
         assert_eq!(config.history_retention, 0);
+        assert_eq!(config.auto_clean, AutoCleanSchedule::Disabled);
+        assert_eq!(config.auto_clean_last_run, None);
+    }
+
+    #[test]
+    fn validates_auto_clean_schedule_bounds() {
+        assert!(AutoCleanSchedule::EveryHours { hours: 1 }
+            .validate()
+            .is_ok());
+        assert!(AutoCleanSchedule::EveryHours { hours: 168 }
+            .validate()
+            .is_ok());
+        assert!(AutoCleanSchedule::DailyAt {
+            hour: 23,
+            minute: 59,
+        }
+        .validate()
+        .is_ok());
+        assert!(AutoCleanSchedule::EveryHours { hours: 0 }
+            .validate()
+            .is_err());
+        assert!(AutoCleanSchedule::EveryHours { hours: 169 }
+            .validate()
+            .is_err());
+        assert!(AutoCleanSchedule::DailyAt {
+            hour: 24,
+            minute: 0,
+        }
+        .validate()
+        .is_err());
+        assert!(AutoCleanSchedule::DailyAt {
+            hour: 0,
+            minute: 60,
+        }
+        .validate()
+        .is_err());
+    }
+
+    #[test]
+    fn serializes_auto_clean_schedule_and_last_run() {
+        let mut config = Config::new("en-US".to_string());
+        config.auto_clean = AutoCleanSchedule::EveryHours { hours: 6 };
+        config.auto_clean_last_run = Some("2026-07-13T08:30:00Z".parse().unwrap());
+
+        let value = serde_json::to_value(config).unwrap();
+
+        assert_eq!(
+            value["auto_clean"],
+            serde_json::json!({ "kind": "every_hours", "hours": 6 })
+        );
+        assert_eq!(value["auto_clean_last_run"], "2026-07-13T08:30:00Z");
     }
 
     #[test]

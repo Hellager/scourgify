@@ -11,7 +11,7 @@ pub(crate) mod records;
 pub(crate) mod rules;
 
 const DATABASE_FILE: &str = "scourgify.db";
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const BUILTIN_WHITELIST_RULES: &[&str] = &["Desktop", "Documents"];
 const DATABASE_PATH_UNAVAILABLE: &str = "Database path is unavailable.";
 const DATABASE_STATE_UNAVAILABLE: &str = "Database state could not be accessed.";
@@ -37,6 +37,11 @@ CREATE TABLE clean_records (
 
 CREATE INDEX idx_rules_type ON rules(rule_type);
 CREATE INDEX idx_records_date ON clean_records(cleaned_at);
+"#;
+
+const SCHEMA_V2: &str = r#"
+ALTER TABLE clean_records ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'
+    CHECK(source IN ('manual', 'auto'));
 "#;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -240,8 +245,13 @@ fn migrate(connection: &mut Connection) -> Result<u32> {
         );
     }
 
-    if current_version == 0 {
+    let mut version = current_version;
+    if version == 0 {
         migrate_to_v1(connection)?;
+        version = 1;
+    }
+    if version == 1 {
+        migrate_to_v2(connection)?;
     }
 
     Ok(SCHEMA_VERSION)
@@ -267,11 +277,26 @@ fn migrate_to_v1(connection: &mut Connection) -> Result<()> {
     }
 
     transaction
-        .pragma_update(None, "user_version", SCHEMA_VERSION)
+        .pragma_update(None, "user_version", 1)
         .context("failed to set SQLite user_version")?;
     transaction
         .commit()
         .context("failed to commit schema v1 migration")
+}
+
+fn migrate_to_v2(connection: &mut Connection) -> Result<()> {
+    let transaction = connection
+        .transaction()
+        .context("failed to start schema v2 migration")?;
+    transaction
+        .execute_batch(SCHEMA_V2)
+        .context("failed to migrate schema to v2")?;
+    transaction
+        .pragma_update(None, "user_version", 2)
+        .context("failed to set SQLite user_version")?;
+    transaction
+        .commit()
+        .context("failed to commit schema v2 migration")
 }
 
 #[cfg(test)]
@@ -310,6 +335,40 @@ mod tests {
         migrate(&mut connection).unwrap();
 
         assert_eq!(rule_count(&connection), 0);
+    }
+
+    #[test]
+    fn migration_upgrades_v1_records_with_manual_source() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .unwrap();
+        migrate_to_v1(&mut connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO clean_records (item_path, item_type) VALUES (?1, 'recent_file')",
+                [r"C:\old.txt"],
+            )
+            .unwrap();
+
+        assert_eq!(user_version(&connection), 1);
+        assert_eq!(migrate(&mut connection).unwrap(), SCHEMA_VERSION);
+        assert_eq!(user_version(&connection), 2);
+        assert_eq!(
+            connection
+                .query_row("SELECT source FROM clean_records", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap(),
+            "manual"
+        );
+        assert!(connection
+            .execute(
+                "INSERT INTO clean_records (item_path, item_type, source)
+                 VALUES (?1, 'recent_file', 'invalid')",
+                [r"C:\invalid.txt"],
+            )
+            .is_err());
     }
 
     #[test]

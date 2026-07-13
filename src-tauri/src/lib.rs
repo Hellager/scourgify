@@ -171,14 +171,22 @@ fn update_config(
     mut next_config: Config,
 ) -> Result<Config, String> {
     next_config.language = config::normalize_language(&next_config.language);
-    let (current_auto_start, current_language, current_history_retention) = {
+    next_config.validate().map_err(|error| error.to_string())?;
+    let (
+        current_auto_start,
+        current_language,
+        current_history_retention,
+        current_auto_clean_last_run,
+    ) = {
         let config = config.lock().map_err(|error| error.to_string())?;
         (
             config.auto_start,
             config.language.clone(),
             config.history_retention,
+            config.auto_clean_last_run,
         )
     };
+    next_config.auto_clean_last_run = current_auto_clean_last_run;
     if next_config.history_retention > 0
         && (current_history_retention == 0
             || next_config.history_retention < current_history_retention)

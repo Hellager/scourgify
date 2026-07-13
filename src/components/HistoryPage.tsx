@@ -67,6 +67,7 @@ interface CleanRecord {
   item_type: "recent_file" | "frequent_folder";
   rule_id: number | null;
   rule_keyword: string | null;
+  source: "manual" | "auto";
   cleaned_at: string;
 }
 

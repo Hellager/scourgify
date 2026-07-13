@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     db::{
-        records::{self, NewCleanRecord},
+        records::{self, CleanSource, NewCleanRecord},
         rules::{self, Rule},
         DbState,
     },
@@ -132,7 +132,14 @@ fn execute(
         let records = result
             .succeeded
             .iter()
-            .map(|path| clean_record(path, item_type, matches.get(&path.to_lowercase())))
+            .map(|path| {
+                clean_record(
+                    path,
+                    item_type,
+                    matches.get(&path.to_lowercase()),
+                    CleanSource::Manual,
+                )
+            })
             .collect::<Vec<_>>();
         if let Err(error) = database.with_connection(|connection| {
             records::insert_batch(connection, &records, history_retention)
@@ -186,7 +193,12 @@ fn prepare_cleanup(paths: Vec<String>, rules: &[Rule], selection: Selection) -> 
     }
 }
 
-fn clean_record(path: &str, item_type: &str, match_result: Option<&MatchResult>) -> NewCleanRecord {
+fn clean_record(
+    path: &str,
+    item_type: &str,
+    match_result: Option<&MatchResult>,
+    source: CleanSource,
+) -> NewCleanRecord {
     let (rule_id, rule_keyword) = match match_result {
         Some(MatchResult::Targeted { rule_id, keyword }) => (Some(*rule_id), Some(keyword.clone())),
         _ => (None, None),
@@ -196,6 +208,7 @@ fn clean_record(path: &str, item_type: &str, match_result: Option<&MatchResult>)
         item_type: item_type.to_string(),
         rule_id,
         rule_keyword,
+        source,
     }
 }
 
@@ -280,13 +293,20 @@ mod tests {
             keyword: "Temp".to_string(),
         };
 
-        let targeted_record = clean_record(r"C:\Temp\a.txt", "recent_file", Some(&targeted));
-        let neutral_record = clean_record(r"C:\Docs\a.txt", "recent_file", None);
+        let targeted_record = clean_record(
+            r"C:\Temp\a.txt",
+            "recent_file",
+            Some(&targeted),
+            CleanSource::Manual,
+        );
+        let neutral_record = clean_record(r"C:\Docs\a.txt", "recent_file", None, CleanSource::Auto);
 
         assert_eq!(targeted_record.rule_id, Some(7));
         assert_eq!(targeted_record.rule_keyword.as_deref(), Some("Temp"));
         assert_eq!(neutral_record.rule_id, None);
         assert_eq!(neutral_record.rule_keyword, None);
+        assert_eq!(targeted_record.source, CleanSource::Manual);
+        assert_eq!(neutral_record.source, CleanSource::Auto);
     }
 
     #[test]

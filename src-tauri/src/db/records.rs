@@ -1,8 +1,38 @@
 use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{
+    params,
+    types::{FromSql, FromSqlError, FromSqlResult, ValueRef},
+    Connection,
+};
 use serde::{Deserialize, Serialize};
 
 const MAX_PAGE_SIZE: u32 = 100;
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CleanSource {
+    Manual,
+    Auto,
+}
+
+impl CleanSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Auto => "auto",
+        }
+    }
+}
+
+impl FromSql for CleanSource {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value.as_str()? {
+            "manual" => Ok(Self::Manual),
+            "auto" => Ok(Self::Auto),
+            _ => Err(FromSqlError::InvalidType),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewCleanRecord {
@@ -10,6 +40,7 @@ pub struct NewCleanRecord {
     pub item_type: String,
     pub rule_id: Option<i64>,
     pub rule_keyword: Option<String>,
+    pub source: CleanSource,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -35,6 +66,7 @@ pub struct CleanRecord {
     pub item_type: String,
     pub rule_id: Option<i64>,
     pub rule_keyword: Option<String>,
+    pub source: CleanSource,
     pub cleaned_at: String,
 }
 
@@ -104,8 +136,8 @@ pub fn insert_batch(
     {
         let mut statement = transaction
             .prepare(
-                "INSERT INTO clean_records (item_path, item_type, rule_id, rule_keyword)
-                 VALUES (?1, ?2, (SELECT id FROM rules WHERE id = ?3), ?4)",
+                "INSERT INTO clean_records (item_path, item_type, rule_id, rule_keyword, source)
+                 VALUES (?1, ?2, (SELECT id FROM rules WHERE id = ?3), ?4, ?5)",
             )
             .context("failed to prepare clean record insert")?;
         for record in records {
@@ -114,7 +146,8 @@ pub fn insert_batch(
                     record.item_path,
                     record.item_type,
                     record.rule_id,
-                    record.rule_keyword
+                    record.rule_keyword,
+                    record.source.as_str()
                 ])
                 .with_context(|| format!("failed to record cleanup for {}", record.item_path))?;
         }
@@ -184,7 +217,7 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
     let offset = i64::try_from(u64::from(query.page - 1) * u64::from(query.page_size))
         .context("history page offset is too large")?;
     let sql = format!(
-        "SELECT id, item_path, item_type, rule_id, rule_keyword, cleaned_at
+        "SELECT id, item_path, item_type, rule_id, rule_keyword, source, cleaned_at
          FROM clean_records
          {FILTERS}
          ORDER BY {sort_column} {sort_order}, id {sort_order}
@@ -210,7 +243,8 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
                     item_type: row.get(2)?,
                     rule_id: row.get(3)?,
                     rule_keyword: row.get(4)?,
-                    cleaned_at: row.get(5)?,
+                    source: row.get(5)?,
+                    cleaned_at: row.get(6)?,
                 })
             },
         )
@@ -428,6 +462,24 @@ mod tests {
             .unwrap();
         assert_eq!(stored_rule_id, Some(rule_id));
         assert_eq!(keyword, "Desktop");
+        assert_eq!(
+            list(&connection, history_query()).unwrap().records[0].source,
+            CleanSource::Manual
+        );
+    }
+
+    #[test]
+    fn stores_and_lists_auto_cleanup_source() {
+        let mut connection = test_connection();
+        let mut auto_record = record(r"C:\auto.txt", "recent_file", None, None);
+        auto_record.source = CleanSource::Auto;
+
+        insert_batch(&mut connection, &[auto_record], 0).unwrap();
+
+        assert_eq!(
+            list(&connection, history_query()).unwrap().records[0].source,
+            CleanSource::Auto
+        );
     }
 
     #[test]
@@ -841,6 +893,7 @@ mod tests {
             item_type: item_type.to_string(),
             rule_id,
             rule_keyword: rule_keyword.map(str::to_string),
+            source: CleanSource::Manual,
         }
     }
 
