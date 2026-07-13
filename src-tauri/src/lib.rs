@@ -6,6 +6,9 @@ mod commands;
 mod config;
 mod db;
 mod i18n;
+// The classified scan and cleanup pipeline will consume this in Day 4.
+#[allow(dead_code)]
+mod matcher;
 mod notifier;
 mod privacy;
 mod quick_access;
@@ -59,6 +62,11 @@ pub fn run() {
             privacy_exit,
             privacy_state,
             commands::get_database_status,
+            commands::get_rules,
+            commands::add_rule,
+            commands::update_rule,
+            commands::remove_rule,
+            commands::toggle_rule,
             commands::list_qa_items,
             commands::get_qa_counts,
             commands::pin_qa_folder,

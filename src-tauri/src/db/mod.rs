@@ -7,6 +7,8 @@ use std::{
 };
 use tauri::{AppHandle, Manager, Runtime};
 
+pub(crate) mod rules;
+
 const DATABASE_FILE: &str = "scourgify.db";
 const SCHEMA_VERSION: u32 = 1;
 const BUILTIN_WHITELIST_RULES: &[&str] = &["Desktop", "Documents"];
@@ -74,6 +76,29 @@ impl DbState {
                 error: Some(format!("database state lock poisoned: {error}")),
             },
         }
+    }
+
+    pub(crate) fn with_connection<T>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> Result<T>,
+    ) -> Result<T> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|error| anyhow::anyhow!("database state lock poisoned: {error}"))?;
+        if inner.connection.is_none() {
+            let detail = inner
+                .error
+                .as_deref()
+                .unwrap_or("unknown initialization error");
+            bail!("database unavailable: {detail}");
+        }
+        operation(
+            inner
+                .connection
+                .as_mut()
+                .context("database connection is unavailable")?,
+        )
     }
 
     fn available(path: PathBuf, connection: Connection, schema_version: u32) -> Self {
