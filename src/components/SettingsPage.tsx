@@ -3,10 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Controller, type Control, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Link } from "react-router-dom";
-import { ArrowLeft, Save } from "lucide-react";
+import { Save } from "lucide-react";
 import { toast } from "sonner";
 import packageJson from "../../package.json";
+import { PageHeader, useAppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -47,6 +47,7 @@ type PrivacyState =
 
 export function SettingsPage() {
   const { t } = useI18n();
+  const { setConfig: setShellConfig } = useAppShell();
   const [loading, setLoading] = useState(true);
   const [privacyActive, setPrivacyActive] = useState(false);
   const originalVisibility = useRef<QaVisibility | null>(null);
@@ -151,7 +152,9 @@ export function SettingsPage() {
       const saved = await invoke<ConfigForm>("update_config", {
         nextConfig: values,
       });
-      reset(configSchema.parse(saved));
+      const parsed = configSchema.parse(saved);
+      reset(parsed);
+      setShellConfig(parsed);
       originalVisibility.current = {
         recent: values.show_recent_files,
         frequent: values.show_frequent_folders,
@@ -172,34 +175,21 @@ export function SettingsPage() {
   });
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="flex h-14 items-center justify-between border-b px-6">
-        <div className="flex items-center gap-3">
+    <>
+      <PageHeader
+        actions={
           <Button
-            render={<Link to="/" />}
-            size="icon-sm"
-            type="button"
-            variant="ghost"
+            disabled={loading || formState.isSubmitting}
+            form="settings-form"
+            type="submit"
           >
-            <ArrowLeft />
-            <span className="sr-only">{t("backToDashboard")}</span>
+            <Save />
+            {t("save")}
           </Button>
-          <div>
-            <h1 className="text-base font-semibold">{t("settings")}</h1>
-            <p className="text-xs text-muted-foreground">
-              {t("settingsSubtitle")}
-            </p>
-          </div>
-        </div>
-        <Button
-          disabled={loading || formState.isSubmitting}
-          form="settings-form"
-          type="submit"
-        >
-          <Save />
-          {t("save")}
-        </Button>
-      </header>
+        }
+        subtitle={t("settingsSubtitle")}
+        title={t("settings")}
+      />
 
       <form
         className="mx-auto grid max-w-5xl gap-4 p-6"
@@ -405,7 +395,7 @@ export function SettingsPage() {
           </div>
         </Section>
       </form>
-    </main>
+    </>
   );
 }
 

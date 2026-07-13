@@ -2,17 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { invoke } from "@tauri-apps/api/core";
 import { Controller, useForm } from "react-hook-form";
-import { Link } from "react-router-dom";
-import {
-  ArrowLeft,
-  Pencil,
-  Plus,
-  RefreshCw,
-  ShieldCheck,
-  Trash2,
-} from "lucide-react";
+import { Pencil, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
+import { PageHeader } from "@/components/AppShell";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -208,27 +201,10 @@ export function RulesPage() {
   };
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="flex h-14 items-center justify-between border-b px-6">
-        <div className="flex min-w-0 items-center gap-3">
-          <Button
-            aria-label={t("backToDashboard")}
-            nativeButton={false}
-            render={<Link to="/" />}
-            size="icon-sm"
-            type="button"
-            variant="ghost"
-          >
-            <ArrowLeft />
-          </Button>
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold">{t("rules")}</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              {t("rulesSubtitle")}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
+    <>
+      <PageHeader
+        actions={
+          <>
           <Button
             aria-label={t("refreshRules")}
             disabled={loading}
@@ -244,8 +220,11 @@ export function RulesPage() {
             <Plus />
             {t("addRule")}
           </Button>
-        </div>
-      </header>
+          </>
+        }
+        subtitle={t("rulesSubtitle")}
+        title={t("rules")}
+      />
 
       <div className="mx-auto grid max-w-6xl gap-4 p-6">
         {database && !database.available ? (
@@ -482,7 +461,7 @@ export function RulesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </main>
+    </>
   );
 
   function RuleTypeLabel({ ruleType }: { ruleType: Rule["rule_type"] }) {

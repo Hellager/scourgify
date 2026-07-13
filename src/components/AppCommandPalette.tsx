@@ -52,13 +52,7 @@ export function AppCommandPalette() {
   };
 
   const openConfigDrawer = () => {
-    if (!onDashboard) {
-      navigate("/");
-    }
-    window.setTimeout(
-      () => dispatchAppEvent(OPEN_CONFIG_DRAWER_EVENT),
-      onDashboard ? 0 : 50,
-    );
+    dispatchAppEvent(OPEN_CONFIG_DRAWER_EVENT);
   };
 
   return (
@@ -91,9 +85,7 @@ export function AppCommandPalette() {
           </CommandGroup>
           <CommandSeparator />
           <CommandGroup heading={t("commandAppearance")}>
-            <CommandItem
-              onSelect={() => run(openConfigDrawer)}
-            >
+            <CommandItem onSelect={() => run(openConfigDrawer)}>
               <Paintbrush />
               {t("openConfigDrawer")}
               <CommandShortcut>{t("drawerShortcut")}</CommandShortcut>

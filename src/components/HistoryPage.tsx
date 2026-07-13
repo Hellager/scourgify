@@ -16,10 +16,8 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { Link } from "react-router-dom";
 import {
   ArrowDown,
-  ArrowLeft,
   ArrowUp,
   ArrowUpDown,
   ChevronLeft,
@@ -28,6 +26,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/AppShell";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -238,27 +237,10 @@ export function HistoryPage() {
     privacyActive;
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="flex h-14 items-center justify-between gap-3 border-b px-6">
-        <div className="flex min-w-0 items-center gap-3">
-          <Button
-            aria-label={t("backToDashboard")}
-            nativeButton={false}
-            render={<Link to="/" />}
-            size="icon-sm"
-            type="button"
-            variant="ghost"
-          >
-            <ArrowLeft />
-          </Button>
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold">{t("history")}</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              {t("historySubtitle")}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
+    <>
+      <PageHeader
+        actions={
+          <>
           <Button
             aria-label={t("refreshHistory")}
             disabled={loading}
@@ -279,8 +261,11 @@ export function HistoryPage() {
             <Trash2 />
             {t("clearHistory")}
           </Button>
-        </div>
-      </header>
+          </>
+        }
+        subtitle={t("historySubtitle")}
+        title={t("history")}
+      />
 
       <div className="mx-auto grid max-w-7xl gap-4 p-6">
         {database && !database.available ? (
@@ -439,7 +424,7 @@ export function HistoryPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </main>
+    </>
   );
 }
 

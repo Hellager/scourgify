@@ -40,12 +40,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Columns3,
-  Gauge,
   FolderOpen,
   FolderPlus,
-  History,
-  Info,
-  Paintbrush,
   RefreshCw,
   RotateCcw,
   Search,
@@ -86,21 +82,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarSeparator,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
-import {
   Table,
   TableBody,
   TableCell,
@@ -114,17 +95,12 @@ import {
   notifyPartialFailure,
 } from "@/lib/notifications";
 import {
+  dispatchAppEvent,
   OPEN_CONFIG_DRAWER_EVENT,
   REFRESH_DASHBOARD_EVENT,
 } from "@/lib/app-events";
-import {
-  configSchema,
-  defaultConfig,
-  type ConfigForm,
-  type SidebarVariant,
-} from "@/lib/config";
 import { type I18nKey, useI18n } from "@/lib/i18n";
-import { ConfigDrawer } from "@/components/ConfigDrawer";
+import { PageHeader, useAppShell } from "@/components/AppShell";
 
 type QaType = "recent" | "frequent";
 
@@ -233,7 +209,7 @@ const quickAccessChartColors = ["#2563eb", "#16a34a"];
 
 export function Dashboard() {
   const { language, t } = useI18n();
-  const [config, setConfig] = useState<ConfigForm>(defaultConfig);
+  const { config, updateDashboardSummary } = useAppShell();
   const [activeTab, setActiveTab] = useState<QaType>("recent");
   const [counts, setCounts] = useState<QaCounts>(emptyCounts);
   const [items, setItems] = useState<QaItem[]>([]);
@@ -249,7 +225,6 @@ export function Dashboard() {
   const [privacyActive, setPrivacyActive] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [pinFolderPath, setPinFolderPath] = useState("");
-  const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   const [lastOperationSummary, setLastOperationSummary] =
     useState<OperationSummary | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -442,14 +417,6 @@ export function Dashboard() {
     setCounts(await invoke<QaCounts>("get_qa_counts"));
   }, []);
 
-  const loadConfig = useCallback(async () => {
-    try {
-      setConfig(configSchema.parse(await invoke<ConfigForm>("get_config")));
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
-  }, []);
-
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
     setStatsError(null);
@@ -524,26 +491,27 @@ export function Dashboard() {
   }, [refresh]);
 
   useEffect(() => {
-    void loadConfig();
-  }, [loadConfig]);
-
-  useEffect(() => {
     setPagination((current) =>
       current.pageIndex === 0 ? current : { ...current, pageIndex: 0 },
     );
   }, [activeTab, query, items.length]);
 
   useEffect(() => {
-    const openConfigDrawer = () => setConfigDrawerOpen(true);
     const refreshDashboard = () => void refresh();
 
-    window.addEventListener(OPEN_CONFIG_DRAWER_EVENT, openConfigDrawer);
     window.addEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
     return () => {
-      window.removeEventListener(OPEN_CONFIG_DRAWER_EVENT, openConfigDrawer);
       window.removeEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    updateDashboardSummary({
+      recent: counts.recent,
+      frequent: counts.frequent,
+      selected: selectedPaths.size,
+    });
+  }, [counts.frequent, counts.recent, selectedPaths.size, updateDashboardSummary]);
 
   const switchTab = (value: unknown) => {
     const nextTab = toQaType(value);
@@ -744,98 +712,13 @@ export function Dashboard() {
   });
 
   return (
-    <SidebarProvider>
-      <Sidebar
-        collapsible="icon"
-        variant={config.sidebar_variant as SidebarVariant}
-      >
-        <SidebarHeader>
-          <div className="px-2 py-1">
-            <div className="text-sm font-semibold">Scourgify</div>
-            <div className="text-xs text-muted-foreground">
-              {t("quickAccess")}
-            </div>
-          </div>
-        </SidebarHeader>
-        <SidebarSeparator />
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel>{t("commandNavigation")}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton render={<Link to="/" />}>
-                    <Gauge />
-                    <span>{t("dashboard")}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton render={<Link to="/rules" />}>
-                    <ShieldCheck />
-                    <span>{t("rules")}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton render={<Link to="/history" />}>
-                    <History />
-                    <span>{t("history")}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton render={<Link to="/settings" />}>
-                    <Settings />
-                    <span>{t("settings")}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton render={<Link to="/about" />}>
-                    <Info />
-                    <span>{t("about")}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    onClick={() => setConfigDrawerOpen(true)}
-                    type="button"
-                  >
-                    <Paintbrush />
-                    <span>{t("appearance")}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-          <SidebarGroup>
-            <SidebarGroupLabel>{t("counts")}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <div className="grid gap-1 px-2 text-xs text-muted-foreground">
-                <span>
-                  {t("recent")}: {counts.recent}
-                </span>
-                <span>
-                  {t("frequent")}: {counts.frequent}
-                </span>
-                <span>
-                  {t("selected")}: {selectedPaths.size}
-                </span>
-              </div>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-      </Sidebar>
-      <SidebarInset className="min-h-screen bg-background text-foreground">
-      <header className="flex h-14 items-center justify-between border-b px-6">
-        <div className="flex items-center gap-3">
-          <SidebarTrigger />
-          <div>
-            <h1 className="text-base font-semibold">Scourgify</h1>
-            <p className="text-xs text-muted-foreground">{t("dashboard")}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
+    <>
+      <PageHeader
+        actions={
+          <>
           <Button
             aria-label={t("openAppearanceDrawer")}
-            onClick={() => setConfigDrawerOpen(true)}
+            onClick={() => dispatchAppEvent(OPEN_CONFIG_DRAWER_EVENT)}
             size="icon-sm"
             type="button"
             variant="outline"
@@ -867,8 +750,11 @@ export function Dashboard() {
           >
             {t("about")}
           </Link>
-        </div>
-      </header>
+          </>
+        }
+        subtitle={t("dashboard")}
+        title="Scourgify"
+      />
 
       <section className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
         <CountCard label={t("recentFiles")} value={counts.recent} />
@@ -1171,15 +1057,7 @@ export function Dashboard() {
         smartTargets={smartTargets}
         t={t}
       />
-      <ConfigDrawer
-        config={config}
-        onConfigSaved={setConfig}
-        onOpenChange={setConfigDrawerOpen}
-        open={configDrawerOpen}
-        privacyActive={privacyActive}
-      />
-      </SidebarInset>
-    </SidebarProvider>
+    </>
   );
 }
 
