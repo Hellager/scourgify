@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { invoke } from "@tauri-apps/api/core";
 import { Controller, useForm } from "react-hook-form";
-import { Pencil, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import {
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { PageHeader } from "@/components/AppShell";
@@ -87,6 +94,13 @@ export function RulesPage() {
   const [editingRule, setEditingRule] = useState<Rule | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Rule | null>(null);
   const [mutatingId, setMutatingId] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | Rule["rule_type"]>(
+    "all",
+  );
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "enabled" | "disabled"
+  >("all");
   const {
     control,
     formState,
@@ -125,6 +139,37 @@ export function RulesPage() {
 
   const writesDisabled =
     loading || database?.available !== true || privacyActive;
+  const filteredRules = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    return rules.filter(
+      (rule) =>
+        (!keyword || rule.keyword.toLowerCase().includes(keyword)) &&
+        (typeFilter === "all" || rule.rule_type === typeFilter) &&
+        (statusFilter === "all" || rule.enabled === (statusFilter === "enabled")),
+    );
+  }, [rules, search, statusFilter, typeFilter]);
+  const whitelistCount = filteredRules.filter(
+    (rule) => rule.rule_type === "whitelist",
+  ).length;
+  const blacklistCount = filteredRules.length - whitelistCount;
+  const conflictingKeywords = useMemo(() => {
+    const rulesByKeyword = new Map<
+      string,
+      { keyword: string; types: Set<Rule["rule_type"]> }
+    >();
+    for (const rule of rules) {
+      const normalized = rule.keyword.trim().toLowerCase();
+      const entry = rulesByKeyword.get(normalized) ?? {
+        keyword: rule.keyword,
+        types: new Set<Rule["rule_type"]>(),
+      };
+      entry.types.add(rule.rule_type);
+      rulesByKeyword.set(normalized, entry);
+    }
+    return Array.from(rulesByKeyword.values())
+      .filter(({ types }) => types.size === 2)
+      .map(({ keyword }) => keyword);
+  }, [rules]);
 
   const openCreate = () => {
     setEditingRule(null);
@@ -266,13 +311,76 @@ export function RulesPage() {
           </section>
         ) : null}
 
+        <section className="grid gap-3" aria-label={t("filterRules")}>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem_12rem]">
+            <label className="relative min-w-0">
+              <span className="sr-only">{t("filterRules")}</span>
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("filterRules")}
+                type="search"
+                value={search}
+              />
+            </label>
+            <Select
+              onValueChange={(value) =>
+                setTypeFilter(value as "all" | Rule["rule_type"])
+              }
+              value={typeFilter}
+            >
+              <SelectTrigger aria-label={t("ruleType")} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("all")}</SelectItem>
+                <SelectItem value="whitelist">{t("whitelist")}</SelectItem>
+                <SelectItem value="blacklist">{t("blacklist")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              onValueChange={(value) =>
+                setStatusFilter(value as "all" | "enabled" | "disabled")
+              }
+              value={statusFilter}
+            >
+              <SelectTrigger aria-label={t("ruleStatus")} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("all")}</SelectItem>
+                <SelectItem value="enabled">{t("enabled")}</SelectItem>
+                <SelectItem value="disabled">{t("disabled")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="text-sm tabular-nums text-muted-foreground">
+            {t("ruleFilterSummary", {
+              count: filteredRules.length,
+              whitelist: whitelistCount,
+              blacklist: blacklistCount,
+            })}
+          </p>
+        </section>
+
+        {conflictingKeywords.length > 0 ? (
+          <section className="border-l-2 border-amber-500 px-4 py-2">
+            <p className="break-words text-sm text-muted-foreground">
+              {t("ruleConflictWarning", {
+                keywords: conflictingKeywords.join(", "),
+              })}
+            </p>
+          </section>
+        ) : null}
+
         <section aria-labelledby="rules-list-title">
           <div className="mb-3 flex items-center justify-between gap-4">
             <h2 className="text-sm font-semibold" id="rules-list-title">
               {t("rules")}
             </h2>
             <span className="text-sm tabular-nums text-muted-foreground">
-              {t("ruleCount", { count: rules.length })}
+              {t("ruleCount", { count: filteredRules.length })}
             </span>
           </div>
           <div className="overflow-x-auto rounded-md border">
@@ -290,8 +398,10 @@ export function RulesPage() {
                   <RuleTableMessage message={t("loadingRules")} />
                 ) : rules.length === 0 ? (
                   <RuleTableMessage message={t("noRules")} />
+                ) : filteredRules.length === 0 ? (
+                  <RuleTableMessage message={t("noMatches")} />
                 ) : (
-                  rules.map((rule) => (
+                  filteredRules.map((rule) => (
                     <TableRow key={rule.id}>
                       <TableCell className="max-w-md font-medium">
                         <span className="block truncate" title={rule.keyword}>

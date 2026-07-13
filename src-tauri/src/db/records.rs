@@ -18,6 +18,14 @@ pub struct HistoryQuery {
     pub page_size: u32,
     pub sort_by: String,
     pub sort_order: String,
+    #[serde(default)]
+    pub search: String,
+    #[serde(default)]
+    pub item_type: Option<String>,
+    #[serde(default)]
+    pub matched_by_rule: Option<bool>,
+    #[serde(default)]
+    pub date_range: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -34,6 +42,7 @@ pub struct CleanRecord {
 pub struct CleanRecordPage {
     pub records: Vec<CleanRecord>,
     pub total: u64,
+    pub overall_total: u64,
     pub page: u32,
     pub page_size: u32,
 }
@@ -116,10 +125,40 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
         "desc" => "DESC",
         _ => bail!("history sort_order must be asc or desc"),
     };
-    let total = connection
+    let search = history_search_pattern(&query.search);
+    let item_type = match query.item_type.as_deref() {
+        None => None,
+        Some(value @ ("recent_file" | "frequent_folder")) => Some(value),
+        Some(value) => bail!("unsupported history item_type: {value}"),
+    };
+    let matched_by_rule = query.matched_by_rule.map(i64::from);
+    let date_modifier = match query.date_range.as_deref() {
+        None => None,
+        Some("7d") => Some("-6 days"),
+        Some("30d") => Some("-29 days"),
+        Some(value) => bail!("unsupported history date_range: {value}"),
+    };
+    const FILTERS: &str = "WHERE (?1 IS NULL OR item_path LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                    OR COALESCE(rule_keyword, '') LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
+           AND (?2 IS NULL OR item_type = ?2)
+           AND (?3 IS NULL
+                OR (?3 = 1 AND rule_keyword IS NOT NULL)
+                OR (?3 = 0 AND rule_keyword IS NULL))
+           AND (?4 IS NULL
+                OR cleaned_at >= datetime('now', 'localtime', 'start of day', ?4, 'utc'))";
+    let count_sql = format!("SELECT COUNT(*) FROM clean_records {FILTERS}");
+    let overall_total = connection
         .query_row("SELECT COUNT(*) FROM clean_records", [], |row| {
             row.get::<_, i64>(0)
         })
+        .context("failed to count all clean records")?;
+    let overall_total = u64::try_from(overall_total).context("clean record count is negative")?;
+    let total = connection
+        .query_row(
+            &count_sql,
+            params![search.as_deref(), item_type, matched_by_rule, date_modifier],
+            |row| row.get::<_, i64>(0),
+        )
         .context("failed to count clean records")?;
     let total = u64::try_from(total).context("clean record count is negative")?;
     let offset = i64::try_from(u64::from(query.page - 1) * u64::from(query.page_size))
@@ -127,23 +166,34 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
     let sql = format!(
         "SELECT id, item_path, item_type, rule_id, rule_keyword, cleaned_at
          FROM clean_records
+         {FILTERS}
          ORDER BY {sort_column} {sort_order}, id {sort_order}
-         LIMIT ?1 OFFSET ?2"
+         LIMIT ?5 OFFSET ?6"
     );
     let mut statement = connection
         .prepare(&sql)
         .context("failed to prepare clean record query")?;
     let records = statement
-        .query_map(params![i64::from(query.page_size), offset], |row| {
-            Ok(CleanRecord {
-                id: row.get(0)?,
-                item_path: row.get(1)?,
-                item_type: row.get(2)?,
-                rule_id: row.get(3)?,
-                rule_keyword: row.get(4)?,
-                cleaned_at: row.get(5)?,
-            })
-        })
+        .query_map(
+            params![
+                search.as_deref(),
+                item_type,
+                matched_by_rule,
+                date_modifier,
+                i64::from(query.page_size),
+                offset
+            ],
+            |row| {
+                Ok(CleanRecord {
+                    id: row.get(0)?,
+                    item_path: row.get(1)?,
+                    item_type: row.get(2)?,
+                    rule_id: row.get(3)?,
+                    rule_keyword: row.get(4)?,
+                    cleaned_at: row.get(5)?,
+                })
+            },
+        )
         .context("failed to query clean records")?
         .collect::<rusqlite::Result<Vec<_>>>()
         .context("failed to read clean records")?;
@@ -151,9 +201,22 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
     Ok(CleanRecordPage {
         records,
         total,
+        overall_total,
         page: query.page,
         page_size: query.page_size,
     })
+}
+
+fn history_search_pattern(search: &str) -> Option<String> {
+    let search = search.trim();
+    if search.is_empty() {
+        return None;
+    }
+    let escaped = search
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    Some(format!("%{escaped}%"))
 }
 
 pub fn clear(connection: &Connection) -> Result<()> {
@@ -377,6 +440,7 @@ mod tests {
                 page_size: 2,
                 sort_by: "item_path".to_string(),
                 sort_order: "asc".to_string(),
+                ..history_query()
             },
         )
         .unwrap();
@@ -387,6 +451,7 @@ mod tests {
                 page_size: 2,
                 sort_by: "item_path".to_string(),
                 sort_order: "asc".to_string(),
+                ..history_query()
             },
         )
         .unwrap();
@@ -408,6 +473,109 @@ mod tests {
                 page_size: 20,
                 sort_by: "id; DROP TABLE clean_records".to_string(),
                 sort_order: "asc".to_string(),
+                ..history_query()
+            }
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn filters_history_before_counting_sorting_and_pagination() {
+        let connection = test_connection();
+        for (path, item_type, keyword, age) in [
+            (
+                r"C:\Temp\100% cache.bin",
+                "recent_file",
+                Some("Cache"),
+                "0 days",
+            ),
+            (r"C:\Temp\manual.txt", "recent_file", None, "0 days"),
+            (r"C:\Archive", "frequent_folder", None, "-10 days"),
+            (r"C:\Old\report.txt", "recent_file", Some("Old"), "-40 days"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO clean_records
+                     (item_path, item_type, rule_keyword, cleaned_at)
+                     VALUES (?1, ?2, ?3, datetime('now', ?4))",
+                    params![path, item_type, keyword, age],
+                )
+                .unwrap();
+        }
+
+        let literal_wildcard = list(
+            &connection,
+            HistoryQuery {
+                search: "100%".to_string(),
+                ..history_query()
+            },
+        )
+        .unwrap();
+        assert_eq!(literal_wildcard.total, 1);
+        assert_eq!(literal_wildcard.overall_total, 4);
+        assert_eq!(
+            literal_wildcard.records[0].rule_keyword.as_deref(),
+            Some("Cache")
+        );
+
+        let targeted_recent = list(
+            &connection,
+            HistoryQuery {
+                item_type: Some("recent_file".to_string()),
+                matched_by_rule: Some(true),
+                date_range: Some("30d".to_string()),
+                ..history_query()
+            },
+        )
+        .unwrap();
+        assert_eq!(targeted_recent.total, 1);
+        assert_eq!(
+            targeted_recent.records[0].item_path,
+            r"C:\Temp\100% cache.bin"
+        );
+
+        let manual_first = list(
+            &connection,
+            HistoryQuery {
+                page_size: 1,
+                sort_by: "item_path".to_string(),
+                sort_order: "asc".to_string(),
+                matched_by_rule: Some(false),
+                date_range: Some("30d".to_string()),
+                ..history_query()
+            },
+        )
+        .unwrap();
+        let manual_second = list(
+            &connection,
+            HistoryQuery {
+                page: 2,
+                page_size: 1,
+                sort_by: "item_path".to_string(),
+                sort_order: "asc".to_string(),
+                matched_by_rule: Some(false),
+                date_range: Some("30d".to_string()),
+                ..history_query()
+            },
+        )
+        .unwrap();
+        assert_eq!(manual_first.total, 2);
+        assert_eq!(manual_first.records[0].item_path, r"C:\Archive");
+        assert_eq!(manual_second.records[0].item_path, r"C:\Temp\manual.txt");
+
+        assert!(list(
+            &connection,
+            HistoryQuery {
+                item_type: Some("invalid".to_string()),
+                ..history_query()
+            }
+        )
+        .is_err());
+        assert!(list(
+            &connection,
+            HistoryQuery {
+                date_range: Some("forever".to_string()),
+                ..history_query()
             }
         )
         .is_err());
@@ -542,6 +710,19 @@ mod tests {
             item_type: item_type.to_string(),
             rule_id,
             rule_keyword: rule_keyword.map(str::to_string),
+        }
+    }
+
+    fn history_query() -> HistoryQuery {
+        HistoryQuery {
+            page: 1,
+            page_size: 20,
+            sort_by: "cleaned_at".to_string(),
+            sort_order: "desc".to_string(),
+            search: String::new(),
+            item_type: None,
+            matched_by_rule: None,
+            date_range: None,
         }
     }
 

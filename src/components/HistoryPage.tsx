@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  Search,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -38,6 +39,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -67,6 +69,7 @@ interface CleanRecord {
 interface CleanRecordPage {
   records: CleanRecord[];
   total: number;
+  overall_total: number;
   page: number;
   page_size: number;
 }
@@ -85,6 +88,7 @@ export function HistoryPage() {
   const { t } = useI18n();
   const [records, setRecords] = useState<CleanRecord[]>([]);
   const [total, setTotal] = useState(0);
+  const [overallTotal, setOverallTotal] = useState(0);
   const [database, setDatabase] = useState<DatabaseStatus | null>(null);
   const [privacyActive, setPrivacyActive] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -98,6 +102,14 @@ export function HistoryPage() {
   const [sorting, setSorting] = useState<SortingState>([
     { id: "cleaned_at", desc: true },
   ]);
+  const [search, setSearch] = useState("");
+  const [itemType, setItemType] = useState<
+    "all" | CleanRecord["item_type"]
+  >("all");
+  const [ruleSource, setRuleSource] = useState<"all" | "manual" | "matched">(
+    "all",
+  );
+  const [dateRange, setDateRange] = useState<"all" | "7d" | "30d">("all");
   const requestId = useRef(0);
 
   const columns = useMemo<ColumnDef<CleanRecord>[]>(
@@ -153,6 +165,7 @@ export function HistoryPage() {
       if (!databaseStatus.available) {
         setRecords([]);
         setTotal(0);
+        setOverallTotal(0);
         return;
       }
       const result = await invoke<CleanRecordPage>("get_clean_records", {
@@ -161,11 +174,17 @@ export function HistoryPage() {
           page_size: pagination.pageSize,
           sort_by: sortingRule.id,
           sort_order: sortingRule.desc ? "desc" : "asc",
+          search,
+          item_type: itemType === "all" ? null : itemType,
+          matched_by_rule:
+            ruleSource === "all" ? null : ruleSource === "matched",
+          date_range: dateRange === "all" ? null : dateRange,
         },
       });
       if (request !== requestId.current) {
         return;
       }
+      setOverallTotal(result.overall_total);
       const lastPageIndex = Math.max(
         0,
         Math.ceil(result.total / pagination.pageSize) - 1,
@@ -184,13 +203,23 @@ export function HistoryPage() {
       }
       setRecords([]);
       setTotal(0);
+      setOverallTotal(0);
       setError(errorMessage(loadError));
     } finally {
       if (request === requestId.current) {
         setLoading(false);
       }
     }
-  }, [pagination.pageIndex, pagination.pageSize, sortingRule.desc, sortingRule.id]);
+  }, [
+    dateRange,
+    itemType,
+    pagination.pageIndex,
+    pagination.pageSize,
+    ruleSource,
+    search,
+    sortingRule.desc,
+    sortingRule.id,
+  ]);
 
   useEffect(() => {
     void loadRecords();
@@ -219,6 +248,7 @@ export function HistoryPage() {
       setClearOpen(false);
       setRecords([]);
       setTotal(0);
+      setOverallTotal(0);
       setPagination((current) => ({ ...current, pageIndex: 0 }));
       toast.success(t("historyCleared"));
     } catch (clearError) {
@@ -232,7 +262,7 @@ export function HistoryPage() {
   const clearDisabled =
     loading ||
     clearing ||
-    total === 0 ||
+    overallTotal === 0 ||
     database?.available !== true ||
     privacyActive;
 
@@ -307,6 +337,75 @@ export function HistoryPage() {
           </section>
         ) : null}
 
+        <section className="grid gap-3" aria-label={t("searchHistory")}>
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem_12rem_10rem]">
+            <label className="relative min-w-0">
+              <span className="sr-only">{t("searchHistory")}</span>
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPagination((current) => ({ ...current, pageIndex: 0 }));
+                }}
+                placeholder={t("searchHistory")}
+                type="search"
+                value={search}
+              />
+            </label>
+            <Select
+              onValueChange={(value) => {
+                setItemType(value as "all" | CleanRecord["item_type"]);
+                setPagination((current) => ({ ...current, pageIndex: 0 }));
+              }}
+              value={itemType}
+            >
+              <SelectTrigger aria-label={t("type")} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("all")}</SelectItem>
+                <SelectItem value="recent_file">{t("recentFile")}</SelectItem>
+                <SelectItem value="frequent_folder">
+                  {t("frequentFolder")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              onValueChange={(value) => {
+                setRuleSource(value as "all" | "manual" | "matched");
+                setPagination((current) => ({ ...current, pageIndex: 0 }));
+              }}
+              value={ruleSource}
+            >
+              <SelectTrigger aria-label={t("sourceRule")} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("all")}</SelectItem>
+                <SelectItem value="manual">{t("manualCleanup")}</SelectItem>
+                <SelectItem value="matched">{t("ruleMatched")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              onValueChange={(value) => {
+                setDateRange(value as "all" | "7d" | "30d");
+                setPagination((current) => ({ ...current, pageIndex: 0 }));
+              }}
+              value={dateRange}
+            >
+              <SelectTrigger aria-label={t("dateRange")} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("all")}</SelectItem>
+                <SelectItem value="7d">{t("last7Days")}</SelectItem>
+                <SelectItem value="30d">{t("last30Days")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </section>
+
         <section aria-labelledby="history-list-title" className="min-w-0">
           <div className="mb-3 flex items-center justify-between gap-4">
             <h2 className="text-sm font-semibold" id="history-list-title">
@@ -340,7 +439,16 @@ export function HistoryPage() {
                 {loading ? (
                   <HistoryTableMessage message={t("loadingHistory")} />
                 ) : records.length === 0 ? (
-                  <HistoryTableMessage message={t("noHistory")} />
+                  <HistoryTableMessage
+                    message={
+                      search ||
+                      itemType !== "all" ||
+                      ruleSource !== "all" ||
+                      dateRange !== "all"
+                        ? t("noMatches")
+                        : t("noHistory")
+                    }
+                  />
                 ) : (
                   table.getRowModel().rows.map((row) => (
                     <TableRow key={row.id}>
@@ -408,7 +516,7 @@ export function HistoryPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>{t("clearHistoryQuestion")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("clearHistoryDescription", { count: total })}
+              {t("clearHistoryDescription", { count: overallTotal })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
