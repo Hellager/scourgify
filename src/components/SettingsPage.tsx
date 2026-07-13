@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Controller, type Control, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Save } from "lucide-react";
+import { LoaderCircle, Play, Save } from "lucide-react";
 import { toast } from "sonner";
 import packageJson from "../../package.json";
 import { PageHeader, useAppShell } from "@/components/AppShell";
@@ -17,7 +17,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { configSchema, defaultConfig, type ConfigForm } from "@/lib/config";
+import {
+  type AutoCleanSchedule,
+  configSchema,
+  defaultConfig,
+  type ConfigForm,
+} from "@/lib/config";
+import {
+  type AutoCleanFinished,
+  AUTO_CLEAN_UPDATED_EVENT,
+} from "@/lib/app-events";
 import { useI18n } from "@/lib/i18n";
 import { requestNotificationPermission } from "@/lib/notifications";
 
@@ -45,11 +54,20 @@ type PrivacyState =
   | "ActiveFull"
   | { ActivePartial: { recent: boolean; frequent: boolean } };
 
+interface AutoCleanResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  section_errors: number;
+  history_errors: number;
+}
+
 export function SettingsPage() {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const { setConfig: setShellConfig } = useAppShell();
   const [loading, setLoading] = useState(true);
   const [privacyActive, setPrivacyActive] = useState(false);
+  const [runningAutoClean, setRunningAutoClean] = useState(false);
   const originalVisibility = useRef<QaVisibility | null>(null);
   const {
     control,
@@ -65,6 +83,8 @@ export function SettingsPage() {
   });
   const notificationsEnabled = watch("notifications_enabled");
   const notifyOperationComplete = watch("notify_operation_complete");
+  const autoCleanSchedule = watch("auto_clean");
+  const autoCleanLastRun = watch("auto_clean_last_run");
 
   useEffect(() => {
     let active = true;
@@ -98,6 +118,76 @@ export function SettingsPage() {
       active = false;
     };
   }, [reset]);
+
+  useEffect(() => {
+    const updateLastRun = (event: Event) => {
+      const { completed_at } = (event as CustomEvent<AutoCleanFinished>).detail;
+      setValue("auto_clean_last_run", completed_at, { shouldDirty: false });
+    };
+    window.addEventListener(AUTO_CLEAN_UPDATED_EVENT, updateLastRun);
+    return () =>
+      window.removeEventListener(AUTO_CLEAN_UPDATED_EVENT, updateLastRun);
+  }, [setValue]);
+
+  const updateAutoCleanSchedule = (schedule: AutoCleanSchedule) => {
+    setValue("auto_clean", schedule, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  };
+
+  const setAutoCleanEnabled = (enabled: boolean) => {
+    updateAutoCleanSchedule(
+      enabled ? { kind: "every_hours", hours: 6 } : { kind: "disabled" },
+    );
+  };
+
+  const setAutoCleanMode = (
+    kind: Exclude<AutoCleanSchedule["kind"], "disabled">,
+  ) => {
+    if (kind === "on_startup") {
+      updateAutoCleanSchedule({ kind });
+    } else if (kind === "every_hours") {
+      updateAutoCleanSchedule({
+        kind,
+        hours: autoCleanSchedule.kind === kind ? autoCleanSchedule.hours : 6,
+      });
+    } else {
+      updateAutoCleanSchedule({
+        kind,
+        hour: autoCleanSchedule.kind === kind ? autoCleanSchedule.hour : 8,
+        minute: autoCleanSchedule.kind === kind ? autoCleanSchedule.minute : 0,
+      });
+    }
+  };
+
+  const runAutoClean = async () => {
+    setRunningAutoClean(true);
+    try {
+      const result = await invoke<AutoCleanResult>("run_auto_clean_now");
+      if (result.failed || result.section_errors || result.history_errors) {
+        toast.warning(
+          t("autoCleanCompletedWithIssues", {
+            succeeded: result.succeeded,
+            failed: result.failed,
+            sectionErrors: result.section_errors,
+            historyErrors: result.history_errors,
+          }),
+        );
+      } else {
+        toast.success(
+          t("autoCleanCompleted", {
+            succeeded: result.succeeded,
+            total: result.total,
+          }),
+        );
+      }
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setRunningAutoClean(false);
+    }
+  };
 
   const updateVisibility = async (qaType: VisibilityQaType, visible: boolean) => {
     const fieldName =
@@ -255,6 +345,118 @@ export function SettingsPage() {
               name: "privacy_mode_cleanup_links",
             }}
           />
+        </Section>
+
+        <Section title={t("autoClean")}>
+          <label className="flex items-center justify-between gap-4 py-3">
+            <span className="text-sm">{t("autoCleanEnabled")}</span>
+            <Switch
+              checked={autoCleanSchedule.kind !== "disabled"}
+              disabled={loading || formState.isSubmitting}
+              onCheckedChange={setAutoCleanEnabled}
+            />
+          </label>
+
+          {autoCleanSchedule.kind !== "disabled" ? (
+            <>
+              <label className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center">
+                <span className="text-sm">{t("autoCleanSchedule")}</span>
+                <Select
+                  onValueChange={(value) =>
+                    setAutoCleanMode(
+                      value as Exclude<AutoCleanSchedule["kind"], "disabled">,
+                    )
+                  }
+                  value={autoCleanSchedule.kind}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="on_startup">
+                      {t("autoCleanOnStartup")}
+                    </SelectItem>
+                    <SelectItem value="every_hours">
+                      {t("autoCleanEveryHours")}
+                    </SelectItem>
+                    <SelectItem value="daily_at">
+                      {t("autoCleanDailyAt")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+
+              {autoCleanSchedule.kind === "every_hours" ? (
+                <label className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center">
+                  <span className="text-sm">{t("autoCleanInterval")}</span>
+                  <Input
+                    max={168}
+                    min={1}
+                    onChange={(event) => {
+                      const hours = event.currentTarget.valueAsNumber;
+                      if (!Number.isNaN(hours)) {
+                        updateAutoCleanSchedule({ kind: "every_hours", hours });
+                      }
+                    }}
+                    type="number"
+                    value={autoCleanSchedule.hours}
+                  />
+                </label>
+              ) : null}
+
+              {autoCleanSchedule.kind === "daily_at" ? (
+                <label className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center">
+                  <span className="text-sm">{t("autoCleanTime")}</span>
+                  <Input
+                    onChange={(event) => {
+                      const [hour, minute] = event.currentTarget.value
+                        .split(":")
+                        .map(Number);
+                      if (Number.isInteger(hour) && Number.isInteger(minute)) {
+                        updateAutoCleanSchedule({ kind: "daily_at", hour, minute });
+                      }
+                    }}
+                    type="time"
+                    value={`${String(autoCleanSchedule.hour).padStart(2, "0")}:${String(autoCleanSchedule.minute).padStart(2, "0")}`}
+                  />
+                </label>
+              ) : null}
+            </>
+          ) : null}
+
+          {formState.errors.auto_clean ? (
+            <p className="py-2 text-sm text-destructive">
+              {t("autoCleanInvalidSchedule")}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <span>
+              <span className="block text-sm">{t("autoCleanLastRun")}</span>
+              <span className="block text-xs text-muted-foreground">
+                {formatLastRun(
+                  autoCleanLastRun,
+                  language,
+                  t("autoCleanNever"),
+                )}
+              </span>
+            </span>
+            <Button
+              className="min-w-36"
+              disabled={loading || runningAutoClean || privacyActive}
+              onClick={() => void runAutoClean()}
+              title={privacyActive ? t("privacyWriteDisabled") : undefined}
+              type="button"
+              variant="outline"
+            >
+              {runningAutoClean ? (
+                <LoaderCircle className="animate-spin" />
+              ) : (
+                <Play />
+              )}
+              {t(runningAutoClean ? "autoCleanRunning" : "autoCleanRunNow")}
+            </Button>
+          </div>
         </Section>
 
         <Section title={t("appearance")}>
@@ -502,4 +704,17 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function formatLastRun(value: string | null, language: string, fallback: string) {
+  if (!value) {
+    return fallback;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? fallback
+    : new Intl.DateTimeFormat(language, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(date);
 }

@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
   Gauge,
@@ -38,8 +39,12 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import {
+  type AutoCleanFinished,
+  AUTO_CLEAN_UPDATED_EVENT,
   dispatchAppEvent,
   OPEN_CONFIG_DRAWER_EVENT,
+  REFRESH_DASHBOARD_EVENT,
+  REFRESH_HISTORY_EVENT,
 } from "@/lib/app-events";
 import {
   configSchema,
@@ -66,6 +71,8 @@ type PrivacyState =
   | "ActiveFull"
   | { ActivePartial: { recent: boolean; frequent: boolean } };
 
+const AUTO_CLEAN_FINISHED_EVENT = "auto-clean-finished";
+
 const AppShellContext = createContext<AppShellContextValue | null>(null);
 
 export function AppShell({ dashboard }: { dashboard: ReactNode }) {
@@ -87,6 +94,25 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
       .catch((error) =>
         toast.error(error instanceof Error ? error.message : String(error)),
       );
+  }, []);
+
+  useEffect(() => {
+    const unlisten = listen<AutoCleanFinished>(
+      AUTO_CLEAN_FINISHED_EVENT,
+      ({ payload }) => {
+        setConfig((current) => ({
+          ...current,
+          auto_clean_last_run: payload.completed_at,
+        }));
+        dispatchAppEvent(AUTO_CLEAN_UPDATED_EVENT, payload);
+        dispatchAppEvent(REFRESH_DASHBOARD_EVENT);
+        dispatchAppEvent(REFRESH_HISTORY_EVENT);
+      },
+    );
+
+    return () => {
+      unlisten.then((cleanup) => cleanup());
+    };
   }, []);
 
   useEffect(() => {

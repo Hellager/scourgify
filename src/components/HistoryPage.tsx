@@ -60,6 +60,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { type I18nKey, useI18n } from "@/lib/i18n";
+import { REFRESH_HISTORY_EVENT } from "@/lib/app-events";
 
 interface CleanRecord {
   id: number;
@@ -225,6 +226,13 @@ export function HistoryPage() {
 
   useEffect(() => {
     void loadRecords();
+  }, [loadRecords]);
+
+  useEffect(() => {
+    const refreshHistory = () => void loadRecords();
+    window.addEventListener(REFRESH_HISTORY_EVENT, refreshHistory);
+    return () =>
+      window.removeEventListener(REFRESH_HISTORY_EVENT, refreshHistory);
   }, [loadRecords]);
 
   const table = useReactTable({
