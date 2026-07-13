@@ -2,12 +2,18 @@ use std::path::PathBuf;
 use tauri::State;
 
 use crate::{
+    db::{DatabaseStatus, DbState},
     privacy::{PrivacyManager, PrivacyModeState},
     quick_access::{self, QaBatchResult, QaCounts, QaItem, QaRestoreResult, QaVisibility},
 };
 
 const PRIVACY_WRITE_ERROR: &str =
     "Privacy mode is active; Quick Access write operations are disabled.";
+
+#[tauri::command]
+pub(crate) fn get_database_status(database: State<'_, DbState>) -> DatabaseStatus {
+    database.status()
+}
 
 #[tauri::command]
 pub(crate) fn list_qa_items(qa_type: String) -> Result<Vec<QaItem>, String> {

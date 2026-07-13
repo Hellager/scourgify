@@ -4,6 +4,7 @@ compile_error!("Scourgify is Windows-only because wincent targets Windows Quick 
 mod alert;
 mod commands;
 mod config;
+mod db;
 mod i18n;
 mod notifier;
 mod privacy;
@@ -57,6 +58,7 @@ pub fn run() {
             privacy_enter,
             privacy_exit,
             privacy_state,
+            commands::get_database_status,
             commands::list_qa_items,
             commands::get_qa_counts,
             commands::pin_qa_folder,
@@ -70,6 +72,7 @@ pub fn run() {
         .setup(|app| {
             let mut config = config::load(app.handle())?;
             sync_auto_start_config(app.handle(), &mut config);
+            let database = db::initialize(app.handle());
             let privacy_manager = privacy::PrivacyManager::new(config.privacy_mode_cleanup_links);
             if config.privacy_mode {
                 match privacy_manager.enter() {
@@ -103,6 +106,7 @@ pub fn run() {
                 }
             }
             app.manage(Mutex::new(config));
+            app.manage(database);
             app.manage(privacy_manager);
             let mode = app.state::<Mutex<Config>>()
                 .lock()
