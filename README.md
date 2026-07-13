@@ -1,6 +1,6 @@
 # Scourgify
 
-Version: 0.3.0
+Version: 0.4.0
 
 Scourgify is a Windows-only tray app and dashboard for managing Windows Quick Access privacy and cleanup behavior. Its Quick Access integration uses `wincent`, which targets Windows Explorer Recent Files and Frequent Folders.
 
@@ -14,8 +14,15 @@ Scourgify is a Windows-only tray app and dashboard for managing Windows Quick Ac
 - Cmd/Ctrl+K command palette, appearance drawer, and configurable sidebar style.
 - Dashboard table sorting, pagination, and column visibility controls.
 - Dashboard overview chart and latest operation summary.
-- Five-language tray, About, Dashboard, Settings, drawer, and command UI: English, Simplified Chinese, Traditional Chinese, French, and Russian.
+- SQLite-backed whitelist and blacklist rules with protected and targeted item labels.
+- Rule-aware smart cleanup with an optional confirmation preview.
+- Paginated cleanup history with sorting, clearing, retention, and rule snapshots.
+- Cleanup totals, daily or weekly trends, and rule-hit rankings alongside the existing current-state charts.
+- Native localized relative times for recent-file interactions, with path-only fallback when metadata is unavailable.
+- Five-language UI: English, Simplified Chinese, Traditional Chinese, French, and Russian.
 - Runtime light/dark tray and window icons.
+
+Rules and cleanup history are stored in `scourgify.db` under the application config directory. Database initialization failures leave Quick Access browsing available while protected cleanup, rules, history, and statistics remain disabled.
 
 ## Build
 

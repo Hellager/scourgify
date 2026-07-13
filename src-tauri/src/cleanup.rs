@@ -17,6 +17,7 @@ pub struct ClassifiedItem {
     pub path: String,
     pub name: String,
     pub item_type: String,
+    pub last_interaction_at: Option<u64>,
     #[serde(rename = "match")]
     pub match_result: MatchResult,
 }
@@ -50,6 +51,7 @@ pub fn list_classified(database: &DbState, qa_type: &str) -> Result<Vec<Classifi
             path: item.path,
             name: item.name,
             item_type: item_type.to_string(),
+            last_interaction_at: item.last_interaction_at,
         })
         .collect())
 }

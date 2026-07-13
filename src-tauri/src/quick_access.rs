@@ -1,6 +1,9 @@
 use anyhow::{bail, Result};
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 use wincent::prelude::{
     AddOptions, BatchOptions, FrequentRestoreReport, QuickAccess, QuickAccessItem,
     QuickAccessManager, RecentRestoreReport, RemoveOptions, RestoreDefaultsOptions,
@@ -11,6 +14,7 @@ use wincent::prelude::{
 pub struct QaItem {
     pub path: String,
     pub name: String,
+    pub last_interaction_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,14 +63,49 @@ pub fn list_items(qa_type: &str) -> Result<Vec<QaItem>> {
     let manager = QuickAccessManager::new();
     let qa_type = parse_qa_type(qa_type)?;
     let items = get_items_logged(&manager, qa_type, "list")?;
+    let interaction_times = recent_interaction_times(&manager, qa_type);
 
     Ok(items
         .into_iter()
         .map(|path| QaItem {
             name: item_name(&path),
+            last_interaction_at: interaction_times.get(&path.to_lowercase()).copied(),
             path,
         })
         .collect())
+}
+
+const FILETIME_UNIX_EPOCH_OFFSET: u64 = 116_444_736_000_000_000;
+
+fn recent_interaction_times(
+    manager: &QuickAccessManager,
+    qa_type: QuickAccess,
+) -> HashMap<String, u64> {
+    if !matches!(qa_type, QuickAccess::RecentFiles) {
+        return HashMap::new();
+    }
+
+    match manager.get_recent_files_metadata() {
+        Ok(entries) => entries
+            .into_iter()
+            .filter_map(|entry| {
+                entry
+                    .last_interaction_filetime()
+                    .and_then(filetime_to_unix_ms)
+                    .map(|timestamp| (entry.path().to_lowercase(), timestamp))
+            })
+            .collect(),
+        Err(error) => {
+            log::warn!("wincent recent metadata unavailable; using path-only items: {error}");
+            HashMap::new()
+        }
+    }
+}
+
+fn filetime_to_unix_ms(filetime: u64) -> Option<u64> {
+    filetime
+        .checked_sub(FILETIME_UNIX_EPOCH_OFFSET)
+        .map(|ticks| ticks / 10_000)
 }
 
 pub fn get_counts() -> Result<QaCounts> {
@@ -472,5 +511,15 @@ mod tests {
     #[test]
     fn falls_back_to_path_when_name_is_unavailable() {
         assert_eq!(item_name(r"C:\"), r"C:\");
+    }
+
+    #[test]
+    fn converts_windows_filetime_to_unix_milliseconds() {
+        assert_eq!(filetime_to_unix_ms(FILETIME_UNIX_EPOCH_OFFSET), Some(0));
+        assert_eq!(
+            filetime_to_unix_ms(FILETIME_UNIX_EPOCH_OFFSET + 10_000),
+            Some(1)
+        );
+        assert_eq!(filetime_to_unix_ms(FILETIME_UNIX_EPOCH_OFFSET - 1), None);
     }
 }

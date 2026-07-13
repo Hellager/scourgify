@@ -137,6 +137,7 @@ interface QaItem {
   path: string;
   name: string;
   item_type: "recent_file" | "frequent_folder";
+  last_interaction_at: number | null;
   match: QaMatch;
 }
 
@@ -231,7 +232,7 @@ const emptyCounts: QaCounts = {
 const quickAccessChartColors = ["#2563eb", "#16a34a"];
 
 export function Dashboard() {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const [config, setConfig] = useState<ConfigForm>(defaultConfig);
   const [activeTab, setActiveTab] = useState<QaType>("recent");
   const [counts, setCounts] = useState<QaCounts>(emptyCounts);
@@ -348,6 +349,25 @@ export function Dashboard() {
           </span>
         ),
       },
+      ...(activeTab === "recent"
+        ? [
+            {
+              accessorKey: "last_interaction_at",
+              header: t("lastUsed"),
+              cell: ({ row }) => {
+                const timestamp = row.original.last_interaction_at;
+                return timestamp === null ? null : (
+                  <span
+                    className="whitespace-nowrap text-muted-foreground"
+                    title={new Date(timestamp).toLocaleString(language)}
+                  >
+                    {formatRelativeTime(timestamp, language)}
+                  </span>
+                );
+              },
+            },
+          ]
+        : []),
       {
         id: "match",
         accessorFn: (row) => row.match.status,
@@ -383,7 +403,7 @@ export function Dashboard() {
         ),
       },
     ],
-    [selectedPaths, t],
+    [activeTab, language, selectedPaths, t],
   );
 
   const table = useReactTable({
@@ -454,10 +474,9 @@ export function Dashboard() {
           await invoke<QaItem[]>("list_qa_items_classified", { qaType }),
         );
       } else {
-        const legacyItems = await invoke<Array<{ path: string; name: string }>>(
-          "list_qa_items",
-          { qaType },
-        );
+        const legacyItems = await invoke<
+          Array<Pick<QaItem, "path" | "name" | "last_interaction_at">>
+        >("list_qa_items", { qaType });
         setItems(
           legacyItems.map((item) => ({
             ...item,
@@ -1606,12 +1625,35 @@ function getColumnLabel(
 ) {
   const labels: Record<string, I18nKey> = {
     location: "location",
+    last_interaction_at: "lastUsed",
     match: "ruleMatch",
     name: "name",
     path: "path",
     type: "type",
   };
   return labels[columnId] ? t(labels[columnId]) : columnId;
+}
+
+function formatRelativeTime(timestamp: number, language: string) {
+  const divisions: Array<[number, Intl.RelativeTimeFormatUnit]> = [
+    [60, "second"],
+    [60, "minute"],
+    [24, "hour"],
+    [7, "day"],
+    [4.345, "week"],
+    [12, "month"],
+    [Number.POSITIVE_INFINITY, "year"],
+  ];
+  let value = (timestamp - Date.now()) / 1_000;
+  const formatter = new Intl.RelativeTimeFormat(language, { numeric: "auto" });
+
+  for (const [amount, unit] of divisions) {
+    if (Math.abs(value) < amount) {
+      return formatter.format(Math.round(value), unit);
+    }
+    value /= amount;
+  }
+  return "";
 }
 
 function toQaType(value: unknown): QaType {
