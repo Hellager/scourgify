@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, State};
 
 use crate::{
-    cleanup::{self, AutoCleanResult, AutoCleanState, ClassifiedItem},
+    cleanup::{self, AutoCleanResult, ClassifiedItem},
     config::Config,
     db::{
         records::{self, CleanRecordPage, HistoryQuery, Stats, StatsRange},
@@ -11,6 +11,7 @@ use crate::{
     },
     privacy::{PrivacyManager, PrivacyModeState},
     quick_access::{self, QaBatchResult, QaCounts, QaItem, QaRestoreResult, QaVisibility},
+    scheduler,
 };
 
 const PRIVACY_WRITE_ERROR: &str =
@@ -173,22 +174,8 @@ pub(crate) fn smart_clean(
 }
 
 #[tauri::command]
-pub(crate) fn run_auto_clean_now(
-    app: AppHandle,
-    database: State<'_, DbState>,
-    config: State<'_, Mutex<Config>>,
-    privacy: State<'_, PrivacyManager>,
-    auto_clean: State<'_, AutoCleanState>,
-) -> Result<AutoCleanResult, String> {
-    let config = config.lock().map_err(|error| error.to_string())?.clone();
-    cleanup::run_auto_clean(
-        &app,
-        database.inner(),
-        &config,
-        privacy.inner(),
-        auto_clean.inner(),
-    )
-    .map_err(|error| error.to_string())
+pub(crate) fn run_auto_clean_now(app: AppHandle) -> Result<AutoCleanResult, String> {
+    scheduler::run_now(&app).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

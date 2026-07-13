@@ -1,0 +1,377 @@
+use anyhow::{Context, Result};
+use chrono::{DateTime, Duration as ChronoDuration, Local, LocalResult, NaiveTime, TimeZone, Utc};
+use serde::Serialize;
+use std::{
+    sync::{
+        mpsc::{self, Receiver, RecvTimeoutError, Sender},
+        Mutex,
+    },
+    time::{Duration, Instant},
+};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
+
+use crate::{
+    cleanup::{self, AutoCleanResult, AutoCleanState},
+    config::{self, AutoCleanSchedule, Config},
+    db::DbState,
+    privacy::PrivacyManager,
+};
+
+pub const AUTO_CLEAN_FINISHED_EVENT: &str = "auto-clean-finished";
+
+const STARTUP_DELAY: Duration = Duration::from_secs(30);
+const ERROR_RETRY_DELAY: Duration = Duration::from_secs(60);
+
+pub struct AutoCleanScheduler {
+    sender: Sender<SchedulerMessage>,
+}
+
+impl AutoCleanScheduler {
+    pub fn start<R: Runtime>(app: AppHandle<R>) -> Result<Self> {
+        let initial_schedule = config_snapshot(&app)?.auto_clean;
+        let startup_deadline = matches!(initial_schedule, AutoCleanSchedule::OnStartup)
+            .then(|| Instant::now() + STARTUP_DELAY);
+        let (sender, receiver) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("scourgify-auto-clean".to_string())
+            .spawn(move || run_worker(app, receiver, startup_deadline))
+            .context("failed to start auto-clean scheduler")?;
+        Ok(Self { sender })
+    }
+
+    pub fn reschedule(&self) -> Result<()> {
+        self.sender
+            .send(SchedulerMessage::Reschedule)
+            .context("auto-clean scheduler is unavailable")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AutoCleanFinished {
+    pub completed_at: DateTime<Utc>,
+    pub total: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub section_errors: usize,
+    pub history_errors: usize,
+}
+
+pub fn run_now<R: Runtime>(app: &AppHandle<R>) -> Result<AutoCleanResult> {
+    let config = config_snapshot(app)?;
+    let database = app.state::<DbState>();
+    let privacy = app.state::<PrivacyManager>();
+    let auto_clean = app.state::<AutoCleanState>();
+    let result = cleanup::run_auto_clean(
+        app,
+        database.inner(),
+        &config,
+        privacy.inner(),
+        auto_clean.inner(),
+    )?;
+    record_completion(app, &result)?;
+    Ok(result)
+}
+
+fn run_worker<R: Runtime>(
+    app: AppHandle<R>,
+    receiver: Receiver<SchedulerMessage>,
+    mut startup_deadline: Option<Instant>,
+) {
+    let mut last_interval_attempt = None;
+
+    loop {
+        let config = match config_snapshot(&app) {
+            Ok(config) => config,
+            Err(error) => {
+                log::error!("failed to read auto-clean schedule: {error:#}");
+                match wait_for_next(&receiver, Some(ERROR_RETRY_DELAY)) {
+                    WaitOutcome::Run | WaitOutcome::Reschedule => continue,
+                    WaitOutcome::Stop => return,
+                }
+            }
+        };
+        if !matches!(config.auto_clean, AutoCleanSchedule::OnStartup) {
+            startup_deadline = None;
+        }
+        let delay = match next_delay(
+            &config.auto_clean,
+            config.auto_clean_last_run,
+            last_interval_attempt,
+            startup_deadline,
+            Utc::now(),
+            Instant::now(),
+        ) {
+            Ok(delay) => delay,
+            Err(error) => {
+                log::error!("failed to calculate auto-clean schedule: {error:#}");
+                match wait_for_next(&receiver, Some(ERROR_RETRY_DELAY)) {
+                    WaitOutcome::Run | WaitOutcome::Reschedule => continue,
+                    WaitOutcome::Stop => return,
+                }
+            }
+        };
+
+        match wait_for_next(&receiver, delay) {
+            WaitOutcome::Reschedule => continue,
+            WaitOutcome::Stop => return,
+            WaitOutcome::Run => {}
+        }
+
+        let current_schedule = match config_snapshot(&app) {
+            Ok(config) => config.auto_clean,
+            Err(error) => {
+                log::error!("failed to verify auto-clean schedule: {error:#}");
+                continue;
+            }
+        };
+        if current_schedule != config.auto_clean {
+            continue;
+        }
+        match config.auto_clean {
+            AutoCleanSchedule::OnStartup => startup_deadline = None,
+            AutoCleanSchedule::EveryHours { .. } => last_interval_attempt = Some(Utc::now()),
+            AutoCleanSchedule::Disabled | AutoCleanSchedule::DailyAt { .. } => {}
+        }
+
+        if let Err(error) = run_now(&app) {
+            log::warn!("scheduled auto-clean skipped or failed: {error:#}");
+        }
+    }
+}
+
+fn next_delay(
+    schedule: &AutoCleanSchedule,
+    last_run: Option<DateTime<Utc>>,
+    last_interval_attempt: Option<DateTime<Utc>>,
+    startup_deadline: Option<Instant>,
+    now_utc: DateTime<Utc>,
+    now_instant: Instant,
+) -> Result<Option<Duration>> {
+    match schedule {
+        AutoCleanSchedule::Disabled => Ok(None),
+        AutoCleanSchedule::OnStartup => {
+            Ok(startup_deadline.map(|deadline| deadline.saturating_duration_since(now_instant)))
+        }
+        AutoCleanSchedule::EveryHours { hours } => {
+            let next = next_interval_run(now_utc, last_run, last_interval_attempt, *hours);
+            Ok(Some(duration_until(now_utc, next)))
+        }
+        AutoCleanSchedule::DailyAt { hour, minute } => {
+            let local_now = now_utc.with_timezone(&Local);
+            let next = next_daily_run(&local_now, *hour, *minute)?;
+            Ok(Some(duration_until(now_utc, next)))
+        }
+    }
+}
+
+fn next_interval_run(
+    now: DateTime<Utc>,
+    last_run: Option<DateTime<Utc>>,
+    last_attempt: Option<DateTime<Utc>>,
+    hours: u32,
+) -> DateTime<Utc> {
+    let Some(anchor) = [last_run, last_attempt].into_iter().flatten().max() else {
+        return now + ChronoDuration::hours(i64::from(hours));
+    };
+    (anchor + ChronoDuration::hours(i64::from(hours))).max(now)
+}
+
+fn next_daily_run<Tz: TimeZone>(now: &DateTime<Tz>, hour: u8, minute: u8) -> Result<DateTime<Utc>> {
+    let time = NaiveTime::from_hms_opt(u32::from(hour), u32::from(minute), 0)
+        .context("invalid daily auto-clean time")?;
+    let now_utc = now.with_timezone(&Utc);
+    let timezone = now.timezone();
+    let mut date = now.date_naive();
+
+    for _ in 0..=366 {
+        let local = date.and_time(time);
+        let candidates = match timezone.from_local_datetime(&local) {
+            LocalResult::Single(value) => vec![value],
+            LocalResult::Ambiguous(first, second) => vec![first, second],
+            LocalResult::None => Vec::new(),
+        };
+        if let Some(next) = candidates
+            .into_iter()
+            .map(|value| value.with_timezone(&Utc))
+            .filter(|value| *value > now_utc)
+            .min()
+        {
+            return Ok(next);
+        }
+        date = date
+            .succ_opt()
+            .context("daily auto-clean date is out of range")?;
+    }
+
+    anyhow::bail!("no valid daily auto-clean time found")
+}
+
+fn duration_until(now: DateTime<Utc>, next: DateTime<Utc>) -> Duration {
+    next.signed_duration_since(now)
+        .to_std()
+        .unwrap_or(Duration::ZERO)
+}
+
+fn wait_for_next(receiver: &Receiver<SchedulerMessage>, delay: Option<Duration>) -> WaitOutcome {
+    match delay {
+        Some(delay) => match receiver.recv_timeout(delay) {
+            Ok(SchedulerMessage::Reschedule) => WaitOutcome::Reschedule,
+            Err(RecvTimeoutError::Timeout) => WaitOutcome::Run,
+            Err(RecvTimeoutError::Disconnected) => WaitOutcome::Stop,
+        },
+        None => match receiver.recv() {
+            Ok(SchedulerMessage::Reschedule) => WaitOutcome::Reschedule,
+            Err(_) => WaitOutcome::Stop,
+        },
+    }
+}
+
+fn record_completion<R: Runtime>(app: &AppHandle<R>, result: &AutoCleanResult) -> Result<()> {
+    let completed_at = Utc::now();
+    {
+        let state = app.state::<Mutex<Config>>();
+        let mut current = state
+            .lock()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        let mut next = current.clone();
+        next.auto_clean_last_run = Some(completed_at);
+        config::save(app, &next)?;
+        *current = next;
+    }
+
+    let event = AutoCleanFinished {
+        completed_at,
+        total: result.total,
+        succeeded: result.succeeded,
+        failed: result.failed,
+        section_errors: result.section_errors,
+        history_errors: result.history_errors,
+    };
+    if let Err(error) = app.emit(AUTO_CLEAN_FINISHED_EVENT, event) {
+        log::warn!("failed to emit auto-clean completion: {error}");
+    }
+    if let Some(scheduler) = app.try_state::<AutoCleanScheduler>() {
+        if let Err(error) = scheduler.reschedule() {
+            log::warn!("failed to reschedule auto-clean after completion: {error:#}");
+        }
+    }
+    Ok(())
+}
+
+fn config_snapshot<R: Runtime>(app: &AppHandle<R>) -> Result<Config> {
+    app.state::<Mutex<Config>>()
+        .lock()
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
+        .map(|config| config.clone())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SchedulerMessage {
+    Reschedule,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WaitOutcome {
+    Run,
+    Reschedule,
+    Stop,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{FixedOffset, TimeZone};
+
+    #[test]
+    fn interval_uses_last_run_or_attempt_and_catches_up_once() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 13, 12, 0, 0).unwrap();
+
+        assert_eq!(
+            next_interval_run(now, None, None, 6),
+            now + ChronoDuration::hours(6)
+        );
+        assert_eq!(
+            next_interval_run(now, Some(now - ChronoDuration::hours(8)), None, 6),
+            now
+        );
+        assert_eq!(
+            next_interval_run(
+                now,
+                Some(now - ChronoDuration::hours(8)),
+                Some(now - ChronoDuration::hours(1)),
+                6,
+            ),
+            now + ChronoDuration::hours(5)
+        );
+    }
+
+    #[test]
+    fn daily_schedule_uses_the_next_local_occurrence() {
+        let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
+        let before = timezone.with_ymd_and_hms(2026, 7, 13, 7, 30, 0).unwrap();
+        let after = timezone.with_ymd_and_hms(2026, 7, 13, 9, 30, 0).unwrap();
+
+        assert_eq!(
+            next_daily_run(&before, 8, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 7, 13, 0, 0, 0).unwrap()
+        );
+        assert_eq!(
+            next_daily_run(&after, 8, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 7, 14, 0, 0, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn disabled_and_startup_schedules_have_expected_waits() {
+        let now_utc = Utc.with_ymd_and_hms(2026, 7, 13, 12, 0, 0).unwrap();
+        let now_instant = Instant::now();
+
+        assert_eq!(
+            next_delay(
+                &AutoCleanSchedule::Disabled,
+                None,
+                None,
+                None,
+                now_utc,
+                now_instant,
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            next_delay(
+                &AutoCleanSchedule::OnStartup,
+                None,
+                None,
+                Some(now_instant + STARTUP_DELAY),
+                now_utc,
+                now_instant,
+            )
+            .unwrap(),
+            Some(STARTUP_DELAY)
+        );
+        assert_eq!(
+            next_delay(
+                &AutoCleanSchedule::OnStartup,
+                None,
+                None,
+                None,
+                now_utc,
+                now_instant,
+            )
+            .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn wake_message_interrupts_scheduled_wait() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(SchedulerMessage::Reschedule).unwrap();
+
+        assert_eq!(
+            wait_for_next(&receiver, Some(Duration::from_secs(60))),
+            WaitOutcome::Reschedule
+        );
+    }
+}

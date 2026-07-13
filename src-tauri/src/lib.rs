@@ -11,6 +11,7 @@ mod matcher;
 mod notifier;
 mod privacy;
 mod quick_access;
+mod scheduler;
 mod theme;
 mod tray;
 
@@ -22,6 +23,7 @@ use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 use config::{AppMode, Config};
 use cleanup::AutoCleanState;
 use privacy::{LockResult, PrivacyManager, PrivacyModeState};
+use scheduler::AutoCleanScheduler;
 
 const LANGUAGE_CHANGED_EVENT: &str = "language-changed";
 
@@ -125,6 +127,7 @@ pub fn run() {
             app.manage(database);
             app.manage(privacy_manager);
             app.manage(AutoCleanState::default());
+            app.manage(AutoCleanScheduler::start(app.handle().clone())?);
             let mode = app.state::<Mutex<Config>>()
                 .lock()
                 .map(|config| config.app_mode)
@@ -179,17 +182,16 @@ fn update_config(
         current_auto_start,
         current_language,
         current_history_retention,
-        current_auto_clean_last_run,
+        current_auto_clean,
     ) = {
         let config = config.lock().map_err(|error| error.to_string())?;
         (
             config.auto_start,
             config.language.clone(),
             config.history_retention,
-            config.auto_clean_last_run,
+            config.auto_clean.clone(),
         )
     };
-    next_config.auto_clean_last_run = current_auto_clean_last_run;
     if next_config.history_retention > 0
         && (current_history_retention == 0
             || next_config.history_retention < current_history_retention)
@@ -203,10 +205,18 @@ fn update_config(
     if current_auto_start != next_config.auto_start {
         set_auto_start_preference(&app, next_config.auto_start)?;
     }
-    config::save(&app, &next_config).map_err(|error| error.to_string())?;
     {
-        let mut config = config.lock().map_err(|error| error.to_string())?;
-        *config = next_config.clone();
+        let mut current = config.lock().map_err(|error| error.to_string())?;
+        next_config.auto_clean_last_run = current.auto_clean_last_run;
+        config::save(&app, &next_config).map_err(|error| error.to_string())?;
+        *current = next_config.clone();
+    }
+    if current_auto_clean != next_config.auto_clean {
+        if let Some(scheduler) = app.try_state::<AutoCleanScheduler>() {
+            if let Err(error) = scheduler.reschedule() {
+                log::warn!("failed to reschedule auto-clean after config update: {error:#}");
+            }
+        }
     }
     apply_window_strategy(&app, next_config.app_mode).map_err(|error| error.to_string())?;
     if current_language != next_config.language {
