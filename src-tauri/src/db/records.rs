@@ -69,6 +69,26 @@ pub struct Stats {
     pub rule_hits: Vec<RuleHitStat>,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+pub enum StatsRange {
+    #[serde(rename = "7d")]
+    Last7Days,
+    #[serde(rename = "30d")]
+    Last30Days,
+    #[serde(rename = "all")]
+    All,
+}
+
+impl StatsRange {
+    fn date_modifier(self) -> Option<&'static str> {
+        match self {
+            Self::Last7Days => Some("-6 days"),
+            Self::Last30Days => Some("-29 days"),
+            Self::All => None,
+        }
+    }
+}
+
 pub fn insert_batch(
     connection: &mut Connection,
     records: &[NewCleanRecord],
@@ -226,7 +246,7 @@ pub fn clear(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn stats(connection: &Connection) -> Result<Stats> {
+pub fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
     let (total, recent_files, frequent_folders) = connection
         .query_row(
             "SELECT COUNT(*),
@@ -244,37 +264,75 @@ pub fn stats(connection: &Connection) -> Result<Stats> {
         )
         .context("failed to count cleanup statistics")?;
 
+    let total = u64::try_from(total).context("cleanup total is negative")?;
+    let (daily_trend, weekly_trend) = if total == 0 {
+        (Vec::new(), Vec::new())
+    } else {
+        (
+            trend(connection, range, false, "daily cleanup trend")?,
+            trend(connection, range, true, "weekly cleanup trend")?,
+        )
+    };
+
     Ok(Stats {
-        total: u64::try_from(total).context("cleanup total is negative")?,
+        total,
         recent_files: u64::try_from(recent_files).context("recent file total is negative")?,
         frequent_folders: u64::try_from(frequent_folders)
             .context("frequent folder total is negative")?,
-        daily_trend: trend(
-            connection,
-            "date(cleaned_at, 'localtime')",
-            "daily cleanup trend",
-        )?,
-        weekly_trend: trend(
-            connection,
-            "date(cleaned_at, 'localtime', 'weekday 0', '-6 days')",
-            "weekly cleanup trend",
-        )?,
+        daily_trend,
+        weekly_trend,
         rule_hits: rule_hits(connection)?,
     })
 }
 
-fn trend(connection: &Connection, period_sql: &str, label: &str) -> Result<Vec<StatsTrendPoint>> {
-    let sql = format!(
-        "SELECT {period_sql} AS period, COUNT(*)
-         FROM clean_records
-         GROUP BY period
-         ORDER BY period"
-    );
+fn trend(
+    connection: &Connection,
+    range: StatsRange,
+    weekly: bool,
+    label: &str,
+) -> Result<Vec<StatsTrendPoint>> {
     let mut statement = connection
-        .prepare(&sql)
+        .prepare(
+            "WITH RECURSIVE
+             bounds(start_day, end_day) AS (
+                 SELECT
+                     COALESCE(
+                         CASE
+                             WHEN ?1 IS NULL THEN (
+                                 SELECT MIN(date(cleaned_at, 'localtime')) FROM clean_records
+                             )
+                             ELSE date('now', 'localtime', ?1)
+                         END,
+                         date('now', 'localtime')
+                     ),
+                     date('now', 'localtime')
+             ),
+             days(day) AS (
+                 SELECT start_day FROM bounds
+                 UNION ALL
+                 SELECT date(day, '+1 day')
+                 FROM days, bounds
+                 WHERE day < end_day
+             ),
+             record_days(day, count) AS (
+                 SELECT date(cleaned_at, 'localtime'), COUNT(*)
+                 FROM clean_records
+                 GROUP BY date(cleaned_at, 'localtime')
+             )
+             SELECT
+                 CASE
+                     WHEN ?2 = 1 THEN date(days.day, 'weekday 0', '-6 days')
+                     ELSE days.day
+                 END AS period,
+                 COALESCE(SUM(record_days.count), 0)
+             FROM days
+             LEFT JOIN record_days ON record_days.day = days.day
+             GROUP BY period
+             ORDER BY period",
+        )
         .with_context(|| format!("failed to prepare {label}"))?;
     let rows = statement
-        .query_map([], |row| {
+        .query_map(params![range.date_modifier(), weekly], |row| {
             let count = row.get::<_, i64>(1)?;
             Ok((row.get::<_, String>(0)?, count))
         })
@@ -663,7 +721,7 @@ mod tests {
                 .unwrap();
         }
 
-        let stats = stats(&connection).unwrap();
+        let stats = stats(&connection, StatsRange::All).unwrap();
 
         assert_eq!(stats.total, 4);
         assert_eq!(stats.recent_files, 2);
@@ -697,6 +755,79 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn fills_local_date_ranges_and_matches_history_boundaries() {
+        let connection = test_connection();
+        for (path, modifier) in [
+            (r"C:\today.txt", "+0 days"),
+            (r"C:\two-days-ago.txt", "-2 days"),
+            (r"C:\older.txt", "-40 days"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO clean_records (item_path, item_type, cleaned_at)
+                     VALUES (?1, 'recent_file',
+                             datetime('now', 'localtime', 'start of day', ?2, 'utc'))",
+                    params![path, modifier],
+                )
+                .unwrap();
+        }
+
+        let last_seven = stats(&connection, StatsRange::Last7Days).unwrap();
+        let last_thirty = stats(&connection, StatsRange::Last30Days).unwrap();
+        let all = stats(&connection, StatsRange::All).unwrap();
+        let mut query = history_query();
+        query.date_range = Some("7d".to_string());
+        let history = list(&connection, query).unwrap();
+        let earliest_local_day = connection
+            .query_row(
+                "SELECT MIN(date(cleaned_at, 'localtime')) FROM clean_records",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+
+        assert_eq!(last_seven.daily_trend.len(), 7);
+        assert_eq!(last_thirty.daily_trend.len(), 30);
+        assert_eq!(all.daily_trend.first().unwrap().period, earliest_local_day);
+        assert!(last_seven.daily_trend.iter().any(|point| point.count == 0));
+        assert_eq!(
+            last_seven
+                .daily_trend
+                .iter()
+                .map(|point| point.count)
+                .sum::<u64>(),
+            history.total
+        );
+        assert_eq!(
+            last_seven
+                .weekly_trend
+                .iter()
+                .map(|point| point.count)
+                .sum::<u64>(),
+            history.total
+        );
+        assert!(last_thirty
+            .weekly_trend
+            .iter()
+            .any(|point| point.count == 0));
+        assert_eq!(
+            last_thirty
+                .daily_trend
+                .iter()
+                .map(|point| point.count)
+                .sum::<u64>(),
+            2
+        );
+        assert_eq!(
+            all.daily_trend.iter().map(|point| point.count).sum::<u64>(),
+            3
+        );
+        assert_eq!(last_seven.total, 3);
+        assert_eq!(last_thirty.total, 3);
+        assert_eq!(all.total, 3);
     }
 
     fn record(

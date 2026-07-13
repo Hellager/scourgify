@@ -5,7 +5,7 @@ use crate::{
     cleanup::{self, ClassifiedItem},
     config::Config,
     db::{
-        records::{self, CleanRecordPage, HistoryQuery, Stats},
+        records::{self, CleanRecordPage, HistoryQuery, Stats, StatsRange},
         rules::{self, NewRule, Rule},
         DatabaseStatus, DbState,
     },
@@ -169,9 +169,9 @@ pub(crate) fn clear_clean_records(
 }
 
 #[tauri::command]
-pub(crate) fn get_stats(database: State<'_, DbState>) -> Result<Stats, String> {
+pub(crate) fn get_stats(database: State<'_, DbState>, range: StatsRange) -> Result<Stats, String> {
     database
-        .with_connection(|connection| records::stats(connection))
+        .with_connection(|connection| records::stats(connection, range))
         .map_err(|error| error.to_string())
 }
 

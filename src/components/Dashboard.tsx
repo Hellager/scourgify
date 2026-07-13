@@ -186,6 +186,8 @@ interface Stats {
   rule_hits: RuleHitStat[];
 }
 
+type StatsRange = "7d" | "30d" | "all";
+
 type PrivacyState =
   | "Inactive"
   | "ActiveFull"
@@ -220,6 +222,7 @@ export function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [databaseAvailable, setDatabaseAvailable] = useState(true);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [statsRange, setStatsRange] = useState<StatsRange>("30d");
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [privacyActive, setPrivacyActive] = useState(false);
@@ -324,25 +327,21 @@ export function Dashboard() {
           </span>
         ),
       },
-      ...(activeTab === "recent"
-        ? [
-            {
-              accessorKey: "last_interaction_at",
-              header: t("lastUsed"),
-              cell: ({ row }) => {
-                const timestamp = row.original.last_interaction_at;
-                return timestamp === null ? null : (
-                  <span
-                    className="whitespace-nowrap text-muted-foreground"
-                    title={new Date(timestamp).toLocaleString(language)}
-                  >
-                    {formatRelativeTime(timestamp, language)}
-                  </span>
-                );
-              },
-            },
-          ]
-        : []),
+      {
+        accessorKey: "last_interaction_at",
+        header: t("lastUsed"),
+        cell: ({ row }) => {
+          const timestamp = row.original.last_interaction_at;
+          return timestamp === null ? null : (
+            <span
+              className="whitespace-nowrap text-muted-foreground"
+              title={new Date(timestamp).toLocaleString(language)}
+            >
+              {formatRelativeTime(timestamp, language)}
+            </span>
+          );
+        },
+      },
       {
         id: "match",
         accessorFn: (row) => row.match.status,
@@ -378,7 +377,7 @@ export function Dashboard() {
         ),
       },
     ],
-    [activeTab, language, selectedPaths, t],
+    [language, selectedPaths, t],
   );
 
   const table = useReactTable({
@@ -421,14 +420,14 @@ export function Dashboard() {
     setStatsLoading(true);
     setStatsError(null);
     try {
-      setStats(await invoke<Stats>("get_stats"));
+      setStats(await invoke<Stats>("get_stats", { range: statsRange }));
     } catch (error) {
       setStats(null);
       setStatsError(errorMessage(error));
     } finally {
       setStatsLoading(false);
     }
-  }, []);
+  }, [statsRange]);
 
   const loadItems = useCallback(async (qaType: QaType) => {
     setLoading(true);
@@ -475,7 +474,6 @@ export function Dashboard() {
       loadCounts(),
       syncPrivacyState(),
       loadItems(activeTab),
-      loadStats(),
     ]);
     if (countsResult.status === "rejected") {
       setCounts(emptyCounts);
@@ -484,11 +482,20 @@ export function Dashboard() {
     if (privacyResult.status === "rejected") {
       setPrivacyActive(false);
     }
-  }, [activeTab, loadCounts, loadItems, loadStats, syncPrivacyState]);
+  }, [activeTab, loadCounts, loadItems, syncPrivacyState]);
+
+  const refreshAll = useCallback(
+    () => Promise.all([refresh(), loadStats()]),
+    [loadStats, refresh],
+  );
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    void loadStats();
+  }, [loadStats]);
 
   useEffect(() => {
     setPagination((current) =>
@@ -497,13 +504,13 @@ export function Dashboard() {
   }, [activeTab, query, items.length]);
 
   useEffect(() => {
-    const refreshDashboard = () => void refresh();
+    const refreshDashboard = () => void refreshAll();
 
     window.addEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
     return () => {
       window.removeEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
     };
-  }, [refresh]);
+  }, [refreshAll]);
 
   useEffect(() => {
     updateDashboardSummary({
@@ -623,7 +630,7 @@ export function Dashboard() {
         }
       }
 
-      await refresh();
+      await refreshAll();
     } catch (error) {
       setLastOperationSummary(
         createFailedOperationSummary(action, currentLabel, error, t),
@@ -728,7 +735,7 @@ export function Dashboard() {
           <Button
             aria-label={t("refreshQuickAccess")}
             disabled={loading}
-            onClick={() => void refresh()}
+            onClick={() => void refreshAll()}
             size="icon-sm"
             type="button"
             variant="outline"
@@ -772,6 +779,8 @@ export function Dashboard() {
         available={databaseAvailable}
         error={statsError}
         loading={statsLoading}
+        onRangeChange={setStatsRange}
+        range={statsRange}
         stats={stats}
         t={t}
       />
@@ -1316,12 +1325,16 @@ function HistoryStats({
   available,
   error,
   loading,
+  onRangeChange,
+  range,
   stats,
   t,
 }: {
   available: boolean;
   error: string | null;
   loading: boolean;
+  onRangeChange: (range: StatsRange) => void;
+  range: StatsRange;
   stats: Stats | null;
   t: (key: I18nKey, values?: Record<string, string | number>) => string;
 }) {
@@ -1358,20 +1371,56 @@ function HistoryStats({
             <div className="min-w-0 rounded-md border bg-card p-4 text-card-foreground">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h3 className="text-sm font-semibold">{t("cleaningTrend")}</h3>
-                <div className="inline-flex rounded-md border p-0.5">
-                  {(["daily", "weekly"] as const).map((value) => (
-                    <Button
-                      aria-pressed={period === value}
-                      className="h-7 px-2.5"
-                      key={value}
-                      onClick={() => setPeriod(value)}
-                      size="sm"
-                      type="button"
-                      variant={period === value ? "secondary" : "ghost"}
-                    >
-                      {t(value)}
-                    </Button>
-                  ))}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div
+                    aria-label={t("dateRange")}
+                    className="inline-flex rounded-md border p-0.5"
+                    role="group"
+                  >
+                    {(["7d", "30d", "all"] as const).map((value) => {
+                      const label = t(
+                        value === "7d"
+                          ? "last7Days"
+                          : value === "30d"
+                            ? "last30Days"
+                            : "all",
+                      );
+                      return (
+                        <Button
+                          aria-label={label}
+                          aria-pressed={range === value}
+                          className="h-7 px-2.5"
+                          key={value}
+                          onClick={() => onRangeChange(value)}
+                          size="sm"
+                          title={label}
+                          type="button"
+                          variant={range === value ? "secondary" : "ghost"}
+                        >
+                          {value === "7d"
+                            ? "7D"
+                            : value === "30d"
+                              ? "30D"
+                              : t("all")}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                  <div className="inline-flex rounded-md border p-0.5">
+                    {(["daily", "weekly"] as const).map((value) => (
+                      <Button
+                        aria-pressed={period === value}
+                        className="h-7 px-2.5"
+                        key={value}
+                        onClick={() => setPeriod(value)}
+                        size="sm"
+                        type="button"
+                        variant={period === value ? "secondary" : "ghost"}
+                      >
+                        {t(value)}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
               </div>
               {trend && trend.length > 0 ? (

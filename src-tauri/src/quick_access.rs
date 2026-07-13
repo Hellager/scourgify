@@ -63,7 +63,7 @@ pub fn list_items(qa_type: &str) -> Result<Vec<QaItem>> {
     let manager = QuickAccessManager::new();
     let qa_type = parse_qa_type(qa_type)?;
     let items = get_items_logged(&manager, qa_type, "list")?;
-    let interaction_times = recent_interaction_times(&manager, qa_type);
+    let interaction_times = interaction_times(&manager, qa_type);
 
     Ok(items
         .into_iter()
@@ -77,15 +77,14 @@ pub fn list_items(qa_type: &str) -> Result<Vec<QaItem>> {
 
 const FILETIME_UNIX_EPOCH_OFFSET: u64 = 116_444_736_000_000_000;
 
-fn recent_interaction_times(
-    manager: &QuickAccessManager,
-    qa_type: QuickAccess,
-) -> HashMap<String, u64> {
-    if !matches!(qa_type, QuickAccess::RecentFiles) {
-        return HashMap::new();
-    }
+fn interaction_times(manager: &QuickAccessManager, qa_type: QuickAccess) -> HashMap<String, u64> {
+    let entries = match qa_type {
+        QuickAccess::RecentFiles => manager.get_recent_files_metadata(),
+        QuickAccess::FrequentFolders => manager.get_frequent_folders_metadata(),
+        _ => return HashMap::new(),
+    };
 
-    match manager.get_recent_files_metadata() {
+    match entries {
         Ok(entries) => entries
             .into_iter()
             .filter_map(|entry| {
@@ -96,7 +95,7 @@ fn recent_interaction_times(
             })
             .collect(),
         Err(error) => {
-            log::warn!("wincent recent metadata unavailable; using path-only items: {error}");
+            log::warn!("wincent metadata unavailable; using path-only items: {error}");
             HashMap::new()
         }
     }
