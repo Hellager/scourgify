@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use tauri::State;
 
 use crate::{
+    cleanup::{self, ClassifiedItem},
     db::{
         rules::{self, NewRule, Rule},
         DatabaseStatus, DbState,
@@ -81,6 +82,14 @@ pub(crate) fn list_qa_items(qa_type: String) -> Result<Vec<QaItem>, String> {
 }
 
 #[tauri::command]
+pub(crate) fn list_qa_items_classified(
+    database: State<'_, DbState>,
+    qa_type: String,
+) -> Result<Vec<ClassifiedItem>, String> {
+    cleanup::list_classified(database.inner(), &qa_type).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub(crate) fn get_qa_counts() -> Result<QaCounts, String> {
     quick_access::get_counts().map_err(|error| error.to_string())
 }
@@ -96,21 +105,33 @@ pub(crate) fn pin_qa_folder(
 
 #[tauri::command]
 pub(crate) fn remove_qa_items(
+    database: State<'_, DbState>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
     paths: Vec<String>,
 ) -> Result<QaBatchResult, String> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    quick_access::remove_items(&qa_type, paths).map_err(|error| error.to_string())
+    cleanup::remove_selected(database.inner(), &qa_type, paths).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub(crate) fn empty_qa_items(
+    database: State<'_, DbState>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
-) -> Result<(), String> {
+) -> Result<QaBatchResult, String> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    quick_access::empty_items(&qa_type).map_err(|error| error.to_string())
+    cleanup::empty_current(database.inner(), &qa_type).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn smart_clean(
+    database: State<'_, DbState>,
+    privacy: State<'_, PrivacyManager>,
+    qa_type: String,
+) -> Result<QaBatchResult, String> {
+    ensure_quick_access_write_allowed(privacy.state())?;
+    cleanup::smart_clean(database.inner(), &qa_type).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

@@ -2,12 +2,11 @@
 compile_error!("Scourgify is Windows-only because wincent targets Windows Quick Access.");
 
 mod alert;
+mod cleanup;
 mod commands;
 mod config;
 mod db;
 mod i18n;
-// The classified scan and cleanup pipeline will consume this in Day 4.
-#[allow(dead_code)]
 mod matcher;
 mod notifier;
 mod privacy;
@@ -68,10 +67,12 @@ pub fn run() {
             commands::remove_rule,
             commands::toggle_rule,
             commands::list_qa_items,
+            commands::list_qa_items_classified,
             commands::get_qa_counts,
             commands::pin_qa_folder,
             commands::remove_qa_items,
             commands::empty_qa_items,
+            commands::smart_clean,
             commands::restore_qa_defaults,
             commands::get_qa_visibility,
             commands::set_qa_visibility,

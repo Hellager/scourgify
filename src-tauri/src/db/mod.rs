@@ -7,6 +7,7 @@ use std::{
 };
 use tauri::{AppHandle, Manager, Runtime};
 
+pub(crate) mod records;
 pub(crate) mod rules;
 
 const DATABASE_FILE: &str = "scourgify.db";

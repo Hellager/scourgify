@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use wincent::prelude::{
-    AddOptions, BatchOptions, EmptyOptions, FrequentRestoreReport, QuickAccess, QuickAccessItem,
+    AddOptions, BatchOptions, FrequentRestoreReport, QuickAccess, QuickAccessItem,
     QuickAccessManager, RecentRestoreReport, RemoveOptions, RestoreDefaultsOptions,
     RestoreDefaultsReport, VisibilityOptions,
 };
@@ -20,11 +20,13 @@ pub struct QaCounts {
     pub all: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct QaBatchResult {
     pub total: usize,
     pub succeeded: Vec<String>,
     pub failed: Vec<QaBatchFailure>,
+    pub skipped_protected: Vec<String>,
+    pub history_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -125,25 +127,6 @@ pub fn remove_items(qa_type: &str, paths: Vec<String>) -> Result<QaBatchResult> 
     log_batch_result("remove", qa_type, &result);
 
     Ok(to_batch_result(result))
-}
-
-pub fn empty_items(qa_type: &str) -> Result<()> {
-    let qa_type = parse_write_qa_type(qa_type)?;
-    log::info!("wincent empty started qa_type={}", qa_name(qa_type));
-
-    match QuickAccessManager::new().empty_items(qa_type, EmptyOptions::new().refresh_explorer()) {
-        Ok(()) => {
-            log::info!("wincent empty succeeded qa_type={}", qa_name(qa_type));
-            Ok(())
-        }
-        Err(error) => {
-            log::error!(
-                "wincent empty failed qa_type={} error={error}",
-                qa_name(qa_type)
-            );
-            Err(error.into())
-        }
-    }
 }
 
 pub fn restore_defaults(qa_type: &str) -> Result<QaRestoreResult> {
@@ -268,6 +251,8 @@ fn to_batch_result(result: wincent::prelude::BatchResult) -> QaBatchResult {
                 error: failure.error().to_string(),
             })
             .collect(),
+        skipped_protected: Vec::new(),
+        history_error: None,
     }
 }
 
@@ -410,6 +395,8 @@ mod tests {
         assert_eq!(result.total, 0);
         assert!(result.succeeded.is_empty());
         assert!(result.failed.is_empty());
+        assert!(result.skipped_protected.is_empty());
+        assert_eq!(result.history_error, None);
     }
 
     #[test]
