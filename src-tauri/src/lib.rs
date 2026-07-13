@@ -75,6 +75,7 @@ pub fn run() {
             commands::smart_clean,
             commands::get_clean_records,
             commands::clear_clean_records,
+            commands::get_stats,
             commands::restore_qa_defaults,
             commands::get_qa_visibility,
             commands::set_qa_visibility,

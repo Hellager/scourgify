@@ -22,11 +22,16 @@ import {
   type VisibilityState,
 } from "@tanstack/react-table";
 import {
+  CartesianGrid,
   Cell,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
 import {
   ArrowDown,
@@ -185,6 +190,25 @@ interface QuickAccessChartItem {
   value: number;
 }
 
+interface StatsTrendPoint {
+  period: string;
+  count: number;
+}
+
+interface RuleHitStat {
+  keyword: string;
+  count: number;
+}
+
+interface Stats {
+  total: number;
+  recent_files: number;
+  frequent_folders: number;
+  daily_trend: StatsTrendPoint[];
+  weekly_trend: StatsTrendPoint[];
+  rule_hits: RuleHitStat[];
+}
+
 type PrivacyState =
   | "Inactive"
   | "ActiveFull"
@@ -218,6 +242,9 @@ export function Dashboard() {
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [databaseAvailable, setDatabaseAvailable] = useState(true);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
   const [privacyActive, setPrivacyActive] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [pinFolderPath, setPinFolderPath] = useState("");
@@ -403,6 +430,19 @@ export function Dashboard() {
     }
   }, []);
 
+  const loadStats = useCallback(async () => {
+    setStatsLoading(true);
+    setStatsError(null);
+    try {
+      setStats(await invoke<Stats>("get_stats"));
+    } catch (error) {
+      setStats(null);
+      setStatsError(errorMessage(error));
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
   const loadItems = useCallback(async (qaType: QaType) => {
     setLoading(true);
     setError(null);
@@ -449,6 +489,7 @@ export function Dashboard() {
       loadCounts(),
       syncPrivacyState(),
       loadItems(activeTab),
+      loadStats(),
     ]);
     if (countsResult.status === "rejected") {
       setCounts(emptyCounts);
@@ -457,7 +498,7 @@ export function Dashboard() {
     if (privacyResult.status === "rejected") {
       setPrivacyActive(false);
     }
-  }, [activeTab, loadCounts, loadItems, syncPrivacyState]);
+  }, [activeTab, loadCounts, loadItems, loadStats, syncPrivacyState]);
 
   useEffect(() => {
     void refresh();
@@ -821,6 +862,14 @@ export function Dashboard() {
         <OverviewChart data={quickAccessChartData} t={t} total={quickAccessTotal} />
         <OperationSummaryPanel summary={lastOperationSummary} t={t} />
       </section>
+
+      <HistoryStats
+        available={databaseAvailable}
+        error={statsError}
+        loading={statsLoading}
+        stats={stats}
+        t={t}
+      />
 
       <section className="grid gap-3 px-6 pb-6 md:grid-cols-[1fr_auto_auto]">
         <label className="min-w-0">
@@ -1363,6 +1412,136 @@ function OperationSummaryPanel({
         </div>
       )}
     </div>
+  );
+}
+
+function HistoryStats({
+  available,
+  error,
+  loading,
+  stats,
+  t,
+}: {
+  available: boolean;
+  error: string | null;
+  loading: boolean;
+  stats: Stats | null;
+  t: (key: I18nKey, values?: Record<string, string | number>) => string;
+}) {
+  const [period, setPeriod] = useState<"daily" | "weekly">("daily");
+  const trend = period === "daily" ? stats?.daily_trend : stats?.weekly_trend;
+  const maxRuleHits = stats?.rule_hits[0]?.count ?? 0;
+
+  return (
+    <section className="px-6 pb-6" aria-labelledby="history-stats-title">
+      <h2 className="text-sm font-semibold" id="history-stats-title">
+        {t("historyStatistics")}
+      </h2>
+      {!available ? (
+        <p className="mt-3 text-sm text-muted-foreground">
+          {t("databaseUnavailable")}
+        </p>
+      ) : loading ? (
+        <p className="mt-3 text-sm text-muted-foreground">
+          {t("loadingStatistics")}
+        </p>
+      ) : error ? (
+        <p className="mt-3 text-sm text-destructive">{error}</p>
+      ) : stats ? (
+        <>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <CountCard label={t("totalCleaned")} value={stats.total} />
+            <CountCard label={t("recentFiles")} value={stats.recent_files} />
+            <CountCard
+              label={t("frequentFolders")}
+              value={stats.frequent_folders}
+            />
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+            <div className="min-w-0 rounded-md border bg-card p-4 text-card-foreground">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold">{t("cleaningTrend")}</h3>
+                <div className="inline-flex rounded-md border p-0.5">
+                  {(["daily", "weekly"] as const).map((value) => (
+                    <Button
+                      aria-pressed={period === value}
+                      className="h-7 px-2.5"
+                      key={value}
+                      onClick={() => setPeriod(value)}
+                      size="sm"
+                      type="button"
+                      variant={period === value ? "secondary" : "ghost"}
+                    >
+                      {t(value)}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              {trend && trend.length > 0 ? (
+                <div className="mt-4 h-60 min-w-0">
+                  <ResponsiveContainer height="100%" width="100%">
+                    <LineChart data={trend} margin={{ left: -20, right: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="period" minTickGap={24} tickLine={false} />
+                      <YAxis allowDecimals={false} tickLine={false} />
+                      <Tooltip />
+                      <Line
+                        dataKey="count"
+                        dot={false}
+                        stroke="#2563eb"
+                        strokeWidth={2}
+                        type="monotone"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="grid h-60 place-items-center text-sm text-muted-foreground">
+                  {t("noHistory")}
+                </div>
+              )}
+            </div>
+            <div className="rounded-md border bg-card p-4 text-card-foreground">
+              <h3 className="text-sm font-semibold">{t("ruleHitRanking")}</h3>
+              {stats.rule_hits.length > 0 ? (
+                <ol className="mt-5 grid gap-4">
+                  {stats.rule_hits.map((rule, index) => (
+                    <li
+                      className="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-2"
+                      key={rule.keyword}
+                    >
+                      <span className="text-xs tabular-nums text-muted-foreground">
+                        {index + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm" title={rule.keyword}>
+                          {rule.keyword}
+                        </div>
+                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-amber-500"
+                            style={{
+                              width: `${(rule.count / maxRuleHits) * 100}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <span className="text-sm font-medium tabular-nums">
+                        {rule.count}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <div className="grid h-60 place-items-center text-sm text-muted-foreground">
+                  {t("noRuleHits")}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
+    </section>
   );
 }
 

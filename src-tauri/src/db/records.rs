@@ -38,6 +38,28 @@ pub struct CleanRecordPage {
     pub page_size: u32,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StatsTrendPoint {
+    pub period: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RuleHitStat {
+    pub keyword: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Stats {
+    pub total: u64,
+    pub recent_files: u64,
+    pub frequent_folders: u64,
+    pub daily_trend: Vec<StatsTrendPoint>,
+    pub weekly_trend: Vec<StatsTrendPoint>,
+    pub rule_hits: Vec<RuleHitStat>,
+}
+
 pub fn insert_batch(
     connection: &mut Connection,
     records: &[NewCleanRecord],
@@ -139,6 +161,95 @@ pub fn clear(connection: &Connection) -> Result<()> {
         .execute("DELETE FROM clean_records", [])
         .context("failed to clear clean records")?;
     Ok(())
+}
+
+pub fn stats(connection: &Connection) -> Result<Stats> {
+    let (total, recent_files, frequent_folders) = connection
+        .query_row(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(item_type = 'recent_file'), 0),
+                    COALESCE(SUM(item_type = 'frequent_folder'), 0)
+             FROM clean_records",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .context("failed to count cleanup statistics")?;
+
+    Ok(Stats {
+        total: u64::try_from(total).context("cleanup total is negative")?,
+        recent_files: u64::try_from(recent_files).context("recent file total is negative")?,
+        frequent_folders: u64::try_from(frequent_folders)
+            .context("frequent folder total is negative")?,
+        daily_trend: trend(
+            connection,
+            "date(cleaned_at, 'localtime')",
+            "daily cleanup trend",
+        )?,
+        weekly_trend: trend(
+            connection,
+            "date(cleaned_at, 'localtime', 'weekday 0', '-6 days')",
+            "weekly cleanup trend",
+        )?,
+        rule_hits: rule_hits(connection)?,
+    })
+}
+
+fn trend(connection: &Connection, period_sql: &str, label: &str) -> Result<Vec<StatsTrendPoint>> {
+    let sql = format!(
+        "SELECT {period_sql} AS period, COUNT(*)
+         FROM clean_records
+         GROUP BY period
+         ORDER BY period"
+    );
+    let mut statement = connection
+        .prepare(&sql)
+        .with_context(|| format!("failed to prepare {label}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            let count = row.get::<_, i64>(1)?;
+            Ok((row.get::<_, String>(0)?, count))
+        })
+        .with_context(|| format!("failed to query {label}"))?;
+    rows.map(|row| {
+        let (period, count) = row.with_context(|| format!("failed to read {label}"))?;
+        Ok(StatsTrendPoint {
+            period,
+            count: u64::try_from(count).context("cleanup trend count is negative")?,
+        })
+    })
+    .collect()
+}
+
+fn rule_hits(connection: &Connection) -> Result<Vec<RuleHitStat>> {
+    let mut statement = connection
+        .prepare(
+            "SELECT rule_keyword, COUNT(*) AS hit_count
+             FROM clean_records
+             WHERE rule_keyword IS NOT NULL
+             GROUP BY rule_keyword COLLATE NOCASE
+             ORDER BY hit_count DESC, rule_keyword COLLATE NOCASE
+             LIMIT 10",
+        )
+        .context("failed to prepare rule hit statistics")?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .context("failed to query rule hit statistics")?;
+    rows.map(|row| {
+        let (keyword, count) = row.context("failed to read rule hit statistics")?;
+        Ok(RuleHitStat {
+            keyword,
+            count: u64::try_from(count).context("rule hit count is negative")?,
+        })
+    })
+    .collect()
 }
 
 pub fn trim_to(connection: &Connection, retention: usize) -> Result<()> {
@@ -348,6 +459,76 @@ mod tests {
         clear(&connection).unwrap();
 
         assert_eq!(record_count(&connection), 0);
+    }
+
+    #[test]
+    fn aggregates_cleanup_history_statistics() {
+        let connection = test_connection();
+        for (path, item_type, keyword, cleaned_at) in [
+            (
+                r"C:\a.txt",
+                "recent_file",
+                Some("Cache"),
+                "2026-01-06 12:00:00",
+            ),
+            (
+                r"C:\b.txt",
+                "recent_file",
+                Some("cache"),
+                "2026-01-06 12:00:00",
+            ),
+            (
+                r"C:\Temp",
+                "frequent_folder",
+                Some("Temp"),
+                "2026-01-07 12:00:00",
+            ),
+            (r"C:\Work", "frequent_folder", None, "2026-01-07 12:00:00"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO clean_records
+                     (item_path, item_type, rule_keyword, cleaned_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![path, item_type, keyword, cleaned_at],
+                )
+                .unwrap();
+        }
+
+        let stats = stats(&connection).unwrap();
+
+        assert_eq!(stats.total, 4);
+        assert_eq!(stats.recent_files, 2);
+        assert_eq!(stats.frequent_folders, 2);
+        assert_eq!(
+            stats
+                .daily_trend
+                .iter()
+                .map(|point| point.count)
+                .sum::<u64>(),
+            4
+        );
+        assert_eq!(
+            stats
+                .weekly_trend
+                .iter()
+                .map(|point| point.count)
+                .sum::<u64>(),
+            4
+        );
+        assert_eq!(
+            stats.rule_hits,
+            [
+                RuleHitStat {
+                    keyword: "Cache".to_string(),
+                    count: 2,
+                },
+                RuleHitStat {
+                    keyword: "Temp".to_string(),
+                    count: 1,
+                },
+            ]
+        );
     }
 
     fn record(
