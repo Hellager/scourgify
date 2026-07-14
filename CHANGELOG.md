@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0 - Unreleased
+
+- Added automatic cleanup schedules for startup, recurring hourly intervals, and daily fixed times, with runtime rescheduling and last-run tracking.
+- Added a shared automatic cleanup service with privacy-mode, database-availability, and concurrency guards, plus aggregated history and notification results.
+- Added automatic cleanup settings, immediate execution, localized completion feedback, and live Dashboard and History refresh events.
+- Added CSV and JSON cleanup-history exports for all records or the active filters, with native save dialogs, result Toasts, and an open-folder action.
+- Added Start Recommended recent-item visibility control with Explorer refresh, privacy protection, and Windows-state synchronization.
+- Migrated cleanup history to schema v2 with manual/automatic source tracking and completed five-language coverage for v0.5.0 features.
+
+## 0.4.5 - 2026-07-13
+
+- Unified Dashboard, Rules, History, Settings, and About under a shared application shell and navigation model.
+- Added server-side Rule and History search, filtering, date ranges, sorting, pagination, and filter-aware totals.
+- Added ranged daily and weekly cleanup trends, rule-hit statistics, and Quick Access interaction metadata.
+- Added runtime database diagnostics and recovery actions without requiring an application restart.
+- Improved empty, loading, failure, dialog-focus, and narrow-layout states across database-backed pages.
+- Hardened v0.4.0 behavior with focused regression tests and bumped application metadata to v0.4.5.
+
+## 0.4.0 - 2026-07-13
+
+- Added a bundled SQLite database with schema migration, built-in rule seeding, and persistent cleanup history.
+- Added blacklist and whitelist rule CRUD, deterministic matching, conflict handling, and a dedicated Rules page.
+- Unified protected Quick Access cleanup so whitelist matches are preserved and successful removals are recorded with rule snapshots.
+- Added rule-aware Smart Clean previews and execution for Recent Files and Frequent Folders.
+- Added paginated cleanup history with paths, item types, matched rules, timestamps, retention controls, and destructive-clear confirmation.
+- Added cleanup totals, type distribution, trend charts, and rule-hit insights to the Dashboard.
+
 ## 0.3.0 - 2026-07-10
 
 - Added a full Settings page with persistent app, privacy, appearance, notification, and Quick Access visibility preferences.
