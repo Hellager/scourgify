@@ -92,6 +92,10 @@ const en = {
     " Windows may rebuild default Explorer folder entries after this operation.",
   enableNotifications: "Enable notifications",
   enabled: "Enabled",
+  exportAllRecords: "All records",
+  exportCurrentFilters: "Current filters",
+  exportHistory: "Export",
+  exportingHistory: "Exporting...",
   failed: "Failed",
   failedRemoveItems: "Failed to remove {failed} item(s).",
   filterRules: "Search rules",
@@ -111,6 +115,7 @@ const en = {
   historyClearPrivacyDisabled:
     "Privacy mode is active; clearing history is disabled.",
   historyCount: "{count} record(s)",
+  historyExported: "Exported {count} history record(s).",
   historyRetention: "History retention",
   historyRetentionDescription:
     "Keep the latest N records. Use 0 to keep all records.",
@@ -154,6 +159,7 @@ const en = {
   notificationPermissionDenied: "System notification permission was not granted.",
   notifyActive: "Notify when app is active",
   notifyActiveDescription: "For development testing.",
+  openFolder: "Open folder",
   notifyComplete: "Notify operation complete",
   notifyPartialFailure: "Notify partial failures",
   open: "Open",
@@ -267,12 +273,17 @@ const dictionaries: Record<Language, Dictionary> = {
     clearHistory: "清空历史",
     clearHistoryDescription: "这将永久删除全部 {count} 条清理记录。",
     clearHistoryQuestion: "清空清理历史？",
+    exportAllRecords: "全部记录",
+    exportCurrentFilters: "当前筛选",
+    exportHistory: "导出",
+    exportingHistory: "正在导出...",
     frequentFolder: "常用文件夹",
     goToHistory: "前往历史记录",
     history: "清理历史",
     historyCleared: "清理历史已清空。",
     historyClearPrivacyDisabled: "隐私模式已启用，无法清空历史记录。",
     historyCount: "{count} 条记录",
+    historyExported: "已导出 {count} 条历史记录。",
     historyRetention: "历史保留数量",
     historyRetentionDescription: "保留最近 N 条记录；输入 0 保留全部。",
     historySubtitle: "查看已清理的快速访问项目及命中规则。",
@@ -281,6 +292,7 @@ const dictionaries: Record<Language, Dictionary> = {
     last30Days: "最近 30 天",
     last7Days: "最近 7 天",
     manualCleanup: "手动清理",
+    openFolder: "打开所在目录",
     ruleConflictWarning: "以下关键词同时存在黑白名单，白名单优先：{keywords}。",
     ruleFilterSummary:
       "显示 {count} 条 · 白名单 {whitelist} 条 · 黑名单 {blacklist} 条",
@@ -499,12 +511,17 @@ const dictionaries: Record<Language, Dictionary> = {
     clearHistory: "清空歷史",
     clearHistoryDescription: "這將永久刪除全部 {count} 筆清理記錄。",
     clearHistoryQuestion: "清空清理歷史？",
+    exportAllRecords: "全部記錄",
+    exportCurrentFilters: "目前篩選",
+    exportHistory: "匯出",
+    exportingHistory: "正在匯出...",
     frequentFolder: "常用資料夾",
     goToHistory: "前往歷史記錄",
     history: "清理歷史",
     historyCleared: "清理歷史已清空。",
     historyClearPrivacyDisabled: "隱私模式已啟用，無法清空歷史記錄。",
     historyCount: "{count} 筆記錄",
+    historyExported: "已匯出 {count} 筆歷史記錄。",
     historyRetention: "歷史保留數量",
     historyRetentionDescription: "保留最近 N 筆記錄；輸入 0 保留全部。",
     historySubtitle: "查看已清理的快速存取項目及命中規則。",
@@ -513,6 +530,7 @@ const dictionaries: Record<Language, Dictionary> = {
     last30Days: "最近 30 天",
     last7Days: "最近 7 天",
     manualCleanup: "手動清理",
+    openFolder: "開啟所在資料夾",
     ruleConflictWarning: "以下關鍵詞同時存在黑白名單，白名單優先：{keywords}。",
     ruleFilterSummary:
       "顯示 {count} 筆 · 白名單 {whitelist} 筆 · 黑名單 {blacklist} 筆",
@@ -732,6 +750,10 @@ const dictionaries: Record<Language, Dictionary> = {
     clearHistoryDescription:
       "Cette action supprime définitivement les {count} entrées de l'historique.",
     clearHistoryQuestion: "Effacer l'historique de nettoyage ?",
+    exportAllRecords: "Toutes les entrées",
+    exportCurrentFilters: "Filtres actuels",
+    exportHistory: "Exporter",
+    exportingHistory: "Exportation...",
     frequentFolder: "Dossier fréquent",
     goToHistory: "Aller à l'historique",
     history: "Historique",
@@ -739,6 +761,7 @@ const dictionaries: Record<Language, Dictionary> = {
     historyClearPrivacyDisabled:
       "Le mode confidentialité est actif ; l'effacement de l'historique est désactivé.",
     historyCount: "{count} entrée(s)",
+    historyExported: "{count} entrée(s) d'historique exportée(s).",
     historyRetention: "Conservation de l'historique",
     historyRetentionDescription:
       "Conserver les N entrées les plus récentes. Utiliser 0 pour tout conserver.",
@@ -749,6 +772,7 @@ const dictionaries: Record<Language, Dictionary> = {
     last30Days: "30 derniers jours",
     last7Days: "7 derniers jours",
     manualCleanup: "Nettoyage manuel",
+    openFolder: "Ouvrir le dossier",
     ruleConflictWarning:
       "La liste blanche est prioritaire pour les mots-clés en conflit : {keywords}.",
     ruleFilterSummary:
@@ -978,6 +1002,10 @@ const dictionaries: Record<Language, Dictionary> = {
     clearHistoryDescription:
       "Все записи истории очистки ({count}) будут удалены без возможности восстановления.",
     clearHistoryQuestion: "Очистить историю?",
+    exportAllRecords: "Все записи",
+    exportCurrentFilters: "Текущие фильтры",
+    exportHistory: "Экспорт",
+    exportingHistory: "Экспорт...",
     frequentFolder: "Частая папка",
     goToHistory: "Перейти к истории",
     history: "История",
@@ -985,6 +1013,7 @@ const dictionaries: Record<Language, Dictionary> = {
     historyClearPrivacyDisabled:
       "Режим конфиденциальности активен; очистка истории отключена.",
     historyCount: "Записей: {count}",
+    historyExported: "Экспортировано записей: {count}.",
     historyRetention: "Хранение истории",
     historyRetentionDescription:
       "Хранить последние N записей. Значение 0 сохраняет все записи.",
@@ -995,6 +1024,7 @@ const dictionaries: Record<Language, Dictionary> = {
     last30Days: "Последние 30 дней",
     last7Days: "Последние 7 дней",
     manualCleanup: "Ручная очистка",
+    openFolder: "Открыть папку",
     ruleConflictWarning:
       "Белый список имеет приоритет для конфликтующих ключевых слов: {keywords}.",
     ruleFilterSummary:

@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { save as saveFile } from "@tauri-apps/plugin-dialog";
 import {
   type Column,
   type ColumnDef,
@@ -22,6 +23,8 @@ import {
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  Download,
+  LoaderCircle,
   RefreshCw,
   Search,
   Trash2,
@@ -43,6 +46,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -80,6 +91,27 @@ interface CleanRecordPage {
   page_size: number;
 }
 
+interface HistoryFilter {
+  search: string;
+  item_type: CleanRecord["item_type"] | null;
+  matched_by_rule: boolean | null;
+  date_range: "7d" | "30d" | null;
+}
+
+interface HistoryExportResult {
+  count: number;
+}
+
+type HistoryExportFormat = "csv" | "json";
+type HistoryExportScope = "filtered" | "all";
+
+const EMPTY_HISTORY_FILTER: HistoryFilter = {
+  search: "",
+  item_type: null,
+  matched_by_rule: null,
+  date_range: null,
+};
+
 type PrivacyState =
   | "Inactive"
   | "ActiveFull"
@@ -96,6 +128,7 @@ export function HistoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: 20,
@@ -114,6 +147,16 @@ export function HistoryPage() {
   const requestId = useRef(0);
   const refreshTriggerRef = useRef<HTMLButtonElement | null>(null);
   const clearTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const historyFilter = useMemo<HistoryFilter>(
+    () => ({
+      search,
+      item_type: itemType === "all" ? null : itemType,
+      matched_by_rule: ruleSource === "all" ? null : ruleSource === "matched",
+      date_range: dateRange === "all" ? null : dateRange,
+    }),
+    [dateRange, itemType, ruleSource, search],
+  );
 
   const columns = useMemo<ColumnDef<CleanRecord>[]>(
     () => [
@@ -177,11 +220,7 @@ export function HistoryPage() {
           page_size: pagination.pageSize,
           sort_by: sortingRule.id,
           sort_order: sortingRule.desc ? "desc" : "asc",
-          search,
-          item_type: itemType === "all" ? null : itemType,
-          matched_by_rule:
-            ruleSource === "all" ? null : ruleSource === "matched",
-          date_range: dateRange === "all" ? null : dateRange,
+          ...historyFilter,
         },
       });
       if (request !== requestId.current) {
@@ -214,12 +253,9 @@ export function HistoryPage() {
       }
     }
   }, [
-    dateRange,
-    itemType,
+    historyFilter,
     pagination.pageIndex,
     pagination.pageSize,
-    ruleSource,
-    search,
     sortingRule.desc,
     sortingRule.id,
   ]);
@@ -268,6 +304,42 @@ export function HistoryPage() {
     }
   };
 
+  const exportHistory = async (
+    format: HistoryExportFormat,
+    scope: HistoryExportScope,
+  ) => {
+    setExporting(true);
+    try {
+      const path = await saveFile({
+        defaultPath: exportFileName(format),
+        filters: [{ name: format.toUpperCase(), extensions: [format] }],
+        title: t("exportHistory"),
+      });
+      if (!path) {
+        return;
+      }
+      const result = await invoke<HistoryExportResult>("export_clean_records", {
+        path,
+        format,
+        filter: scope === "filtered" ? historyFilter : EMPTY_HISTORY_FILTER,
+      });
+      toast.success(t("historyExported", { count: result.count }), {
+        action: {
+          label: t("openFolder"),
+          onClick: () => {
+            void invoke("open_in_explorer", { path }).catch((openError) =>
+              toast.error(errorMessage(openError)),
+            );
+          },
+        },
+      });
+    } catch (exportError) {
+      toast.error(errorMessage(exportError));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const pageCount = table.getPageCount();
   const clearDisabled =
     loading ||
@@ -275,34 +347,81 @@ export function HistoryPage() {
     overallTotal === 0 ||
     database?.available !== true ||
     privacyActive;
+  const exportDisabled =
+    loading || exporting || database?.available !== true;
 
   return (
     <>
       <PageHeader
         actions={
           <>
-          <Button
-            aria-label={t("refreshHistory")}
-            disabled={loading}
-            onClick={() => void loadRecords()}
-            ref={refreshTriggerRef}
-            size="icon-sm"
-            title={t("refreshHistory")}
-            type="button"
-            variant="outline"
-          >
-            <RefreshCw className={loading ? "animate-spin" : ""} />
-          </Button>
-          <Button
-            disabled={clearDisabled}
-            onClick={() => setClearOpen(true)}
-            ref={clearTriggerRef}
-            type="button"
-            variant="destructive"
-          >
-            <Trash2 />
-            {t("clearHistory")}
-          </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    disabled={exportDisabled}
+                    type="button"
+                    variant="outline"
+                  >
+                    {exporting ? (
+                      <LoaderCircle className="animate-spin" />
+                    ) : (
+                      <Download />
+                    )}
+                    {t(exporting ? "exportingHistory" : "exportHistory")}
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>
+                  {t("exportCurrentFilters")}
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  onSelect={() => void exportHistory("csv", "filtered")}
+                >
+                  CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => void exportHistory("json", "filtered")}
+                >
+                  JSON
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>{t("exportAllRecords")}</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onSelect={() => void exportHistory("csv", "all")}
+                >
+                  CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => void exportHistory("json", "all")}
+                >
+                  JSON
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              aria-label={t("refreshHistory")}
+              disabled={loading}
+              onClick={() => void loadRecords()}
+              ref={refreshTriggerRef}
+              size="icon-sm"
+              title={t("refreshHistory")}
+              type="button"
+              variant="outline"
+            >
+              <RefreshCw className={loading ? "animate-spin" : ""} />
+            </Button>
+            <Button
+              disabled={clearDisabled}
+              onClick={() => setClearOpen(true)}
+              ref={clearTriggerRef}
+              type="button"
+              variant="destructive"
+            >
+              <Trash2 />
+              {t("clearHistory")}
+            </Button>
           </>
         }
         subtitle={t("historySubtitle")}
@@ -583,6 +702,14 @@ function HistoryTableMessage({ message }: { message: string }) {
 function formatCleanedAt(value: string) {
   const date = new Date(`${value.replace(" ", "T")}Z`);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function exportFileName(format: HistoryExportFormat) {
+  const now = new Date();
+  const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()]
+    .map((part) => String(part).padStart(2, "0"))
+    .join("-");
+  return `scourgify-history-${date}.${format}`;
 }
 
 function errorMessage(error: unknown): string {

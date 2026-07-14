@@ -5,7 +5,10 @@ use crate::{
     cleanup::{self, AutoCleanResult, ClassifiedItem},
     config::Config,
     db::{
-        records::{self, CleanRecordPage, HistoryQuery, Stats, StatsRange},
+        records::{
+            self, CleanRecordPage, HistoryExportFormat, HistoryExportResult, HistoryFilter,
+            HistoryQuery, Stats, StatsRange,
+        },
         rules::{self, NewRule, Rule},
         DatabaseStatus, DbState,
     },
@@ -185,6 +188,18 @@ pub(crate) fn get_clean_records(
 ) -> Result<CleanRecordPage, String> {
     database
         .with_connection(|connection| records::list(connection, query))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn export_clean_records(
+    database: State<'_, DbState>,
+    path: String,
+    format: HistoryExportFormat,
+    filter: HistoryFilter,
+) -> Result<HistoryExportResult, String> {
+    database
+        .with_connection(|connection| records::export(connection, &path, format, filter))
         .map_err(|error| error.to_string())
 }
 

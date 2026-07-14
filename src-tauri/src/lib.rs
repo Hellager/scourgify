@@ -80,6 +80,7 @@ pub fn run() {
             commands::smart_clean,
             commands::run_auto_clean_now,
             commands::get_clean_records,
+            commands::export_clean_records,
             commands::clear_clean_records,
             commands::get_stats,
             commands::restore_qa_defaults,

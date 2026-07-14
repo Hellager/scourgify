@@ -1,3 +1,9 @@
+use std::{
+    fs::File,
+    io::{BufWriter, Write},
+    path::Path,
+};
+
 use anyhow::{bail, Context, Result};
 use rusqlite::{
     params,
@@ -49,6 +55,12 @@ pub struct HistoryQuery {
     pub page_size: u32,
     pub sort_by: String,
     pub sort_order: String,
+    #[serde(flatten)]
+    pub filter: HistoryFilter,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct HistoryFilter {
     #[serde(default)]
     pub search: String,
     #[serde(default)]
@@ -57,6 +69,27 @@ pub struct HistoryQuery {
     pub matched_by_rule: Option<bool>,
     #[serde(default)]
     pub date_range: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryExportFormat {
+    Csv,
+    Json,
+}
+
+impl HistoryExportFormat {
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Csv => "csv",
+            Self::Json => "json",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct HistoryExportResult {
+    pub count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -69,6 +102,47 @@ pub struct CleanRecord {
     pub source: CleanSource,
     pub cleaned_at: String,
 }
+
+#[derive(Debug, Serialize)]
+struct ExportCleanRecord {
+    item_path: String,
+    item_type: String,
+    rule_id: Option<i64>,
+    rule_keyword: Option<String>,
+    source: CleanSource,
+    cleaned_at: String,
+}
+
+impl From<CleanRecord> for ExportCleanRecord {
+    fn from(record: CleanRecord) -> Self {
+        Self {
+            item_path: record.item_path,
+            item_type: record.item_type,
+            rule_id: record.rule_id,
+            rule_keyword: record.rule_keyword,
+            source: record.source,
+            cleaned_at: record.cleaned_at,
+        }
+    }
+}
+
+struct ValidatedHistoryFilter {
+    search: Option<String>,
+    item_type: Option<&'static str>,
+    matched_by_rule: Option<i64>,
+    date_modifier: Option<&'static str>,
+}
+
+const HISTORY_FILTERS: &str = "WHERE (?1 IS NULL OR item_path LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                    OR COALESCE(rule_keyword, '') LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
+           AND (?2 IS NULL OR item_type = ?2)
+           AND (?3 IS NULL
+                OR (?3 = 1 AND rule_keyword IS NOT NULL)
+                OR (?3 = 0 AND rule_keyword IS NULL))
+           AND (?4 IS NULL
+                OR cleaned_at >= datetime('now', 'localtime', 'start of day', ?4, 'utc'))";
+
+const HISTORY_COLUMNS: &str = "id, item_path, item_type, rule_id, rule_keyword, source, cleaned_at";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CleanRecordPage {
@@ -178,28 +252,8 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
         "desc" => "DESC",
         _ => bail!("history sort_order must be asc or desc"),
     };
-    let search = history_search_pattern(&query.search);
-    let item_type = match query.item_type.as_deref() {
-        None => None,
-        Some(value @ ("recent_file" | "frequent_folder")) => Some(value),
-        Some(value) => bail!("unsupported history item_type: {value}"),
-    };
-    let matched_by_rule = query.matched_by_rule.map(i64::from);
-    let date_modifier = match query.date_range.as_deref() {
-        None => None,
-        Some("7d") => Some("-6 days"),
-        Some("30d") => Some("-29 days"),
-        Some(value) => bail!("unsupported history date_range: {value}"),
-    };
-    const FILTERS: &str = "WHERE (?1 IS NULL OR item_path LIKE ?1 ESCAPE '\\' COLLATE NOCASE
-                    OR COALESCE(rule_keyword, '') LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
-           AND (?2 IS NULL OR item_type = ?2)
-           AND (?3 IS NULL
-                OR (?3 = 1 AND rule_keyword IS NOT NULL)
-                OR (?3 = 0 AND rule_keyword IS NULL))
-           AND (?4 IS NULL
-                OR cleaned_at >= datetime('now', 'localtime', 'start of day', ?4, 'utc'))";
-    let count_sql = format!("SELECT COUNT(*) FROM clean_records {FILTERS}");
+    let filter = validate_history_filter(query.filter)?;
+    let count_sql = format!("SELECT COUNT(*) FROM clean_records {HISTORY_FILTERS}");
     let overall_total = connection
         .query_row("SELECT COUNT(*) FROM clean_records", [], |row| {
             row.get::<_, i64>(0)
@@ -207,19 +261,17 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
         .context("failed to count all clean records")?;
     let overall_total = u64::try_from(overall_total).context("clean record count is negative")?;
     let total = connection
-        .query_row(
-            &count_sql,
-            params![search.as_deref(), item_type, matched_by_rule, date_modifier],
-            |row| row.get::<_, i64>(0),
-        )
+        .query_row(&count_sql, history_filter_params(&filter), |row| {
+            row.get::<_, i64>(0)
+        })
         .context("failed to count clean records")?;
     let total = u64::try_from(total).context("clean record count is negative")?;
     let offset = i64::try_from(u64::from(query.page - 1) * u64::from(query.page_size))
         .context("history page offset is too large")?;
     let sql = format!(
-        "SELECT id, item_path, item_type, rule_id, rule_keyword, source, cleaned_at
+        "SELECT {HISTORY_COLUMNS}
          FROM clean_records
-         {FILTERS}
+         {HISTORY_FILTERS}
          ORDER BY {sort_column} {sort_order}, id {sort_order}
          LIMIT ?5 OFFSET ?6"
     );
@@ -229,24 +281,14 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
     let records = statement
         .query_map(
             params![
-                search.as_deref(),
-                item_type,
-                matched_by_rule,
-                date_modifier,
+                filter.search.as_deref(),
+                filter.item_type,
+                filter.matched_by_rule,
+                filter.date_modifier,
                 i64::from(query.page_size),
                 offset
             ],
-            |row| {
-                Ok(CleanRecord {
-                    id: row.get(0)?,
-                    item_path: row.get(1)?,
-                    item_type: row.get(2)?,
-                    rule_id: row.get(3)?,
-                    rule_keyword: row.get(4)?,
-                    source: row.get(5)?,
-                    cleaned_at: row.get(6)?,
-                })
-            },
+            read_clean_record,
         )
         .context("failed to query clean records")?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -259,6 +301,158 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
         page: query.page,
         page_size: query.page_size,
     })
+}
+
+pub fn export(
+    connection: &Connection,
+    path: &str,
+    format: HistoryExportFormat,
+    filter: HistoryFilter,
+) -> Result<HistoryExportResult> {
+    let path = validate_export_path(path, format)?;
+    let filter = validate_history_filter(filter)?;
+    let file = File::create(path)
+        .with_context(|| format!("failed to create history export at {}", path.display()))?;
+    let count = match format {
+        HistoryExportFormat::Csv => export_csv(connection, file, &filter)?,
+        HistoryExportFormat::Json => export_json(connection, file, &filter)?,
+    };
+    Ok(HistoryExportResult { count })
+}
+
+fn export_csv(connection: &Connection, file: File, filter: &ValidatedHistoryFilter) -> Result<u64> {
+    let mut writer = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(BufWriter::new(file));
+    writer
+        .write_record([
+            "item_path",
+            "item_type",
+            "rule_id",
+            "rule_keyword",
+            "source",
+            "cleaned_at",
+        ])
+        .context("failed to write CSV history header")?;
+    let count = visit_filtered_records(connection, filter, |record| {
+        writer
+            .serialize(ExportCleanRecord::from(record))
+            .context("failed to serialize CSV history record")
+    })?;
+    writer
+        .flush()
+        .context("failed to finish CSV history export")?;
+    Ok(count)
+}
+
+fn export_json(
+    connection: &Connection,
+    file: File,
+    filter: &ValidatedHistoryFilter,
+) -> Result<u64> {
+    let mut records = Vec::new();
+    let count = visit_filtered_records(connection, filter, |record| {
+        records.push(ExportCleanRecord::from(record));
+        Ok(())
+    })?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, &records)
+        .context("failed to serialize JSON history export")?;
+    writer
+        .flush()
+        .context("failed to finish JSON history export")?;
+    Ok(count)
+}
+
+fn visit_filtered_records(
+    connection: &Connection,
+    filter: &ValidatedHistoryFilter,
+    mut visit: impl FnMut(CleanRecord) -> Result<()>,
+) -> Result<u64> {
+    let sql = format!(
+        "SELECT {HISTORY_COLUMNS}
+         FROM clean_records
+         {HISTORY_FILTERS}
+         ORDER BY cleaned_at DESC, id DESC"
+    );
+    let mut statement = connection
+        .prepare(&sql)
+        .context("failed to prepare history export query")?;
+    let rows = statement
+        .query_map(history_filter_params(filter), read_clean_record)
+        .context("failed to query history export")?;
+    let mut count = 0_u64;
+    for row in rows {
+        visit(row.context("failed to read history export record")?)?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+fn validate_history_filter(filter: HistoryFilter) -> Result<ValidatedHistoryFilter> {
+    let item_type = match filter.item_type.as_deref() {
+        None => None,
+        Some("recent_file") => Some("recent_file"),
+        Some("frequent_folder") => Some("frequent_folder"),
+        Some(value) => bail!("unsupported history item_type: {value}"),
+    };
+    let date_modifier = match filter.date_range.as_deref() {
+        None => None,
+        Some("7d") => Some("-6 days"),
+        Some("30d") => Some("-29 days"),
+        Some(value) => bail!("unsupported history date_range: {value}"),
+    };
+    Ok(ValidatedHistoryFilter {
+        search: history_search_pattern(&filter.search),
+        item_type,
+        matched_by_rule: filter.matched_by_rule.map(i64::from),
+        date_modifier,
+    })
+}
+
+fn history_filter_params(filter: &ValidatedHistoryFilter) -> [&dyn rusqlite::ToSql; 4] {
+    [
+        &filter.search,
+        &filter.item_type,
+        &filter.matched_by_rule,
+        &filter.date_modifier,
+    ]
+}
+
+fn read_clean_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanRecord> {
+    Ok(CleanRecord {
+        id: row.get(0)?,
+        item_path: row.get(1)?,
+        item_type: row.get(2)?,
+        rule_id: row.get(3)?,
+        rule_keyword: row.get(4)?,
+        source: row.get(5)?,
+        cleaned_at: row.get(6)?,
+    })
+}
+
+fn validate_export_path(path: &str, format: HistoryExportFormat) -> Result<&Path> {
+    if path.trim().is_empty() {
+        bail!("history export path is empty");
+    }
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        bail!("history export path must be absolute");
+    }
+    let extension_matches = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(format.extension()));
+    if !extension_matches {
+        bail!(
+            "history export path must use the .{} extension",
+            format.extension()
+        );
+    }
+    path.parent()
+        .filter(|parent| parent.is_dir())
+        .context("history export directory does not exist")?;
+    Ok(path)
 }
 
 fn history_search_pattern(search: &str) -> Option<String> {
@@ -616,7 +810,10 @@ mod tests {
         let literal_wildcard = list(
             &connection,
             HistoryQuery {
-                search: "100%".to_string(),
+                filter: HistoryFilter {
+                    search: "100%".to_string(),
+                    ..HistoryFilter::default()
+                },
                 ..history_query()
             },
         )
@@ -631,9 +828,12 @@ mod tests {
         let targeted_recent = list(
             &connection,
             HistoryQuery {
-                item_type: Some("recent_file".to_string()),
-                matched_by_rule: Some(true),
-                date_range: Some("30d".to_string()),
+                filter: HistoryFilter {
+                    item_type: Some("recent_file".to_string()),
+                    matched_by_rule: Some(true),
+                    date_range: Some("30d".to_string()),
+                    ..HistoryFilter::default()
+                },
                 ..history_query()
             },
         )
@@ -650,8 +850,11 @@ mod tests {
                 page_size: 1,
                 sort_by: "item_path".to_string(),
                 sort_order: "asc".to_string(),
-                matched_by_rule: Some(false),
-                date_range: Some("30d".to_string()),
+                filter: HistoryFilter {
+                    matched_by_rule: Some(false),
+                    date_range: Some("30d".to_string()),
+                    ..HistoryFilter::default()
+                },
                 ..history_query()
             },
         )
@@ -663,8 +866,11 @@ mod tests {
                 page_size: 1,
                 sort_by: "item_path".to_string(),
                 sort_order: "asc".to_string(),
-                matched_by_rule: Some(false),
-                date_range: Some("30d".to_string()),
+                filter: HistoryFilter {
+                    matched_by_rule: Some(false),
+                    date_range: Some("30d".to_string()),
+                    ..HistoryFilter::default()
+                },
                 ..history_query()
             },
         )
@@ -676,7 +882,10 @@ mod tests {
         assert!(list(
             &connection,
             HistoryQuery {
-                item_type: Some("invalid".to_string()),
+                filter: HistoryFilter {
+                    item_type: Some("invalid".to_string()),
+                    ..HistoryFilter::default()
+                },
                 ..history_query()
             }
         )
@@ -684,11 +893,170 @@ mod tests {
         assert!(list(
             &connection,
             HistoryQuery {
-                date_range: Some("forever".to_string()),
+                filter: HistoryFilter {
+                    date_range: Some("forever".to_string()),
+                    ..HistoryFilter::default()
+                },
                 ..history_query()
             }
         )
         .is_err());
+    }
+
+    #[test]
+    fn exports_filtered_csv_with_special_characters() {
+        let mut connection = test_connection();
+        let special_path = "C:\\Temp\\\"report\",\n报告.txt";
+        let special_keyword = "alpha,\"beta\"\nline";
+        let mut targeted = record(special_path, "recent_file", None, Some(special_keyword));
+        targeted.source = CleanSource::Auto;
+        insert_batch(
+            &mut connection,
+            &[
+                targeted,
+                record(r"C:\Temp\manual.txt", "recent_file", None, None),
+            ],
+            0,
+        )
+        .unwrap();
+        let path = export_path("csv");
+
+        let result = export(
+            &connection,
+            path.to_str().unwrap(),
+            HistoryExportFormat::Csv,
+            HistoryFilter {
+                search: "报告".to_string(),
+                matched_by_rule: Some(true),
+                ..HistoryFilter::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.count, 1);
+        let mut reader = csv::Reader::from_path(&path).unwrap();
+        assert_eq!(
+            reader.headers().unwrap().iter().collect::<Vec<_>>(),
+            [
+                "item_path",
+                "item_type",
+                "rule_id",
+                "rule_keyword",
+                "source",
+                "cleaned_at"
+            ]
+        );
+        let rows = reader.records().collect::<csv::Result<Vec<_>>>().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(&rows[0][0], special_path);
+        assert_eq!(&rows[0][3], special_keyword);
+        assert_eq!(&rows[0][4], "auto");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn exports_all_json_records_without_pagination() {
+        let mut connection = test_connection();
+        insert_batch(
+            &mut connection,
+            &[
+                record(r"C:\first.txt", "recent_file", None, None),
+                record(r"C:\second.txt", "recent_file", None, Some("second")),
+                record(r"C:\Third", "frequent_folder", None, None),
+            ],
+            0,
+        )
+        .unwrap();
+        let path = export_path("json");
+
+        let result = export(
+            &connection,
+            path.to_str().unwrap(),
+            HistoryExportFormat::Json,
+            HistoryFilter::default(),
+        )
+        .unwrap();
+
+        assert_eq!(result.count, 3);
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let records = value.as_array().unwrap();
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records[0].as_object().unwrap().keys().collect::<Vec<_>>(),
+            [
+                "cleaned_at",
+                "item_path",
+                "item_type",
+                "rule_id",
+                "rule_keyword",
+                "source"
+            ]
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn exports_empty_csv_with_headers() {
+        let connection = test_connection();
+        let path = export_path("csv");
+
+        let result = export(
+            &connection,
+            path.to_str().unwrap(),
+            HistoryExportFormat::Csv,
+            HistoryFilter::default(),
+        )
+        .unwrap();
+
+        assert_eq!(result.count, 0);
+        assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 1);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_export_targets_and_filters() {
+        let connection = test_connection();
+        assert!(export(
+            &connection,
+            "relative.csv",
+            HistoryExportFormat::Csv,
+            HistoryFilter::default()
+        )
+        .is_err());
+
+        let wrong_extension = export_path("json");
+        assert!(export(
+            &connection,
+            wrong_extension.to_str().unwrap(),
+            HistoryExportFormat::Csv,
+            HistoryFilter::default()
+        )
+        .is_err());
+
+        let invalid_filter = export_path("json");
+        assert!(export(
+            &connection,
+            invalid_filter.to_str().unwrap(),
+            HistoryExportFormat::Json,
+            HistoryFilter {
+                date_range: Some("forever".to_string()),
+                ..HistoryFilter::default()
+            }
+        )
+        .is_err());
+        assert!(!invalid_filter.exists());
+
+        let directory = export_path("csv");
+        std::fs::create_dir(&directory).unwrap();
+        assert!(export(
+            &connection,
+            directory.to_str().unwrap(),
+            HistoryExportFormat::Csv,
+            HistoryFilter::default()
+        )
+        .is_err());
+        std::fs::remove_dir(directory).unwrap();
     }
 
     #[test]
@@ -831,7 +1199,7 @@ mod tests {
         let last_thirty = stats(&connection, StatsRange::Last30Days).unwrap();
         let all = stats(&connection, StatsRange::All).unwrap();
         let mut query = history_query();
-        query.date_range = Some("7d".to_string());
+        query.filter.date_range = Some("7d".to_string());
         let history = list(&connection, query).unwrap();
         let earliest_local_day = connection
             .query_row(
@@ -903,11 +1271,19 @@ mod tests {
             page_size: 20,
             sort_by: "cleaned_at".to_string(),
             sort_order: "desc".to_string(),
-            search: String::new(),
-            item_type: None,
-            matched_by_rule: None,
-            date_range: None,
+            filter: HistoryFilter::default(),
         }
+    }
+
+    fn export_path(extension: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "scourgify-history-export-{}-{unique}.{extension}",
+            std::process::id()
+        ))
     }
 
     fn test_connection() -> Connection {
