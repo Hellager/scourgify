@@ -42,11 +42,12 @@ type SwitchField = {
   name: keyof ConfigForm;
   description?: string;
 };
-type VisibilityQaType = "recent" | "frequent";
+type VisibilityQaType = "recent" | "frequent" | "start_recommended";
 
 interface QaVisibility {
   recent: boolean;
   frequent: boolean;
+  start_recommended: boolean;
 }
 
 type PrivacyState =
@@ -68,6 +69,9 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [privacyActive, setPrivacyActive] = useState(false);
   const [runningAutoClean, setRunningAutoClean] = useState(false);
+  const [startRecommendedVisible, setStartRecommendedVisible] = useState(true);
+  const [updatingVisibility, setUpdatingVisibility] =
+    useState<VisibilityQaType | null>(null);
   const originalVisibility = useRef<QaVisibility | null>(null);
   const {
     control,
@@ -98,6 +102,7 @@ export function SettingsPage() {
         if (active) {
           originalVisibility.current = visibility;
           setPrivacyActive(privacyState !== "Inactive");
+          setStartRecommendedVisible(visibility.start_recommended);
           reset(
             configSchema.parse({
               ...config,
@@ -191,29 +196,62 @@ export function SettingsPage() {
 
   const updateVisibility = async (qaType: VisibilityQaType, visible: boolean) => {
     const fieldName =
-      qaType === "recent" ? "show_recent_files" : "show_frequent_folders";
+      qaType === "recent"
+        ? "show_recent_files"
+        : qaType === "frequent"
+          ? "show_frequent_folders"
+          : null;
+
+    if (qaType === "start_recommended") {
+      setStartRecommendedVisible(visible);
+    }
 
     if (privacyActive) {
-      setValue(fieldName, originalVisibility.current?.[qaType] ?? !visible, {
-        shouldValidate: true,
-      });
+      restoreVisibilityValue(qaType, visible);
       toast.warning(t("privacyWriteDisabled"));
       return;
     }
 
+    setUpdatingVisibility(qaType);
     try {
-      await invoke("set_qa_visibility", { qaType, visible });
-      originalVisibility.current = {
-        recent: originalVisibility.current?.recent ?? true,
-        frequent: originalVisibility.current?.frequent ?? true,
-        [qaType]: visible,
-      };
+      const actual = await invoke<QaVisibility>("set_qa_visibility", {
+        qaType,
+        visible,
+      });
+      applyActualVisibility(actual);
       toast.success(t("quickAccessVisibilityUpdated"));
     } catch (error) {
-      setValue(fieldName, originalVisibility.current?.[qaType] ?? !visible, {
+      try {
+        applyActualVisibility(
+          await invoke<QaVisibility>("get_qa_visibility"),
+        );
+      } catch {
+        restoreVisibilityValue(qaType, visible);
+      }
+      toast.error(errorMessage(error));
+    } finally {
+      setUpdatingVisibility(null);
+    }
+
+    function restoreVisibilityValue(
+      target: VisibilityQaType,
+      attemptedValue: boolean,
+    ) {
+      const previous = originalVisibility.current?.[target] ?? !attemptedValue;
+      if (fieldName) {
+        setValue(fieldName, previous, { shouldValidate: true });
+      } else {
+        setStartRecommendedVisible(previous);
+      }
+    }
+
+    function applyActualVisibility(actual: QaVisibility) {
+      originalVisibility.current = actual;
+      setValue("show_recent_files", actual.recent, { shouldValidate: true });
+      setValue("show_frequent_folders", actual.frequent, {
         shouldValidate: true,
       });
-      toast.error(errorMessage(error));
+      setStartRecommendedVisible(actual.start_recommended);
     }
   };
 
@@ -248,6 +286,9 @@ export function SettingsPage() {
       originalVisibility.current = {
         recent: values.show_recent_files,
         frequent: values.show_frequent_folders,
+        start_recommended:
+          originalVisibility.current?.start_recommended ??
+          startRecommendedVisible,
       };
       if (visibilityChanged) {
         toast.success(t("quickAccessVisibilityUpdated"));
@@ -269,7 +310,11 @@ export function SettingsPage() {
       <PageHeader
         actions={
           <Button
-            disabled={loading || formState.isSubmitting}
+            disabled={
+              loading ||
+              formState.isSubmitting ||
+              updatingVisibility !== null
+            }
             form="settings-form"
             type="submit"
           >
@@ -484,9 +529,14 @@ export function SettingsPage() {
               ],
             }}
           />
+        </Section>
+
+        <Section title={t("visibility")}>
           <SwitchControl
             control={control}
-            disabled={loading || privacyActive}
+            disabled={
+              loading || privacyActive || updatingVisibility !== null
+            }
             field={{ label: t("showRecentFiles"), name: "show_recent_files" }}
             onCheckedChange={(checked) =>
               void updateVisibility("recent", checked)
@@ -494,7 +544,9 @@ export function SettingsPage() {
           />
           <SwitchControl
             control={control}
-            disabled={loading || privacyActive}
+            disabled={
+              loading || privacyActive || updatingVisibility !== null
+            }
             field={{
               label: t("showFrequentFolders"),
               name: "show_frequent_folders",
@@ -503,6 +555,23 @@ export function SettingsPage() {
               void updateVisibility("frequent", checked)
             }
           />
+          <label className="flex items-center justify-between gap-4 py-3">
+            <span>
+              <span className="block text-sm">{t("showStartRecommended")}</span>
+              <span className="block text-xs text-muted-foreground">
+                {t("showStartRecommendedDescription")}
+              </span>
+            </span>
+            <Switch
+              checked={startRecommendedVisible}
+              disabled={
+                loading || privacyActive || updatingVisibility !== null
+              }
+              onCheckedChange={(checked) =>
+                void updateVisibility("start_recommended", checked)
+              }
+            />
+          </label>
         </Section>
 
         <Section title={t("notifications")}>

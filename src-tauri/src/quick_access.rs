@@ -57,6 +57,14 @@ pub struct QaRestoreSectionResult {
 pub struct QaVisibility {
     pub recent: bool,
     pub frequent: bool,
+    pub start_recommended: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VisibilityTarget {
+    Recent,
+    Frequent,
+    StartRecommended,
 }
 
 pub fn list_items(qa_type: &str) -> Result<Vec<QaItem>> {
@@ -200,33 +208,42 @@ pub fn get_visibility() -> Result<QaVisibility> {
     Ok(QaVisibility {
         recent: manager.is_visible(QuickAccess::RecentFiles)?,
         frequent: manager.is_visible(QuickAccess::FrequentFolders)?,
+        start_recommended: manager.is_start_recommended_section_visible()?,
     })
 }
 
-pub fn set_visibility(qa_type: &str, visible: bool) -> Result<()> {
-    let qa_type = parse_visibility_qa_type(qa_type)?;
+pub fn set_visibility(qa_type: &str, visible: bool) -> Result<QaVisibility> {
+    let target = parse_visibility_qa_type(qa_type)?;
     log::info!(
         "Quick Access visibility update started qa_type={} visible={visible}",
-        qa_name(qa_type)
+        visibility_name(target)
     );
 
     let manager = QuickAccessManager::new();
-    match manager.set_visible_with_options(
-        qa_type,
-        visible,
-        VisibilityOptions::new().refresh_explorer(),
-    ) {
+    let options = VisibilityOptions::new().refresh_explorer();
+    let result = match target {
+        VisibilityTarget::Recent => {
+            manager.set_visible_with_options(QuickAccess::RecentFiles, visible, options)
+        }
+        VisibilityTarget::Frequent => {
+            manager.set_visible_with_options(QuickAccess::FrequentFolders, visible, options)
+        }
+        VisibilityTarget::StartRecommended => {
+            manager.set_start_recommended_section_visible_with_options(visible, options)
+        }
+    };
+    match result {
         Ok(()) => {
             log::info!(
                 "Quick Access visibility update succeeded qa_type={} visible={visible}",
-                qa_name(qa_type)
+                visibility_name(target)
             );
-            Ok(())
+            get_visibility()
         }
         Err(error) => {
             log::error!(
                 "Quick Access visibility update failed qa_type={} visible={visible} error={error}",
-                qa_name(qa_type)
+                visibility_name(target)
             );
             Err(error.into())
         }
@@ -250,11 +267,20 @@ fn parse_write_qa_type(qa_type: &str) -> Result<QuickAccess> {
     }
 }
 
-fn parse_visibility_qa_type(qa_type: &str) -> Result<QuickAccess> {
+fn parse_visibility_qa_type(qa_type: &str) -> Result<VisibilityTarget> {
     match qa_type {
-        "recent" => Ok(QuickAccess::RecentFiles),
-        "frequent" => Ok(QuickAccess::FrequentFolders),
+        "recent" => Ok(VisibilityTarget::Recent),
+        "frequent" => Ok(VisibilityTarget::Frequent),
+        "start_recommended" => Ok(VisibilityTarget::StartRecommended),
         _ => bail!("unsupported Quick Access visibility type: {qa_type}"),
+    }
+}
+
+fn visibility_name(target: VisibilityTarget) -> &'static str {
+    match target {
+        VisibilityTarget::Recent => "recent",
+        VisibilityTarget::Frequent => "frequent",
+        VisibilityTarget::StartRecommended => "start_recommended",
     }
 }
 
@@ -448,11 +474,33 @@ mod tests {
     fn parses_visibility_qa_types() {
         assert_eq!(
             parse_visibility_qa_type("recent").unwrap(),
-            QuickAccess::RecentFiles
+            VisibilityTarget::Recent
         );
         assert_eq!(
             parse_visibility_qa_type("frequent").unwrap(),
-            QuickAccess::FrequentFolders
+            VisibilityTarget::Frequent
+        );
+        assert_eq!(
+            parse_visibility_qa_type("start_recommended").unwrap(),
+            VisibilityTarget::StartRecommended
+        );
+    }
+
+    #[test]
+    fn serializes_all_visibility_fields() {
+        let visibility = QaVisibility {
+            recent: true,
+            frequent: false,
+            start_recommended: true,
+        };
+
+        assert_eq!(
+            serde_json::to_value(visibility).unwrap(),
+            serde_json::json!({
+                "recent": true,
+                "frequent": false,
+                "start_recommended": true
+            })
         );
     }
 

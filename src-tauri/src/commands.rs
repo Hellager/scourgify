@@ -240,7 +240,7 @@ pub(crate) fn set_qa_visibility(
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
     visible: bool,
-) -> Result<(), String> {
+) -> Result<QaVisibility, String> {
     ensure_quick_access_write_allowed(privacy.state())?;
     quick_access::set_visibility(&qa_type, visible).map_err(|error| error.to_string())
 }

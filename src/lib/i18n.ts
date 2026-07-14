@@ -242,6 +242,9 @@ const en = {
   settingsSubtitle: "Scourgify preferences",
   showFrequentFolders: "Show frequent folders",
   showRecentFiles: "Show recent files",
+  showStartRecommended: "Show recent items in Start Recommended",
+  showStartRecommendedDescription:
+    "On some Windows 11 versions, hiding this can also hide Explorer Recent Files.",
   sidebar: "Sidebar",
   sidebarStyle: "Sidebar style",
   smartClean: "Smart clean",
@@ -259,6 +262,7 @@ const en = {
   version: "Version",
   visible: "Visible",
   visibleColumns: "Visible columns",
+  visibility: "Visibility",
   whitelist: "Whitelist",
 };
 
@@ -493,6 +497,9 @@ const dictionaries: Record<Language, Dictionary> = {
     settingsSubtitle: "Scourgify 偏好设置",
     showFrequentFolders: "显示常用文件夹",
     showRecentFiles: "显示最近文件",
+    showStartRecommended: "在开始菜单推荐区显示最近项目",
+    showStartRecommendedDescription:
+      "部分 Windows 11 版本隐藏此项时，也可能隐藏资源管理器中的最近文件。",
     sidebar: "侧边栏",
     sidebarStyle: "侧边栏样式",
     succeeded: "成功",
@@ -503,6 +510,7 @@ const dictionaries: Record<Language, Dictionary> = {
     version: "版本",
     visible: "可见",
     visibleColumns: "可见列",
+    visibility: "可见性",
     whitelist: "白名单",
   },
   "zh-TW": {
@@ -731,6 +739,9 @@ const dictionaries: Record<Language, Dictionary> = {
     settingsSubtitle: "Scourgify 偏好設定",
     showFrequentFolders: "顯示常用資料夾",
     showRecentFiles: "顯示最近檔案",
+    showStartRecommended: "在開始功能表建議區顯示最近項目",
+    showStartRecommendedDescription:
+      "部分 Windows 11 版本隱藏此項時，也可能隱藏檔案總管中的最近檔案。",
     sidebar: "側邊欄",
     sidebarStyle: "側邊欄樣式",
     succeeded: "成功",
@@ -741,6 +752,7 @@ const dictionaries: Record<Language, Dictionary> = {
     version: "版本",
     visible: "可見",
     visibleColumns: "可見欄位",
+    visibility: "可見性",
     whitelist: "白名單",
   },
   "fr-FR": {
@@ -983,6 +995,9 @@ const dictionaries: Record<Language, Dictionary> = {
     settingsSubtitle: "Préférences de Scourgify",
     showFrequentFolders: "Afficher les dossiers fréquents",
     showRecentFiles: "Afficher les fichiers récents",
+    showStartRecommended: "Afficher les éléments récents dans Recommandé",
+    showStartRecommendedDescription:
+      "Sur certaines versions de Windows 11, masquer cette option peut aussi masquer les fichiers récents de l'Explorateur.",
     sidebar: "Barre latérale",
     sidebarStyle: "Style de barre latérale",
     succeeded: "Réussi",
@@ -993,6 +1008,7 @@ const dictionaries: Record<Language, Dictionary> = {
     version: "Version",
     visible: "Visible",
     visibleColumns: "Colonnes visibles",
+    visibility: "Visibilité",
     whitelist: "Liste blanche",
   },
   "ru-RU": {
@@ -1235,6 +1251,9 @@ const dictionaries: Record<Language, Dictionary> = {
     settingsSubtitle: "Параметры Scourgify",
     showFrequentFolders: "Показывать частые папки",
     showRecentFiles: "Показывать недавние файлы",
+    showStartRecommended: "Показывать недавние элементы в рекомендациях меню «Пуск»",
+    showStartRecommendedDescription:
+      "В некоторых версиях Windows 11 отключение этой настройки также скрывает недавние файлы в Проводнике.",
     sidebar: "Боковая панель",
     sidebarStyle: "Стиль боковой панели",
     succeeded: "Успешно",
@@ -1245,6 +1264,7 @@ const dictionaries: Record<Language, Dictionary> = {
     version: "Версия",
     visible: "Видимые",
     visibleColumns: "Видимые столбцы",
+    visibility: "Видимость",
     whitelist: "Белый список",
   },
 };
