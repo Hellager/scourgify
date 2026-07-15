@@ -1,28 +1,44 @@
 use std::path::PathBuf;
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use super::ensure_quick_access_write_allowed;
 use crate::{
     error::{CommandError, CommandResult, ErrorCode, ValidationError},
     privacy::PrivacyManager,
     quick_access::{self, QaCounts, QaItem, QaRestoreResult, QaVisibility, QuickAccessError},
+    quick_access_cache::QuickAccessCache,
 };
 
 use super::ActionReceipt;
 
 #[tauri::command]
-pub(crate) fn list_qa_items(qa_type: String) -> CommandResult<Vec<QaItem>> {
-    quick_access::list_items(&qa_type).map_err(|error| quick_access_error("list_qa_items", error))
+pub(crate) fn list_qa_items(
+    app: AppHandle,
+    cache: State<'_, QuickAccessCache>,
+    qa_type: String,
+    fresh: Option<bool>,
+) -> CommandResult<Vec<QaItem>> {
+    cache
+        .items(&app, &qa_type, fresh.unwrap_or(true))
+        .map_err(|error| quick_access_error("list_qa_items", error))
 }
 
 #[tauri::command]
-pub(crate) fn get_qa_counts() -> CommandResult<QaCounts> {
-    quick_access::get_counts().map_err(|error| quick_access_error("get_qa_counts", error))
+pub(crate) fn get_qa_counts(
+    app: AppHandle,
+    cache: State<'_, QuickAccessCache>,
+    fresh: Option<bool>,
+) -> CommandResult<QaCounts> {
+    cache
+        .counts(&app, fresh.unwrap_or(false))
+        .map_err(|error| quick_access_error("get_qa_counts", error))
 }
 
 #[tauri::command]
 pub(crate) fn add_qa_item(
+    app: AppHandle,
+    cache: State<'_, QuickAccessCache>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
     path: String,
@@ -30,17 +46,22 @@ pub(crate) fn add_qa_item(
     ensure_quick_access_write_allowed(privacy.state())?;
     quick_access::add_item(&qa_type, &path)
         .map_err(|error| quick_access_error("add_qa_item", error))?;
+    cache.refresh_after_write(&app, &qa_type);
     Ok(ActionReceipt::new("add_qa_item", path, 1))
 }
 
 #[tauri::command]
 pub(crate) fn restore_qa_defaults(
+    app: AppHandle,
+    cache: State<'_, QuickAccessCache>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
 ) -> CommandResult<QaRestoreResult> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    quick_access::restore_defaults(&qa_type)
-        .map_err(|error| quick_access_error("restore_qa_defaults", error))
+    let result = quick_access::restore_defaults(&qa_type)
+        .map_err(|error| quick_access_error("restore_qa_defaults", error))?;
+    cache.refresh_after_write(&app, &qa_type);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -50,13 +71,19 @@ pub(crate) fn get_qa_visibility() -> CommandResult<QaVisibility> {
 
 #[tauri::command]
 pub(crate) fn set_qa_visibility(
+    app: AppHandle,
+    cache: State<'_, QuickAccessCache>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
     visible: bool,
 ) -> CommandResult<QaVisibility> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    quick_access::set_visibility(&qa_type, visible)
-        .map_err(|error| quick_access_error("set_qa_visibility", error))
+    let result = quick_access::set_visibility(&qa_type, visible)
+        .map_err(|error| quick_access_error("set_qa_visibility", error))?;
+    if matches!(qa_type.as_str(), "recent" | "frequent") {
+        cache.refresh_after_write(&app, &qa_type);
+    }
+    Ok(result)
 }
 
 #[tauri::command]

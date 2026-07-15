@@ -29,7 +29,7 @@ pub(crate) enum QuickAccessError {
     NotAFolder(String),
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct QaItem {
     pub path: String,
     pub name: String,
@@ -37,7 +37,7 @@ pub struct QaItem {
     pub pinned: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub struct QaCounts {
     pub recent: usize,
     pub frequent: usize,
@@ -91,17 +91,30 @@ pub fn list_items(qa_type: &str) -> Result<Vec<QaItem>> {
     let manager = QuickAccessManager::new();
     let qa_type = parse_qa_type(qa_type)?;
     let items = get_items_logged(&manager, qa_type, "list")?;
-    let interaction_times = interaction_times(&manager, qa_type);
 
-    Ok(items
+    Ok(items_from_paths_with_manager(&manager, qa_type, items))
+}
+
+pub(crate) fn items_from_paths(qa_type: QuickAccess, items: Vec<String>) -> Vec<QaItem> {
+    items_from_paths_with_manager(&QuickAccessManager::new(), qa_type, items)
+}
+
+fn items_from_paths_with_manager(
+    manager: &QuickAccessManager,
+    qa_type: QuickAccess,
+    items: Vec<String>,
+) -> Vec<QaItem> {
+    let interaction_times = interaction_times(manager, qa_type);
+
+    items
         .into_iter()
         .map(|path| QaItem {
             name: item_name(&path),
             last_interaction_at: interaction_times.get(&path.to_lowercase()).copied(),
-            pinned: frequent_folder_pinned(&manager, qa_type, &path),
+            pinned: frequent_folder_pinned(manager, qa_type, &path),
             path,
         })
-        .collect())
+        .collect()
 }
 
 fn frequent_folder_pinned(
@@ -166,22 +179,6 @@ fn filetime_to_unix_ms(filetime: u64) -> Option<u64> {
     filetime
         .checked_sub(FILETIME_UNIX_EPOCH_OFFSET)
         .map(|ticks| ticks / 10_000)
-}
-
-pub fn get_counts() -> Result<QaCounts> {
-    let manager = QuickAccessManager::new();
-    log::debug!("wincent counts started");
-
-    let recent = get_items_logged(&manager, QuickAccess::RecentFiles, "count")?.len();
-    let frequent = get_items_logged(&manager, QuickAccess::FrequentFolders, "count")?.len();
-    let all = get_items_logged(&manager, QuickAccess::All, "count")?.len();
-
-    log::debug!("wincent counts succeeded recent={recent} frequent={frequent} all={all}");
-    Ok(QaCounts {
-        recent,
-        frequent,
-        all,
-    })
 }
 
 pub fn add_item(qa_type: &str, path: &str) -> Result<()> {
@@ -309,7 +306,7 @@ pub fn set_visibility(qa_type: &str, visible: bool) -> Result<QaVisibility> {
     }
 }
 
-fn parse_qa_type(qa_type: &str) -> Result<QuickAccess> {
+pub(crate) fn parse_qa_type(qa_type: &str) -> Result<QuickAccess> {
     match qa_type {
         "all" => Ok(QuickAccess::All),
         "recent" => Ok(QuickAccess::RecentFiles),

@@ -9,6 +9,7 @@ use crate::{
     db,
     error::report_background_error,
     privacy::{LockResult, PrivacyManager},
+    quick_access_cache::{QuickAccessCache, QuickAccessWatchers},
 };
 
 pub(crate) fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -23,6 +24,12 @@ pub(crate) fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     app.manage(privacy);
     app.manage(AutoCleanState::default());
     app.manage(AutoCleanScheduler::start(app.handle().clone())?);
+    let quick_access_cache = QuickAccessCache::default();
+    app.manage(quick_access_cache.clone());
+    app.manage(QuickAccessWatchers::start(
+        app.handle().clone(),
+        quick_access_cache,
+    ));
 
     let mode = app
         .state::<Mutex<Config>>()

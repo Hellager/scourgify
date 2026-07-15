@@ -14,7 +14,7 @@ use crate::{
         history::{self, CleanSource, NewCleanRecord},
         rules, DbState,
     },
-    quick_access::{self, QaBatchResult},
+    quick_access::{self, QaBatchResult, QaItem},
     rules::Rule,
 };
 use matcher::{classify, MatchResult};
@@ -56,10 +56,14 @@ struct PreparedCleanup {
     skipped_protected: Vec<String>,
 }
 
-pub fn list_classified(database: &DbState, qa_type: &str) -> Result<Vec<ClassifiedItem>> {
+pub fn list_classified(
+    database: &DbState,
+    qa_type: &str,
+    items: Vec<QaItem>,
+) -> Result<Vec<ClassifiedItem>> {
     let item_type = item_type_for(qa_type)?;
     let rules = load_rules(database)?;
-    Ok(quick_access::list_items(qa_type)?
+    Ok(items
         .into_iter()
         .map(|item| ClassifiedItem {
             match_result: classify(&item.path, &rules),
@@ -70,6 +74,10 @@ pub fn list_classified(database: &DbState, qa_type: &str) -> Result<Vec<Classifi
             pinned: item.pinned,
         })
         .collect())
+}
+
+pub(crate) fn validate_list_type(qa_type: &str) -> Result<()> {
+    item_type_for(qa_type).map(|_| ())
 }
 
 pub fn remove_selected(

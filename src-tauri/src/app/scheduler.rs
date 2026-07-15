@@ -16,6 +16,7 @@ use crate::{
     db::DbState,
     error::report_background_error,
     privacy::PrivacyManager,
+    quick_access_cache::QuickAccessCache,
 };
 
 pub const AUTO_CLEAN_FINISHED_EVENT: &str = "auto-clean-finished";
@@ -68,6 +69,9 @@ pub fn run_now<R: Runtime>(app: &AppHandle<R>) -> Result<AutoCleanResult> {
         privacy.inner(),
         auto_clean.inner(),
     )?;
+    if let Some(cache) = app.try_state::<QuickAccessCache>() {
+        cache.refresh_after_write(app, "all");
+    }
     super::notifier::notify_auto_clean(app, &config, &result);
     record_completion(app, &result)?;
     Ok(result)

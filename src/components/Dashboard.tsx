@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { Link } from "react-router-dom";
 import {
   type Column,
@@ -99,6 +100,7 @@ import {
 import {
   dispatchAppEvent,
   OPEN_CONFIG_DRAWER_EVENT,
+  QUICK_ACCESS_CHANGED_EVENT,
   REFRESH_DASHBOARD_EVENT,
 } from "@/lib/app-events";
 import { type I18nKey, useI18n } from "@/lib/i18n";
@@ -133,6 +135,11 @@ interface QaCounts {
   recent: number;
   frequent: number;
   all: number;
+}
+
+interface QuickAccessChanged {
+  qa_type: QaType;
+  revision: number;
 }
 
 interface QaBatchResult {
@@ -442,8 +449,8 @@ export function Dashboard() {
   const visibleColumnCount = table.getVisibleLeafColumns().length;
   const pageCount = table.getPageCount();
 
-  const loadCounts = useCallback(async () => {
-    setCounts(await invokeCommand<QaCounts>("get_qa_counts"));
+  const loadCounts = useCallback(async (fresh = false) => {
+    setCounts(await invokeCommand<QaCounts>("get_qa_counts", { fresh }));
   }, []);
 
   const loadStats = useCallback(async () => {
@@ -459,29 +466,33 @@ export function Dashboard() {
     }
   }, [statsRange]);
 
-  const loadItems = useCallback(async (qaType: QaType) => {
+  const loadItems = useCallback(async (qaType: QaType, fresh = false) => {
     setLoading(true);
     setError(null);
     try {
       const database = await invokeCommand<DatabaseStatus>("get_database_status");
       setDatabase(database);
+      let nextItems: QaItem[];
       if (database.available) {
-        setItems(
-          await invokeCommand<QaItem[]>("list_qa_items_classified", { qaType }),
-        );
+        nextItems = await invokeCommand<QaItem[]>("list_qa_items_classified", {
+          fresh,
+          qaType,
+        });
       } else {
         const legacyItems = await invokeCommand<
           Array<Pick<QaItem, "path" | "name" | "last_interaction_at" | "pinned">>
-        >("list_qa_items", { qaType });
-        setItems(
-          legacyItems.map((item) => ({
-            ...item,
-            item_type:
-              qaType === "recent" ? "recent_file" : "frequent_folder",
-            match: { status: "neutral" },
-          })),
-        );
+        >("list_qa_items", { fresh, qaType });
+        nextItems = legacyItems.map((item) => ({
+          ...item,
+          item_type: qaType === "recent" ? "recent_file" : "frequent_folder",
+          match: { status: "neutral" },
+        }));
       }
+      setItems(nextItems);
+      const currentPaths = new Set(nextItems.map((item) => item.path));
+      setSelectedPaths(
+        (current) => new Set(Array.from(current).filter((path) => currentPaths.has(path))),
+      );
     } catch (error) {
       setItems([]);
       setError(errorMessage(error));
@@ -497,13 +508,12 @@ export function Dashboard() {
     return active;
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (fresh = false) => {
     setSelectedPaths(new Set());
     setPagination((current) => ({ ...current, pageIndex: 0 }));
     const [countsResult, privacyResult] = await Promise.allSettled([
-      loadCounts(),
+      loadCounts(fresh),
       syncPrivacyState(),
-      loadItems(activeTab),
     ]);
     if (countsResult.status === "rejected") {
       setCounts(emptyCounts);
@@ -512,10 +522,11 @@ export function Dashboard() {
     if (privacyResult.status === "rejected") {
       setPrivacyActive(false);
     }
+    await loadItems(activeTab);
   }, [activeTab, loadCounts, loadItems, syncPrivacyState]);
 
   const refreshAll = useCallback(
-    () => Promise.all([refresh(), loadStats()]),
+    (fresh = false) => Promise.all([refresh(fresh), loadStats()]),
     [loadStats, refresh],
   );
 
@@ -534,13 +545,41 @@ export function Dashboard() {
   }, [activeTab, query, items.length]);
 
   useEffect(() => {
-    const refreshDashboard = () => void refreshAll();
+    const refreshDashboard = (event: Event) => {
+      const { fresh = true } = (event as CustomEvent<{ fresh?: boolean }>).detail ?? {};
+      void refreshAll(fresh);
+    };
 
     window.addEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
     return () => {
       window.removeEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
     };
   }, [refreshAll]);
+
+  useEffect(() => {
+    let timeout: number | undefined;
+    let refreshItems = false;
+    const unlisten = listen<QuickAccessChanged>(
+      QUICK_ACCESS_CHANGED_EVENT,
+      ({ payload }) => {
+        refreshItems ||= payload.qa_type === activeTab;
+        window.clearTimeout(timeout);
+        timeout = window.setTimeout(() => {
+          const shouldRefreshItems = refreshItems;
+          refreshItems = false;
+          void loadCounts().catch((error) => setError(errorMessage(error)));
+          if (shouldRefreshItems) {
+            void loadItems(activeTab);
+          }
+        }, 100);
+      },
+    );
+
+    return () => {
+      window.clearTimeout(timeout);
+      unlisten.then((cleanup) => cleanup());
+    };
+  }, [activeTab, loadCounts, loadItems]);
 
   useEffect(() => {
     updateDashboardSummary({
@@ -773,7 +812,7 @@ export function Dashboard() {
           <Button
             aria-label={t("refreshQuickAccess")}
             disabled={loading}
-            onClick={() => void refreshAll()}
+            onClick={() => void refreshAll(true)}
             ref={refreshTriggerRef}
             size="icon-sm"
             type="button"
@@ -1025,7 +1064,7 @@ export function Dashboard() {
                         <span>{tableState}</span>
                         {error ? (
                           <Button
-                            onClick={() => void refresh()}
+                            onClick={() => void refresh(true)}
                             size="sm"
                             type="button"
                             variant="outline"

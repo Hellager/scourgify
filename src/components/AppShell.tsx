@@ -105,7 +105,7 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
           auto_clean_last_run: payload.completed_at,
         }));
         dispatchAppEvent(AUTO_CLEAN_UPDATED_EVENT, payload);
-        dispatchAppEvent(REFRESH_DASHBOARD_EVENT);
+        dispatchAppEvent(REFRESH_DASHBOARD_EVENT, { fresh: false });
         dispatchAppEvent(REFRESH_HISTORY_EVENT);
       },
     );
