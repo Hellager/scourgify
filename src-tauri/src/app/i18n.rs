@@ -22,7 +22,6 @@ pub struct TrayText {
     pub mode_dashboard: &'static str,
     pub mode_minimal: &'static str,
     pub language: &'static str,
-    pub about: &'static str,
     pub quit: &'static str,
 }
 
@@ -37,7 +36,6 @@ pub fn tray_text(language: &str) -> TrayText {
             mode_dashboard: "Dashboard",
             mode_minimal: "极简",
             language: "语言",
-            about: "关于",
             quit: "退出",
         },
         "zh-TW" => TrayText {
@@ -49,7 +47,6 @@ pub fn tray_text(language: &str) -> TrayText {
             mode_dashboard: "Dashboard",
             mode_minimal: "極簡",
             language: "語言",
-            about: "關於",
             quit: "退出",
         },
         "fr-FR" => TrayText {
@@ -61,7 +58,6 @@ pub fn tray_text(language: &str) -> TrayText {
             mode_dashboard: "Dashboard",
             mode_minimal: "Minimal",
             language: "Langue",
-            about: "À propos",
             quit: "Quitter",
         },
         "ru-RU" => TrayText {
@@ -73,7 +69,6 @@ pub fn tray_text(language: &str) -> TrayText {
             mode_dashboard: "Dashboard",
             mode_minimal: "Минимальный",
             language: "Язык",
-            about: "О программе",
             quit: "Выход",
         },
         _ => TrayText {
@@ -85,7 +80,6 @@ pub fn tray_text(language: &str) -> TrayText {
             mode_dashboard: "Dashboard",
             mode_minimal: "Minimal",
             language: "Language",
-            about: "About",
             quit: "Quit",
         },
     }

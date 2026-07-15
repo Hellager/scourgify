@@ -17,7 +17,6 @@ use crate::{
 const OPEN_DASHBOARD_ID: &str = "open-dashboard";
 const PRIVACY_MODE_ID: &str = "privacy-mode";
 const AUTO_START_ID: &str = "auto-start";
-const ABOUT_ID: &str = "about";
 const QUIT_ID: &str = "quit";
 const MODE_PREFIX: &str = "mode:";
 const LANGUAGE_PREFIX: &str = "language:";
@@ -50,7 +49,6 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
                 OPEN_DASHBOARD_ID => show_dashboard(app),
                 PRIVACY_MODE_ID => toggle_privacy_mode(app),
                 AUTO_START_ID => toggle_auto_start(app),
-                ABOUT_ID => show_about(app),
                 QUIT_ID => quit_app(app),
                 _ => {}
             }
@@ -87,7 +85,6 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>) -> Result<Menu<R>> {
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(app, QUIT_ID, text.quit, true, None::<&str>)?;
-    let about = MenuItem::with_id(app, ABOUT_ID, text.about, true, None::<&str>)?;
     let auto_start = CheckMenuItem::with_id(
         app,
         AUTO_START_ID,
@@ -117,7 +114,6 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>) -> Result<Menu<R>> {
                 &mode_menu,
                 &language_menu,
                 &separator_bottom,
-                &about,
                 &quit,
             ],
         )?
@@ -130,7 +126,6 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>) -> Result<Menu<R>> {
                 &mode_menu,
                 &language_menu,
                 &separator_bottom,
-                &about,
                 &quit,
             ],
         )?
@@ -211,12 +206,6 @@ fn language_item<R: Runtime>(
         current == code,
         None::<&str>,
     )?)
-}
-
-fn show_about<R: Runtime>(app: &AppHandle<R>) {
-    if let Err(error) = window::show_about(app) {
-        log::error!("failed to show about window: {error}");
-    }
 }
 
 fn show_dashboard<R: Runtime>(app: &AppHandle<R>) {
