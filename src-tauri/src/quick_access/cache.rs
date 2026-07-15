@@ -12,10 +12,9 @@ use wincent::prelude::{
     QuickAccess, QuickAccessManager, QuickAccessMonitor, QuickAccessMonitorOptions,
 };
 
-use crate::{
-    error::report_background_error,
-    quick_access::{self, QaCounts, QaItem},
-};
+use crate::error::report_background_error;
+
+use super::{operations, QaCounts, QaItem};
 
 pub(crate) const QUICK_ACCESS_CHANGED_EVENT: &str = "quick-access-changed";
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
@@ -45,7 +44,7 @@ impl QuickAccessCache {
         qa_type: &str,
         fresh: bool,
     ) -> Result<Vec<QaItem>> {
-        let qa_type = quick_access::parse_qa_type(qa_type)?;
+        let qa_type = operations::parse_qa_type(qa_type)?;
         match qa_type {
             QuickAccess::RecentFiles | QuickAccess::FrequentFolders => {
                 self.category_items(app, qa_type, fresh)
@@ -96,7 +95,7 @@ impl QuickAccessCache {
         }
 
         log::debug!("Quick Access cache refresh qa_type={}", qa_name(qa_type));
-        let items = quick_access::list_items(qa_name(qa_type))?;
+        let items = operations::list_items(qa_name(qa_type))?;
         self.update(app, qa_type, items.clone())?;
         Ok(items)
     }
@@ -168,7 +167,7 @@ impl QuickAccessCache {
         qa_type: QuickAccess,
         paths: Vec<String>,
     ) -> Result<()> {
-        self.update(app, qa_type, quick_access::items_from_paths(qa_type, paths))
+        self.update(app, qa_type, operations::items_from_paths(qa_type, paths))
     }
 }
 

@@ -9,7 +9,6 @@ mod db;
 mod error;
 mod privacy;
 mod quick_access;
-mod quick_access_cache;
 mod rules;
 
 pub fn run() {

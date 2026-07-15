@@ -9,7 +9,7 @@ use crate::{
     db,
     error::report_background_error,
     privacy::{LockResult, PrivacyManager},
-    quick_access_cache::{QuickAccessCache, QuickAccessWatchers},
+    quick_access::{QuickAccessCache, QuickAccessWatchers},
 };
 
 pub(crate) fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {

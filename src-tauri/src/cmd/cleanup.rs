@@ -10,8 +10,7 @@ use crate::{
     db::{history::CleanSource, DatabaseStateError, DbState},
     error::{wincent_command_error, CommandError, CommandResult, ErrorCode},
     privacy::PrivacyManager,
-    quick_access::QaBatchResult,
-    quick_access_cache::QuickAccessCache,
+    quick_access::{QaBatchResult, QuickAccessCache},
 };
 
 #[tauri::command]

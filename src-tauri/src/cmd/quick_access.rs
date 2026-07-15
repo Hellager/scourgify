@@ -11,9 +11,8 @@ use crate::{
     privacy::PrivacyManager,
     quick_access::{
         self, QaCounts, QaItem, QaItemMetadata, QaMutationResult, QaRestoreResult, QaVisibility,
-        QuickAccessError,
+        QuickAccessCache, QuickAccessError,
     },
-    quick_access_cache::QuickAccessCache,
 };
 
 use super::ActionReceipt;

@@ -16,7 +16,7 @@ use crate::{
     db::DbState,
     error::report_background_error,
     privacy::PrivacyManager,
-    quick_access_cache::QuickAccessCache,
+    quick_access::QuickAccessCache,
 };
 
 pub const AUTO_CLEAN_FINISHED_EVENT: &str = "auto-clean-finished";
