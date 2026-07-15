@@ -31,7 +31,7 @@ const en = {
   autoCleanCompleted:
     "Automatic cleanup removed {succeeded} of {total} matching item(s).",
   autoCleanCompletedWithIssues:
-    "Removed {succeeded}; item failures: {failed}; section failures: {sectionErrors}; history failures: {historyErrors}.",
+    "Removed {succeeded}; item failures: {failed}; warnings: {warnings}; section failures: {sectionErrors}; history failures: {historyErrors}.",
   autoCleanDailyAt: "Daily at a fixed time",
   autoCleanEnabled: "Enable automatic cleanup",
   autoCleanEveryHours: "Every N hours",
@@ -354,7 +354,7 @@ const dictionaries: Record<Language, Dictionary> = {
     autoClean: "自动清理",
     autoCleanCompleted: "自动清理已移除 {succeeded}/{total} 个命中项目。",
     autoCleanCompletedWithIssues:
-      "已移除 {succeeded} 个；项目失败 {failed} 个；分区失败 {sectionErrors} 个；历史写入失败 {historyErrors} 个。",
+      "已移除 {succeeded} 个；项目失败 {failed} 个；警告 {warnings} 个；分区失败 {sectionErrors} 个；历史写入失败 {historyErrors} 个。",
     autoCleanDailyAt: "每天固定时间",
     autoCleanEnabled: "启用自动清理",
     autoCleanEveryHours: "每 N 小时",
@@ -602,7 +602,7 @@ const dictionaries: Record<Language, Dictionary> = {
     autoClean: "自動清理",
     autoCleanCompleted: "自動清理已移除 {succeeded}/{total} 個命中項目。",
     autoCleanCompletedWithIssues:
-      "已移除 {succeeded} 個；項目失敗 {failed} 個；分區失敗 {sectionErrors} 個；歷史寫入失敗 {historyErrors} 個。",
+      "已移除 {succeeded} 個；項目失敗 {failed} 個；警告 {warnings} 個；分區失敗 {sectionErrors} 個；歷史寫入失敗 {historyErrors} 個。",
     autoCleanDailyAt: "每天固定時間",
     autoCleanEnabled: "啟用自動清理",
     autoCleanEveryHours: "每 N 小時",
@@ -860,7 +860,7 @@ const dictionaries: Record<Language, Dictionary> = {
     autoCleanCompleted:
       "Le nettoyage automatique a supprimé {succeeded} élément(s) sur {total}.",
     autoCleanCompletedWithIssues:
-      "Supprimés : {succeeded} ; échecs d'éléments : {failed} ; échecs de sections : {sectionErrors} ; échecs d'historique : {historyErrors}.",
+      "Supprimés : {succeeded} ; échecs d'éléments : {failed} ; avertissements : {warnings} ; échecs de sections : {sectionErrors} ; échecs d'historique : {historyErrors}.",
     autoCleanDailyAt: "Chaque jour à heure fixe",
     autoCleanEnabled: "Activer le nettoyage automatique",
     autoCleanEveryHours: "Toutes les N heures",
@@ -1122,7 +1122,7 @@ const dictionaries: Record<Language, Dictionary> = {
     autoCleanCompleted:
       "Автоматическая очистка удалила {succeeded} из {total} совпавших элементов.",
     autoCleanCompletedWithIssues:
-      "Удалено: {succeeded}; ошибок элементов: {failed}; ошибок разделов: {sectionErrors}; ошибок истории: {historyErrors}.",
+      "Удалено: {succeeded}; ошибок элементов: {failed}; предупреждений: {warnings}; ошибок разделов: {sectionErrors}; ошибок истории: {historyErrors}.",
     autoCleanDailyAt: "Ежедневно в заданное время",
     autoCleanEnabled: "Включить автоматическую очистку",
     autoCleanEveryHours: "Каждые N часов",

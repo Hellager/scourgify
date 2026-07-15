@@ -32,8 +32,12 @@ pub fn notify_auto_clean<R: Runtime>(
             result.succeeded, result.total
         ),
         AutoCleanNotification::PartialFailure => format!(
-            "Auto-clean completed with issues: {} removed, {} item failures, {} section failures, {} history failures.",
-            result.succeeded, result.failed, result.section_errors, result.history_errors
+            "Auto-clean completed with issues: {} removed, {} item failures, {} warnings, {} section failures, {} history failures.",
+            result.succeeded,
+            result.failed,
+            result.warnings,
+            result.section_errors,
+            result.history_errors
         ),
     };
     show(app, &body);
@@ -47,7 +51,7 @@ fn auto_clean_notification(
     if !config.notifications_enabled {
         return None;
     }
-    if result.has_failures() {
+    if result.has_issues() {
         return config
             .notify_partial_failure
             .then_some(AutoCleanNotification::PartialFailure);
@@ -121,6 +125,7 @@ mod tests {
             total: 0,
             succeeded: 0,
             failed: usize::from(with_failure),
+            warnings: 0,
             skipped_protected: 0,
             section_errors: 0,
             history_errors: 0,

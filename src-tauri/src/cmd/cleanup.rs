@@ -8,7 +8,7 @@ use crate::{
     cleanup::{self, AutoCleanError, AutoCleanResult, ClassifiedItem, CleanupError},
     config::Config,
     db::{history::CleanSource, DatabaseStateError, DbState},
-    error::{CommandError, CommandResult, ErrorCode},
+    error::{wincent_command_error, CommandError, CommandResult, ErrorCode},
     privacy::PrivacyManager,
     quick_access::QaBatchResult,
     quick_access_cache::QuickAccessCache,
@@ -124,21 +124,23 @@ pub(crate) fn run_auto_clean_now(app: AppHandle) -> CommandResult<AutoCleanResul
 }
 
 fn cleanup_error(operation: &str, error: anyhow::Error) -> CommandError {
-    let (code, message) = if error.downcast_ref::<DatabaseStateError>().is_some() {
-        (
+    if error.downcast_ref::<DatabaseStateError>().is_some() {
+        CommandError::unexpected(
+            operation,
             ErrorCode::DatabaseUnavailable,
             "The cleanup database is unavailable.",
+            true,
+            error,
         )
     } else if error.downcast_ref::<CleanupError>().is_some() {
-        (
+        CommandError::expected(
+            operation,
             ErrorCode::ValidationInvalidArgument,
             "The requested Quick Access type is invalid.",
+            false,
+            error,
         )
     } else {
-        (
-            ErrorCode::QuickAccessOperationFailed,
-            "The cleanup operation could not be completed.",
-        )
-    };
-    CommandError::unexpected(operation, code, message, true, error)
+        wincent_command_error(operation, error)
+    }
 }

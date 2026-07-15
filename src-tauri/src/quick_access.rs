@@ -6,9 +6,13 @@ use std::{
 };
 use thiserror::Error;
 use wincent::prelude::{
-    AddOptions, BatchOptions, FrequentFolderPinStatus, FrequentRestoreReport, QuickAccess,
-    QuickAccessItem, QuickAccessManager, RecentRestoreReport, RemoveOptions,
-    RestoreDefaultsOptions, RestoreDefaultsReport, VisibilityOptions,
+    AddOptions, BatchOptions, DestListEntry, FrequentFolderPinStatus, FrequentRawPathRemoveReport,
+    FrequentRestoreReport, QuickAccess, QuickAccessItem, QuickAccessManager, RecentRestoreReport,
+    RemoveOptions, RestoreDefaultsOptions, RestoreDefaultsReport, VisibilityOptions, WincentError,
+};
+
+use crate::error::{
+    wincent_command_error_ref, wincent_post_mutation_warning, CommandError, CommandWarning,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -44,11 +48,26 @@ pub struct QaCounts {
     pub all: usize,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct QaItemMetadata {
+    pub path: String,
+    pub name: String,
+    pub last_interaction_at: Option<u64>,
+    pub access_count: u32,
+    pub score: Option<f32>,
+    pub recent_rank: i32,
+    pub mru_position: u64,
+    pub pinned: bool,
+    pub pin_order: Option<i32>,
+    pub warning_count: usize,
+}
+
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 pub struct QaBatchResult {
     pub total: usize,
     pub succeeded: Vec<String>,
     pub failed: Vec<QaBatchFailure>,
+    pub warnings: Vec<QaBatchWarning>,
     pub skipped_protected: Vec<String>,
     pub history_error: Option<String>,
 }
@@ -56,21 +75,50 @@ pub struct QaBatchResult {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct QaBatchFailure {
     pub path: String,
-    pub error: String,
+    pub error: CommandError,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct QaBatchWarning {
+    pub path: String,
+    pub warning: CommandWarning,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct QaMutationResult {
+    pub action: &'static str,
+    pub target: String,
+    pub affected: u64,
+    pub warnings: Vec<CommandWarning>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct QaRestoreResult {
     pub success: bool,
     pub recent: Option<QaRestoreSectionResult>,
     pub frequent: Option<QaRestoreSectionResult>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct QaRestoreSectionResult {
     pub success: bool,
     pub deleted_lnk_count: usize,
-    pub error: Option<String>,
+    pub recent_files_cleared: Option<bool>,
+    pub backing_file_deleted: Option<bool>,
+    pub rebuilt: Option<bool>,
+    pub non_default_raw_path_count: usize,
+    pub raw_path_cleanup: Option<QaRawPathCleanupResult>,
+    pub error: Option<CommandError>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct QaRawPathCleanupResult {
+    pub success: bool,
+    pub requested_count: usize,
+    pub backing_file_deleted: bool,
+    pub rebuilt: bool,
+    pub remaining_count: usize,
+    pub error: Option<CommandError>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -93,6 +141,41 @@ pub fn list_items(qa_type: &str) -> Result<Vec<QaItem>> {
     let items = get_items_logged(&manager, qa_type, "list")?;
 
     Ok(items_from_paths_with_manager(&manager, qa_type, items))
+}
+
+pub fn list_item_metadata(qa_type: &str) -> Result<Vec<QaItemMetadata>> {
+    let manager = QuickAccessManager::new();
+    let qa_type = parse_write_qa_type(qa_type)?;
+    let entries = match qa_type {
+        QuickAccess::RecentFiles => manager.get_recent_files_metadata(),
+        QuickAccess::FrequentFolders => manager.get_frequent_folders_metadata(),
+        QuickAccess::All => unreachable!("metadata rejects QuickAccess::All"),
+        _ => unreachable!("wincent QuickAccess gained an unsupported variant"),
+    }?;
+
+    log::debug!(
+        "wincent item metadata succeeded qa_type={} count={}",
+        qa_name(qa_type),
+        entries.len()
+    );
+    Ok(entries.into_iter().map(metadata_from_entry).collect())
+}
+
+fn metadata_from_entry(entry: DestListEntry) -> QaItemMetadata {
+    QaItemMetadata {
+        path: entry.path().to_string(),
+        name: item_name(entry.path()),
+        last_interaction_at: entry
+            .last_interaction_filetime()
+            .and_then(filetime_to_unix_ms),
+        access_count: entry.access_count(),
+        score: entry.score().is_finite().then_some(entry.score()),
+        recent_rank: entry.recent_rank(),
+        mru_position: entry.mru_position() as u64,
+        pinned: entry.is_pinned(),
+        pin_order: entry.pin_order(),
+        warning_count: entry.warnings().len(),
+    }
 }
 
 pub(crate) fn items_from_paths(qa_type: QuickAccess, items: Vec<String>) -> Vec<QaItem> {
@@ -200,11 +283,19 @@ pub fn add_item(qa_type: &str, path: &str) -> Result<()> {
             Ok(())
         }
         Err(error) => {
-            log::error!(
-                "wincent add item failed qa_type={} path={} error={error}",
-                qa_name(qa_type),
-                path.display()
-            );
+            if matches!(&error, WincentError::PostMutationFailure { .. }) {
+                log::warn!(
+                    "wincent add item completed with post-mutation warning qa_type={} path={} error={error}",
+                    qa_name(qa_type),
+                    path.display()
+                );
+            } else {
+                log::error!(
+                    "wincent add item failed qa_type={} path={} error={error}",
+                    qa_name(qa_type),
+                    path.display()
+                );
+            }
             Err(error.into())
         }
     }
@@ -224,11 +315,15 @@ pub fn remove_items(qa_type: &str, paths: Vec<String>) -> Result<QaBatchResult> 
     let result = QuickAccessManager::new().remove_items_batch_with_batch_options(
         &items,
         BatchOptions::new().refresh_explorer(),
-        RemoveOptions::new().refresh_explorer(),
+        default_remove_options(),
     );
     log_batch_result("remove", qa_type, &result);
 
-    Ok(to_batch_result(result))
+    Ok(to_batch_result("quick_access_remove_batch", result))
+}
+
+fn default_remove_options() -> RemoveOptions {
+    RemoveOptions::new().deep_clean_recent_links()
 }
 
 pub fn restore_defaults(qa_type: &str) -> Result<QaRestoreResult> {
@@ -363,20 +458,32 @@ fn validate_add_item_path(qa_type: QuickAccess, path: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn to_batch_result(result: wincent::prelude::BatchResult) -> QaBatchResult {
+fn to_batch_result(operation: &str, result: wincent::prelude::BatchResult) -> QaBatchResult {
     let total = result.total();
-    let (succeeded, failed) = result.into_parts();
+    let (mut succeeded, failed) = result.into_parts();
+    let mut command_failures = Vec::new();
+    let mut warnings = Vec::new();
+
+    for failure in failed {
+        if let Some(warning) = wincent_post_mutation_warning(operation, failure.error()) {
+            succeeded.push(failure.path().to_string());
+            warnings.push(QaBatchWarning {
+                path: failure.path().to_string(),
+                warning,
+            });
+        } else {
+            command_failures.push(QaBatchFailure {
+                path: failure.path().to_string(),
+                error: wincent_command_error_ref(operation, failure.error()),
+            });
+        }
+    }
 
     QaBatchResult {
         total,
         succeeded,
-        failed: failed
-            .into_iter()
-            .map(|failure| QaBatchFailure {
-                path: failure.path().to_string(),
-                error: failure.error().to_string(),
-            })
-            .collect(),
+        failed: command_failures,
+        warnings,
         skipped_protected: Vec::new(),
         history_error: None,
     }
@@ -394,7 +501,14 @@ fn recent_restore_section(report: &RecentRestoreReport) -> QaRestoreSectionResul
     QaRestoreSectionResult {
         success: report.success(),
         deleted_lnk_count: report.deleted_lnk_paths().len(),
-        error: report.error().map(|error| error.to_string()),
+        recent_files_cleared: Some(report.recent_files_cleared()),
+        backing_file_deleted: None,
+        rebuilt: None,
+        non_default_raw_path_count: 0,
+        raw_path_cleanup: None,
+        error: report
+            .error()
+            .map(|error| wincent_command_error_ref("restore_qa_defaults.recent", error)),
     }
 }
 
@@ -402,7 +516,27 @@ fn frequent_restore_section(report: &FrequentRestoreReport) -> QaRestoreSectionR
     QaRestoreSectionResult {
         success: report.success(),
         deleted_lnk_count: report.deleted_lnk_paths().len(),
-        error: report.error().map(|error| error.to_string()),
+        recent_files_cleared: None,
+        backing_file_deleted: Some(report.backing_file_deleted()),
+        rebuilt: Some(report.rebuilt()),
+        non_default_raw_path_count: report.non_default_raw_paths().len(),
+        raw_path_cleanup: report.raw_path_remove_report().map(raw_path_cleanup_result),
+        error: report
+            .error()
+            .map(|error| wincent_command_error_ref("restore_qa_defaults.frequent", error)),
+    }
+}
+
+fn raw_path_cleanup_result(report: &FrequentRawPathRemoveReport) -> QaRawPathCleanupResult {
+    QaRawPathCleanupResult {
+        success: report.success(),
+        requested_count: report.requested_raw_paths().len(),
+        backing_file_deleted: report.backing_file_deleted(),
+        rebuilt: report.rebuilt(),
+        remaining_count: report.remaining_non_default_raw_paths().len(),
+        error: report
+            .error()
+            .map(|error| wincent_command_error_ref("restore_qa_defaults.raw_path_cleanup", error)),
     }
 }
 
@@ -433,10 +567,20 @@ fn get_items_logged(
 
 fn log_batch_result(operation: &str, qa_type: QuickAccess, result: &wincent::prelude::BatchResult) {
     let total = result.total();
-    let succeeded = result.succeeded().len();
-    let failed = result.failed().len();
+    let post_mutation_warnings = result
+        .failed()
+        .iter()
+        .filter(|failure| matches!(failure.error(), WincentError::PostMutationFailure { .. }))
+        .count();
+    let succeeded = result.succeeded().len() + post_mutation_warnings;
+    let failed = result.failed().len() - post_mutation_warnings;
 
-    if failed == 0 {
+    if failed == 0 && post_mutation_warnings > 0 {
+        log::warn!(
+            "wincent {operation} batch completed with warnings qa_type={} total={total} succeeded={succeeded} warnings={post_mutation_warnings}",
+            qa_name(qa_type)
+        );
+    } else if failed == 0 {
         log::info!(
             "wincent {operation} batch succeeded qa_type={} total={total} succeeded={succeeded}",
             qa_name(qa_type)
@@ -454,12 +598,21 @@ fn log_batch_result(operation: &str, qa_type: QuickAccess, result: &wincent::pre
     }
 
     for failure in result.failed() {
-        log::warn!(
-            "wincent {operation} item failed qa_type={} path={} error={}",
-            qa_name(qa_type),
-            failure.path(),
-            failure.error()
-        );
+        if matches!(failure.error(), WincentError::PostMutationFailure { .. }) {
+            log::warn!(
+                "wincent {operation} item completed with warning qa_type={} path={} error={}",
+                qa_name(qa_type),
+                failure.path(),
+                failure.error()
+            );
+        } else {
+            log::warn!(
+                "wincent {operation} item failed qa_type={} path={} error={}",
+                qa_name(qa_type),
+                failure.path(),
+                failure.error()
+            );
+        }
     }
 }
 
@@ -516,11 +669,12 @@ mod tests {
 
     #[test]
     fn converts_empty_batch_result() {
-        let result = to_batch_result(wincent::prelude::BatchResult::default());
+        let result = to_batch_result("test", wincent::prelude::BatchResult::default());
 
         assert_eq!(result.total, 0);
         assert!(result.succeeded.is_empty());
         assert!(result.failed.is_empty());
+        assert!(result.warnings.is_empty());
         assert!(result.skipped_protected.is_empty());
         assert_eq!(result.history_error, None);
     }
@@ -563,6 +717,13 @@ mod tests {
         let error = parse_qa_type("unknown").unwrap_err().to_string();
 
         assert!(error.contains("unsupported Quick Access type"));
+    }
+
+    #[test]
+    fn default_remove_options_enable_deep_link_cleanup() {
+        let options = default_remove_options();
+        assert!(options.deep_clean_recent_links_enabled());
+        assert!(!options.refresh_explorer_enabled());
     }
 
     #[test]

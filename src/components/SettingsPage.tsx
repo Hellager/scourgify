@@ -59,6 +59,7 @@ interface AutoCleanResult {
   total: number;
   succeeded: number;
   failed: number;
+  warnings: number;
   section_errors: number;
   history_errors: number;
 }
@@ -170,11 +171,12 @@ export function SettingsPage() {
     setRunningAutoClean(true);
     try {
       const result = await invokeCommand<AutoCleanResult>("run_auto_clean_now");
-      if (result.failed || result.section_errors || result.history_errors) {
+      if (result.failed || result.warnings || result.section_errors || result.history_errors) {
         toast.warning(
           t("autoCleanCompletedWithIssues", {
             succeeded: result.succeeded,
             failed: result.failed,
+            warnings: result.warnings,
             sectionErrors: result.section_errors,
             historyErrors: result.history_errors,
           }),

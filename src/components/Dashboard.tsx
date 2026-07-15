@@ -104,7 +104,12 @@ import {
   REFRESH_DASHBOARD_EVENT,
 } from "@/lib/app-events";
 import { type I18nKey, useI18n } from "@/lib/i18n";
-import { invokeCommand } from "@/lib/commands";
+import {
+  commandIssueMessage,
+  type CommandErrorPayload,
+  type CommandWarningPayload,
+  invokeCommand,
+} from "@/lib/commands";
 import { PageHeader, useAppShell } from "@/components/AppShell";
 import {
   DatabaseRecoveryPanel,
@@ -145,7 +150,8 @@ interface QuickAccessChanged {
 interface QaBatchResult {
   total: number;
   succeeded: string[];
-  failed: Array<{ path: string; error: string }>;
+  failed: Array<{ path: string; error: CommandErrorPayload }>;
+  warnings: Array<{ path: string; warning: CommandWarningPayload }>;
   skipped_protected: string[];
   history_error: string | null;
 }
@@ -159,7 +165,19 @@ interface QaRestoreResult {
 interface QaRestoreSectionResult {
   success: boolean;
   deleted_lnk_count: number;
-  error: string | null;
+  recent_files_cleared: boolean | null;
+  backing_file_deleted: boolean | null;
+  rebuilt: boolean | null;
+  non_default_raw_path_count: number;
+  raw_path_cleanup: {
+    success: boolean;
+    requested_count: number;
+    backing_file_deleted: boolean;
+    rebuilt: boolean;
+    remaining_count: number;
+    error: CommandErrorPayload | null;
+  } | null;
+  error: CommandErrorPayload | null;
 }
 
 interface OperationSummary {
@@ -670,10 +688,14 @@ export function Dashboard() {
           }),
         );
         showCleanupToast(result, t);
-        if (result.failed.length > 0 || result.history_error) {
+        if (result.failed.length > 0 || result.warnings.length > 0 || result.history_error) {
           void notifyPartialFailure(
             "Scourgify",
-            result.history_error ? t("cleanupHistoryWarning") : message,
+            result.history_error
+              ? t("cleanupHistoryWarning")
+              : result.warnings.length > 0
+                ? commandIssueMessage(result.warnings[0].warning)
+                : message,
           );
         } else {
           void notifyOperationComplete("Scourgify", message);
@@ -767,9 +789,15 @@ export function Dashboard() {
         toast.warning(t("privacyWriteDisabled"));
         return;
       }
-      await invokeCommand("add_qa_item", { qaType: activeTab, path });
+      const result = await invokeCommand<{
+        warnings: CommandWarningPayload[];
+      }>("add_qa_item", { qaType: activeTab, path });
       setAddItemPath("");
-      toast.success(t("addedItem"));
+      if (result.warnings.length > 0) {
+        toast.warning(commandIssueMessage(result.warnings[0]));
+      } else {
+        toast.success(t("addedItem"));
+      }
       await refresh();
     } catch (error) {
       toast.error(errorMessage(error));
@@ -1721,8 +1749,17 @@ function showCleanupToast(
   t: (key: I18nKey, values?: Record<string, string | number>) => string,
 ) {
   const message = cleanupResultMessage(result, t);
-  if (result.succeeded.length > 0) {
-    if (result.failed.length > 0 || result.skipped_protected.length > 0) {
+  if (
+    result.warnings.length > 0 &&
+    result.failed.length === 0 &&
+    result.skipped_protected.length === 0
+  ) {
+    toast.warning(commandIssueMessage(result.warnings[0].warning));
+  } else if (result.succeeded.length > 0) {
+    if (
+      result.failed.length > 0 ||
+      result.skipped_protected.length > 0
+    ) {
       toast.warning(message);
     } else {
       toast.success(message);

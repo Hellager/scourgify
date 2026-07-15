@@ -4,9 +4,15 @@ use tauri::{AppHandle, State};
 
 use super::ensure_quick_access_write_allowed;
 use crate::{
-    error::{CommandError, CommandResult, ErrorCode, ValidationError},
+    error::{
+        wincent_command_error, wincent_post_mutation_warning, CommandError, CommandResult,
+        ErrorCode, ValidationError,
+    },
     privacy::PrivacyManager,
-    quick_access::{self, QaCounts, QaItem, QaRestoreResult, QaVisibility, QuickAccessError},
+    quick_access::{
+        self, QaCounts, QaItem, QaItemMetadata, QaMutationResult, QaRestoreResult, QaVisibility,
+        QuickAccessError,
+    },
     quick_access_cache::QuickAccessCache,
 };
 
@@ -36,18 +42,38 @@ pub(crate) fn get_qa_counts(
 }
 
 #[tauri::command]
+pub(crate) fn list_qa_item_metadata(qa_type: String) -> CommandResult<Vec<QaItemMetadata>> {
+    quick_access::list_item_metadata(&qa_type)
+        .map_err(|error| quick_access_error("list_qa_item_metadata", error))
+}
+
+#[tauri::command]
 pub(crate) fn add_qa_item(
     app: AppHandle,
     cache: State<'_, QuickAccessCache>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
     path: String,
-) -> CommandResult<ActionReceipt> {
+) -> CommandResult<QaMutationResult> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    quick_access::add_item(&qa_type, &path)
-        .map_err(|error| quick_access_error("add_qa_item", error))?;
+    let mut warnings = Vec::new();
+    if let Err(error) = quick_access::add_item(&qa_type, &path) {
+        let warning = error
+            .downcast_ref::<wincent::prelude::WincentError>()
+            .and_then(|error| wincent_post_mutation_warning("add_qa_item", error));
+        if let Some(warning) = warning {
+            warnings.push(warning);
+        } else {
+            return Err(quick_access_error("add_qa_item", error));
+        }
+    }
     cache.refresh_after_write(&app, &qa_type);
-    Ok(ActionReceipt::new("add_qa_item", path, 1))
+    Ok(QaMutationResult {
+        action: "add_qa_item",
+        target: path,
+        affected: 1,
+        warnings,
+    })
 }
 
 #[tauri::command]
@@ -137,27 +163,20 @@ fn validation_error(operation: &str, error: ValidationError) -> CommandError {
 }
 
 fn quick_access_error(operation: &str, error: anyhow::Error) -> CommandError {
-    let code = if error.downcast_ref::<QuickAccessError>().is_some() {
-        ErrorCode::ValidationInvalidArgument
+    if let Some(local_error) = error.downcast_ref::<QuickAccessError>() {
+        let (code, message) = match local_error {
+            QuickAccessError::ItemNotFound(_) => (
+                ErrorCode::ResourceNotFound,
+                "The requested path does not exist.",
+            ),
+            _ => (
+                ErrorCode::ValidationInvalidArgument,
+                "The Quick Access request is invalid.",
+            ),
+        };
+        CommandError::expected(operation, code, message, false, error)
     } else {
-        ErrorCode::QuickAccessOperationFailed
-    };
-    if code == ErrorCode::ValidationInvalidArgument {
-        CommandError::expected(
-            operation,
-            code,
-            "The Quick Access request is invalid.",
-            false,
-            error,
-        )
-    } else {
-        CommandError::unexpected(
-            operation,
-            code,
-            "The Quick Access operation could not be completed.",
-            true,
-            error,
-        )
+        wincent_command_error(operation, error)
     }
 }
 

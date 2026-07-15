@@ -51,6 +51,7 @@ pub(crate) struct AutoCleanResult {
     pub total: usize,
     pub succeeded: usize,
     pub failed: usize,
+    pub warnings: usize,
     pub skipped_protected: usize,
     pub section_errors: usize,
     pub history_errors: usize,
@@ -61,6 +62,10 @@ impl AutoCleanResult {
         self.failed > 0 || self.section_errors > 0 || self.history_errors > 0
     }
 
+    pub(crate) fn has_issues(&self) -> bool {
+        self.has_failures() || self.warnings > 0
+    }
+
     fn from_sections(recent: AutoCleanSectionResult, frequent: AutoCleanSectionResult) -> Self {
         let mut aggregate = Self {
             recent,
@@ -68,6 +73,7 @@ impl AutoCleanResult {
             total: 0,
             succeeded: 0,
             failed: 0,
+            warnings: 0,
             skipped_protected: 0,
             section_errors: 0,
             history_errors: 0,
@@ -78,6 +84,7 @@ impl AutoCleanResult {
                 aggregate.total += result.total;
                 aggregate.succeeded += result.succeeded.len();
                 aggregate.failed += result.failed.len();
+                aggregate.warnings += result.warnings.len();
                 aggregate.skipped_protected += result.skipped_protected.len();
                 aggregate.history_errors += usize::from(result.history_error.is_some());
             }
@@ -104,12 +111,13 @@ pub(crate) fn run(
             log::warn!("auto-clean section failed qa_type={qa_type} error={error}");
         }
     }
-    if result.has_failures() {
+    if result.has_issues() {
         log::warn!(
-            "auto-clean completed with issues total={} succeeded={} failed={} section_errors={} history_errors={}",
+            "auto-clean completed with issues total={} succeeded={} failed={} warnings={} section_errors={} history_errors={}",
             result.total,
             result.succeeded,
             result.failed,
+            result.warnings,
             result.section_errors,
             result.history_errors
         );
@@ -155,6 +163,7 @@ fn run_sections(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::{CommandError, ErrorCode};
     use crate::quick_access::QaBatchFailure;
 
     #[test]
@@ -168,8 +177,15 @@ mod tests {
                     succeeded: vec![r"C:\Temp\a.txt".to_string()],
                     failed: vec![QaBatchFailure {
                         path: r"C:\Temp\b.txt".to_string(),
-                        error: "in use".to_string(),
+                        error: CommandError::expected(
+                            "test",
+                            ErrorCode::QuickAccessOperationFailed,
+                            "The Quick Access operation could not be completed.",
+                            false,
+                            "in use",
+                        ),
                     }],
+                    warnings: Vec::new(),
                     skipped_protected: vec![r"C:\Work".to_string()],
                     history_error: Some("database busy".to_string()),
                 })
@@ -188,6 +204,7 @@ mod tests {
         assert_eq!(result.total, 3);
         assert_eq!(result.succeeded, 1);
         assert_eq!(result.failed, 1);
+        assert_eq!(result.warnings, 0);
         assert_eq!(result.skipped_protected, 1);
         assert_eq!(result.section_errors, 1);
         assert_eq!(result.history_errors, 1);

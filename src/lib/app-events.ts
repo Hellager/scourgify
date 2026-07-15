@@ -9,6 +9,7 @@ export interface AutoCleanFinished {
   total: number;
   succeeded: number;
   failed: number;
+  warnings: number;
   section_errors: number;
   history_errors: number;
 }

@@ -59,6 +59,7 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         quick_access::list_qa_items,
         cleanup::list_qa_items_classified,
         quick_access::get_qa_counts,
+        quick_access::list_qa_item_metadata,
         quick_access::add_qa_item,
         cleanup::remove_qa_items,
         cleanup::empty_qa_items,

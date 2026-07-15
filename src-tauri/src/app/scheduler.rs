@@ -54,6 +54,7 @@ pub struct AutoCleanFinished {
     pub total: usize,
     pub succeeded: usize,
     pub failed: usize,
+    pub warnings: usize,
     pub section_errors: usize,
     pub history_errors: usize,
 }
@@ -250,6 +251,7 @@ fn record_completion<R: Runtime>(app: &AppHandle<R>, result: &AutoCleanResult) -
         total: result.total,
         succeeded: result.succeeded,
         failed: result.failed,
+        warnings: result.warnings,
         section_errors: result.section_errors,
         history_errors: result.history_errors,
     };

@@ -6,6 +6,7 @@ use std::{
 
 use serde::Serialize;
 use thiserror::Error;
+use wincent::prelude::{QuickAccessPostMutationStep, WincentError};
 
 static INCIDENT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -20,7 +21,12 @@ pub(crate) enum ErrorCode {
     DatabaseUnavailable,
     InternalUnexpected,
     PrivacyWriteBlocked,
+    QuickAccessAlreadyExists,
+    QuickAccessMetadataUnavailable,
     QuickAccessOperationFailed,
+    QuickAccessPartialFailure,
+    QuickAccessPermissionDenied,
+    QuickAccessTimeout,
     ResourceNotFound,
     SystemOperationFailed,
     ValidationInvalidArgument,
@@ -31,6 +37,14 @@ pub(crate) struct CommandError {
     pub code: ErrorCode,
     pub message: String,
     pub retryable: bool,
+    pub incident_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct CommandWarning {
+    pub code: &'static str,
+    pub step: &'static str,
+    pub message: String,
     pub incident_id: String,
 }
 
@@ -76,6 +90,213 @@ impl CommandError {
             retryable,
             incident_id,
         }
+    }
+}
+
+pub(crate) fn wincent_command_error(operation: &str, error: anyhow::Error) -> CommandError {
+    let classification = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<WincentError>())
+        .map(classify_wincent_error);
+
+    match classification {
+        Some((code, message, retryable, expected)) => {
+            command_error(operation, code, message, retryable, error, expected)
+        }
+        None => CommandError::unexpected(
+            operation,
+            ErrorCode::QuickAccessOperationFailed,
+            "The Quick Access operation could not be completed.",
+            false,
+            error,
+        ),
+    }
+}
+
+pub(crate) fn wincent_command_error_ref(operation: &str, error: &WincentError) -> CommandError {
+    let (code, message, retryable, expected) = classify_wincent_error(error);
+    command_error(operation, code, message, retryable, error, expected)
+}
+
+pub(crate) fn wincent_post_mutation_warning(
+    operation: &str,
+    error: &WincentError,
+) -> Option<CommandWarning> {
+    let WincentError::PostMutationFailure { step, .. } = error else {
+        return None;
+    };
+
+    let step_name = match step {
+        QuickAccessPostMutationStep::DeleteRecentFilesBackingData => {
+            "delete_recent_files_backing_data"
+        }
+        QuickAccessPostMutationStep::RefreshExplorer => "refresh_explorer",
+        _ => "unknown",
+    };
+    let incident_id = next_incident_id();
+    let record = format_log_record(
+        operation,
+        "QuickAccessPostMutationWarning",
+        &incident_id,
+        error,
+    );
+    log::warn!("{record}");
+
+    Some(CommandWarning {
+        code: "quick_access_post_mutation_failed",
+        step: step_name,
+        message: "The Quick Access change completed, but a follow-up step failed.".to_string(),
+        incident_id,
+    })
+}
+
+fn command_error(
+    operation: &str,
+    code: ErrorCode,
+    message: &'static str,
+    retryable: bool,
+    error: impl Display,
+    expected: bool,
+) -> CommandError {
+    if expected {
+        CommandError::expected(operation, code, message, retryable, error)
+    } else {
+        CommandError::unexpected(operation, code, message, retryable, error)
+    }
+}
+
+fn classify_wincent_error(error: &WincentError) -> (ErrorCode, &'static str, bool, bool) {
+    match error {
+        WincentError::InvalidPath(_) | WincentError::InvalidArgument(_) => (
+            ErrorCode::ValidationInvalidArgument,
+            "The Quick Access request is invalid.",
+            false,
+            true,
+        ),
+        WincentError::UnsupportedOperation(_) | WincentError::UnknownQuickAccessType(_) => (
+            ErrorCode::ValidationInvalidArgument,
+            "The requested Quick Access operation is not supported.",
+            false,
+            true,
+        ),
+        WincentError::AlreadyExists { .. } => (
+            ErrorCode::QuickAccessAlreadyExists,
+            "The item is already present in Quick Access.",
+            false,
+            true,
+        ),
+        WincentError::NotInQuickAccess { .. } => (
+            ErrorCode::ResourceNotFound,
+            "The item is not present in Quick Access.",
+            false,
+            true,
+        ),
+        WincentError::Timeout(_) => (
+            ErrorCode::QuickAccessTimeout,
+            "The Quick Access operation timed out.",
+            true,
+            true,
+        ),
+        WincentError::PowerShellExecution(error) => {
+            if error.is_access_denied() || error.is_execution_policy_error() {
+                (
+                    ErrorCode::QuickAccessPermissionDenied,
+                    "Windows or PowerShell permissions blocked the Quick Access operation.",
+                    false,
+                    true,
+                )
+            } else if error.is_timeout() || error.is_transient() {
+                (
+                    ErrorCode::QuickAccessTimeout,
+                    "The Quick Access operation timed out or was temporarily unavailable.",
+                    true,
+                    true,
+                )
+            } else {
+                (
+                    ErrorCode::SystemOperationFailed,
+                    "The PowerShell operation could not be completed.",
+                    false,
+                    false,
+                )
+            }
+        }
+        WincentError::Io(error) => match error.kind() {
+            std::io::ErrorKind::PermissionDenied => (
+                ErrorCode::QuickAccessPermissionDenied,
+                "Windows permissions blocked the Quick Access operation.",
+                false,
+                true,
+            ),
+            std::io::ErrorKind::TimedOut => (
+                ErrorCode::QuickAccessTimeout,
+                "The Quick Access operation timed out.",
+                true,
+                true,
+            ),
+            std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock => (
+                ErrorCode::SystemOperationFailed,
+                "The Windows operation was temporarily unavailable.",
+                true,
+                true,
+            ),
+            _ => (
+                ErrorCode::SystemOperationFailed,
+                "The Windows operation could not be completed.",
+                false,
+                false,
+            ),
+        },
+        WincentError::PartialEmpty { .. } => (
+            ErrorCode::QuickAccessPartialFailure,
+            "The Quick Access cleanup partially completed.",
+            false,
+            true,
+        ),
+        WincentError::DestListParse(_) | WincentError::DestListUnsupportedVersion(_) => (
+            ErrorCode::QuickAccessMetadataUnavailable,
+            "Quick Access metadata is unavailable or unsupported.",
+            false,
+            true,
+        ),
+        WincentError::ComApartmentMismatch(_) => (
+            ErrorCode::SystemOperationFailed,
+            "The Windows COM operation could not be started.",
+            false,
+            false,
+        ),
+        WincentError::WindowsApi(_) | WincentError::Utf8(_) | WincentError::ArrayConversion(_) => (
+            ErrorCode::SystemOperationFailed,
+            "The Windows operation could not be completed.",
+            false,
+            false,
+        ),
+        WincentError::ScriptFailed(_) => (
+            ErrorCode::SystemOperationFailed,
+            "The Windows script operation could not be completed.",
+            false,
+            false,
+        ),
+        WincentError::UnknownScriptMethod(_)
+        | WincentError::MissingParameter
+        | WincentError::ScriptStrategyNotFound(_) => (
+            ErrorCode::InternalUnexpected,
+            "An unexpected application error occurred.",
+            false,
+            false,
+        ),
+        WincentError::PostMutationFailure { .. } => (
+            ErrorCode::QuickAccessOperationFailed,
+            "The Quick Access operation completed with a follow-up failure.",
+            false,
+            true,
+        ),
+        _ => (
+            ErrorCode::QuickAccessOperationFailed,
+            "The Quick Access operation could not be completed.",
+            false,
+            false,
+        ),
     }
 }
 
@@ -204,5 +425,33 @@ mod tests {
             ),
             "operation=update_config code=ConfigPersistenceFailed incident_id=incident-42 error=failed to write config: access denied"
         );
+    }
+
+    #[test]
+    fn maps_wincent_timeout_to_retryable_error() {
+        let error = WincentError::Timeout("refresh timed out".to_string());
+
+        let (code, _, retryable, expected) = classify_wincent_error(&error);
+
+        assert_eq!(code, ErrorCode::QuickAccessTimeout);
+        assert!(retryable);
+        assert!(expected);
+    }
+
+    #[test]
+    fn warning_serializes_with_incident_and_step() {
+        let warning = CommandWarning {
+            code: "quick_access_post_mutation_failed",
+            step: "refresh_explorer",
+            message: "The Quick Access change completed, but a follow-up step failed.".to_string(),
+            incident_id: "incident-1".to_string(),
+        };
+
+        assert_eq!(warning.code, "quick_access_post_mutation_failed");
+        assert_eq!(warning.step, "refresh_explorer");
+        assert!(serde_json::to_value(warning).unwrap()["message"]
+            .as_str()
+            .unwrap()
+            .contains("follow-up"));
     }
 }
