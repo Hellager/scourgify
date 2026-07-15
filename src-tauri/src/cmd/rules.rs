@@ -2,16 +2,19 @@ use tauri::State;
 
 use super::ensure_quick_access_write_allowed;
 use crate::{
-    db::{rules, DbState},
+    db::{rules, rules::RuleError, DatabaseStateError, DbState},
+    error::{CommandError, CommandResult, ErrorCode},
     privacy::PrivacyManager,
     rules::{NewRule, Rule},
 };
 
+use super::ActionReceipt;
+
 #[tauri::command]
-pub(crate) fn get_rules(database: State<'_, DbState>) -> Result<Vec<Rule>, String> {
+pub(crate) fn get_rules(database: State<'_, DbState>) -> CommandResult<Vec<Rule>> {
     database
         .with_connection(|connection| rules::list(connection))
-        .map_err(|error| error.to_string())
+        .map_err(|error| database_error("get_rules", error))
 }
 
 #[tauri::command]
@@ -19,11 +22,11 @@ pub(crate) fn add_rule(
     database: State<'_, DbState>,
     privacy: State<'_, PrivacyManager>,
     rule: NewRule,
-) -> Result<Rule, String> {
+) -> CommandResult<Rule> {
     ensure_quick_access_write_allowed(privacy.state())?;
     database
         .with_connection(|connection| rules::add(connection, rule))
-        .map_err(|error| error.to_string())
+        .map_err(|error| database_error("add_rule", error))
 }
 
 #[tauri::command]
@@ -32,11 +35,11 @@ pub(crate) fn update_rule(
     privacy: State<'_, PrivacyManager>,
     id: i64,
     rule: NewRule,
-) -> Result<Rule, String> {
+) -> CommandResult<Rule> {
     ensure_quick_access_write_allowed(privacy.state())?;
     database
         .with_connection(|connection| rules::update(connection, id, rule))
-        .map_err(|error| error.to_string())
+        .map_err(|error| database_error("update_rule", error))
 }
 
 #[tauri::command]
@@ -44,11 +47,12 @@ pub(crate) fn remove_rule(
     database: State<'_, DbState>,
     privacy: State<'_, PrivacyManager>,
     id: i64,
-) -> Result<(), String> {
+) -> CommandResult<ActionReceipt> {
     ensure_quick_access_write_allowed(privacy.state())?;
     database
         .with_connection(|connection| rules::remove(connection, id))
-        .map_err(|error| error.to_string())
+        .map_err(|error| database_error("remove_rule", error))?;
+    Ok(ActionReceipt::new("remove_rule", id.to_string(), 1))
 }
 
 #[tauri::command]
@@ -57,9 +61,38 @@ pub(crate) fn toggle_rule(
     privacy: State<'_, PrivacyManager>,
     id: i64,
     enabled: bool,
-) -> Result<Rule, String> {
+) -> CommandResult<Rule> {
     ensure_quick_access_write_allowed(privacy.state())?;
     database
         .with_connection(|connection| rules::toggle(connection, id, enabled))
-        .map_err(|error| error.to_string())
+        .map_err(|error| database_error("toggle_rule", error))
+}
+
+fn database_error(operation: &str, error: anyhow::Error) -> CommandError {
+    let (code, message) = match error.downcast_ref::<RuleError>() {
+        Some(RuleError::NotFound(_)) => (
+            ErrorCode::ResourceNotFound,
+            "The requested rule was not found.",
+        ),
+        Some(RuleError::EmptyKeyword) => (
+            ErrorCode::ValidationInvalidArgument,
+            "The rule keyword is invalid.",
+        ),
+        None if error.downcast_ref::<DatabaseStateError>().is_some() => (
+            ErrorCode::DatabaseUnavailable,
+            "The rule database is unavailable.",
+        ),
+        None => (
+            ErrorCode::InternalUnexpected,
+            "The rule operation could not be completed.",
+        ),
+    };
+    if matches!(
+        code,
+        ErrorCode::ResourceNotFound | ErrorCode::ValidationInvalidArgument
+    ) {
+        CommandError::expected(operation, code, message, false, error)
+    } else {
+        CommandError::unexpected(operation, code, message, true, error)
+    }
 }

@@ -4,12 +4,12 @@ use std::{
     path::Path,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use rusqlite::Connection;
 
 use super::history::{
     history_filter_params, read_clean_record, validate_history_filter, CleanRecord,
-    ExportCleanRecord, HistoryExportFormat, HistoryExportResult, HistoryFilter,
+    ExportCleanRecord, HistoryError, HistoryExportFormat, HistoryExportResult, HistoryFilter,
     ValidatedHistoryFilter, HISTORY_COLUMNS, HISTORY_FILTERS,
 };
 
@@ -27,7 +27,11 @@ pub(super) fn export(
         HistoryExportFormat::Csv => export_csv(connection, file, &filter)?,
         HistoryExportFormat::Json => export_json(connection, file, &filter)?,
     };
-    Ok(HistoryExportResult { count })
+    Ok(HistoryExportResult {
+        count,
+        path: path.to_string_lossy().into_owned(),
+        format,
+    })
 }
 
 fn export_csv(connection: &Connection, file: File, filter: &ValidatedHistoryFilter) -> Result<u64> {
@@ -101,24 +105,25 @@ fn visit_filtered_records(
 
 fn validate_export_path(path: &str, format: HistoryExportFormat) -> Result<&Path> {
     if path.trim().is_empty() {
-        bail!("history export path is empty");
+        return Err(HistoryError::ExportPath("path is empty".to_string()).into());
     }
     let path = Path::new(path);
     if !path.is_absolute() {
-        bail!("history export path must be absolute");
+        return Err(HistoryError::ExportPath("path must be absolute".to_string()).into());
     }
     let extension_matches = path
         .extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case(format.extension()));
     if !extension_matches {
-        bail!(
-            "history export path must use the .{} extension",
+        return Err(HistoryError::ExportPath(format!(
+            "path must use the .{} extension",
             format.extension()
-        );
+        ))
+        .into());
     }
-    path.parent()
-        .filter(|parent| parent.is_dir())
-        .context("history export directory does not exist")?;
+    if path.parent().is_none_or(|parent| !parent.is_dir()) {
+        return Err(HistoryError::ExportPath("directory does not exist".to_string()).into());
+    }
     Ok(path)
 }

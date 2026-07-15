@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::{
@@ -6,6 +6,7 @@ use std::{
     sync::Mutex,
 };
 use tauri::{AppHandle, Manager, Runtime};
+use thiserror::Error;
 
 pub(crate) mod history;
 mod history_export;
@@ -20,6 +21,14 @@ use migrations::{migrate_to_v1, BUILTIN_WHITELIST_RULES, SCHEMA_VERSION};
 const DATABASE_FILE: &str = "scourgify.db";
 const DATABASE_PATH_UNAVAILABLE: &str = "Database path is unavailable.";
 const DATABASE_STATE_UNAVAILABLE: &str = "Database state could not be accessed.";
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub(crate) enum DatabaseStateError {
+    #[error("database unavailable: {0}")]
+    Unavailable(String),
+    #[error("database state lock poisoned: {0}")]
+    StateUnavailable(String),
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DatabaseStatus {
@@ -103,13 +112,13 @@ impl DbState {
         let mut inner = self
             .inner
             .lock()
-            .map_err(|error| anyhow::anyhow!("database state lock poisoned: {error}"))?;
+            .map_err(|error| DatabaseStateError::StateUnavailable(error.to_string()))?;
         if inner.connection.is_none() {
             let detail = inner
                 .error
                 .as_deref()
                 .unwrap_or("unknown initialization error");
-            bail!("database unavailable: {detail}");
+            return Err(DatabaseStateError::Unavailable(detail.to_string()).into());
         }
         operation(
             inner

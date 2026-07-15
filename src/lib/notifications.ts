@@ -1,10 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   isPermissionGranted,
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { invokeCommand } from "@/lib/commands";
 
 interface NotificationConfig {
   notifications_enabled: boolean;
@@ -55,7 +55,7 @@ async function notifySystem({
   title: string;
 }) {
   try {
-    const config = await invoke<NotificationConfig>("get_config");
+    const config = await invokeCommand<NotificationConfig>("get_config");
     if (!config.notifications_enabled) {
       return;
     }

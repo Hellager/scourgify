@@ -4,41 +4,46 @@ use tauri::State;
 
 use super::ensure_quick_access_write_allowed;
 use crate::{
+    error::{CommandError, CommandResult, ErrorCode, ValidationError},
     privacy::PrivacyManager,
-    quick_access::{self, QaCounts, QaItem, QaRestoreResult, QaVisibility},
+    quick_access::{self, QaCounts, QaItem, QaRestoreResult, QaVisibility, QuickAccessError},
 };
 
+use super::ActionReceipt;
+
 #[tauri::command]
-pub(crate) fn list_qa_items(qa_type: String) -> Result<Vec<QaItem>, String> {
-    quick_access::list_items(&qa_type).map_err(|error| error.to_string())
+pub(crate) fn list_qa_items(qa_type: String) -> CommandResult<Vec<QaItem>> {
+    quick_access::list_items(&qa_type).map_err(|error| quick_access_error("list_qa_items", error))
 }
 
 #[tauri::command]
-pub(crate) fn get_qa_counts() -> Result<QaCounts, String> {
-    quick_access::get_counts().map_err(|error| error.to_string())
+pub(crate) fn get_qa_counts() -> CommandResult<QaCounts> {
+    quick_access::get_counts().map_err(|error| quick_access_error("get_qa_counts", error))
 }
 
 #[tauri::command]
 pub(crate) fn pin_qa_folder(
     privacy: State<'_, PrivacyManager>,
     path: String,
-) -> Result<(), String> {
+) -> CommandResult<ActionReceipt> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    quick_access::pin_folder(&path).map_err(|error| error.to_string())
+    quick_access::pin_folder(&path).map_err(|error| quick_access_error("pin_qa_folder", error))?;
+    Ok(ActionReceipt::new("pin_qa_folder", path, 1))
 }
 
 #[tauri::command]
 pub(crate) fn restore_qa_defaults(
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
-) -> Result<QaRestoreResult, String> {
+) -> CommandResult<QaRestoreResult> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    quick_access::restore_defaults(&qa_type).map_err(|error| error.to_string())
+    quick_access::restore_defaults(&qa_type)
+        .map_err(|error| quick_access_error("restore_qa_defaults", error))
 }
 
 #[tauri::command]
-pub(crate) fn get_qa_visibility() -> Result<QaVisibility, String> {
-    quick_access::get_visibility().map_err(|error| error.to_string())
+pub(crate) fn get_qa_visibility() -> CommandResult<QaVisibility> {
+    quick_access::get_visibility().map_err(|error| quick_access_error("get_qa_visibility", error))
 }
 
 #[tauri::command]
@@ -46,41 +51,85 @@ pub(crate) fn set_qa_visibility(
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
     visible: bool,
-) -> Result<QaVisibility, String> {
+) -> CommandResult<QaVisibility> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    quick_access::set_visibility(&qa_type, visible).map_err(|error| error.to_string())
+    quick_access::set_visibility(&qa_type, visible)
+        .map_err(|error| quick_access_error("set_qa_visibility", error))
 }
 
 #[tauri::command]
-pub(crate) fn open_in_explorer(path: String) -> Result<(), String> {
-    let path = match validate_open_path(&path) {
-        Ok(path) => path,
-        Err(error) => {
-            log::warn!("open in explorer rejected error={error}");
-            return Err(error);
-        }
-    };
+pub(crate) fn open_in_explorer(path: String) -> CommandResult<ActionReceipt> {
+    let path =
+        validate_open_path(&path).map_err(|error| validation_error("open_in_explorer", error))?;
     log::info!("open in explorer started path={}", path.display());
 
     tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|error| {
-        log::error!(
-            "open in explorer failed path={} error={error}",
-            path.display()
-        );
-        error.to_string()
-    })
+        CommandError::unexpected(
+            "open_in_explorer",
+            ErrorCode::SystemOperationFailed,
+            "The item could not be revealed in Explorer.",
+            true,
+            anyhow::Error::new(error).context(format!("failed to reveal {}", path.display())),
+        )
+    })?;
+    Ok(ActionReceipt::new(
+        "open_in_explorer",
+        path.to_string_lossy(),
+        1,
+    ))
 }
 
-fn validate_open_path(path: &str) -> Result<PathBuf, String> {
+fn validate_open_path(path: &str) -> Result<PathBuf, ValidationError> {
     if path.trim().is_empty() {
-        return Err("Path is empty.".to_string());
+        return Err(ValidationError::InvalidArgument(
+            "path is empty".to_string(),
+        ));
     }
 
     let path = PathBuf::from(path);
     if !path.exists() {
-        return Err(format!("Path does not exist: {}", path.display()));
+        return Err(ValidationError::NotFound(path.display().to_string()));
     }
     Ok(path)
+}
+
+fn validation_error(operation: &str, error: ValidationError) -> CommandError {
+    let (code, message) = match error {
+        ValidationError::InvalidArgument(_) => (
+            ErrorCode::ValidationInvalidArgument,
+            "The requested path is invalid.",
+        ),
+        ValidationError::NotFound(_) => (
+            ErrorCode::ResourceNotFound,
+            "The requested path does not exist.",
+        ),
+    };
+    CommandError::expected(operation, code, message, false, error)
+}
+
+fn quick_access_error(operation: &str, error: anyhow::Error) -> CommandError {
+    let code = if error.downcast_ref::<QuickAccessError>().is_some() {
+        ErrorCode::ValidationInvalidArgument
+    } else {
+        ErrorCode::QuickAccessOperationFailed
+    };
+    if code == ErrorCode::ValidationInvalidArgument {
+        CommandError::expected(
+            operation,
+            code,
+            "The Quick Access request is invalid.",
+            false,
+            error,
+        )
+    } else {
+        CommandError::unexpected(
+            operation,
+            code,
+            "The Quick Access operation could not be completed.",
+            true,
+            error,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -89,7 +138,10 @@ mod tests {
 
     #[test]
     fn rejects_empty_open_path() {
-        assert_eq!(validate_open_path("   ").unwrap_err(), "Path is empty.");
+        assert!(matches!(
+            validate_open_path("   "),
+            Err(ValidationError::InvalidArgument(_))
+        ));
     }
 
     #[test]
@@ -98,7 +150,22 @@ mod tests {
             "scourgify-missing-open-path-{}",
             std::process::id()
         ));
-        let error = validate_open_path(path.to_string_lossy().as_ref()).unwrap_err();
-        assert!(error.contains("Path does not exist:"));
+        assert!(matches!(
+            validate_open_path(path.to_string_lossy().as_ref()),
+            Err(ValidationError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn path_validation_error_does_not_expose_local_path() {
+        let error = validation_error(
+            "open_in_explorer",
+            ValidationError::NotFound(r"C:\Users\private\secret.txt".to_string()),
+        );
+
+        assert_eq!(error.code, ErrorCode::ResourceNotFound);
+        assert!(!error.message.contains("private"));
+        assert!(!error.retryable);
+        assert!(!error.incident_id.is_empty());
     }
 }

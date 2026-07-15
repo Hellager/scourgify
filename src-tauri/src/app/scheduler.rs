@@ -14,6 +14,7 @@ use crate::{
     cleanup::{self, AutoCleanResult, AutoCleanState},
     config::{self, AutoCleanSchedule, Config},
     db::DbState,
+    error::report_background_error,
     privacy::PrivacyManager,
 };
 
@@ -83,7 +84,7 @@ fn run_worker<R: Runtime>(
         let config = match config_snapshot(&app) {
             Ok(config) => config,
             Err(error) => {
-                log::error!("failed to read auto-clean schedule: {error:#}");
+                report_background_error("scheduler_read_config", &error);
                 match wait_for_next(&receiver, Some(ERROR_RETRY_DELAY)) {
                     WaitOutcome::Run | WaitOutcome::Reschedule => continue,
                     WaitOutcome::Stop => return,
@@ -103,7 +104,7 @@ fn run_worker<R: Runtime>(
         ) {
             Ok(delay) => delay,
             Err(error) => {
-                log::error!("failed to calculate auto-clean schedule: {error:#}");
+                report_background_error("scheduler_calculate_next_run", &error);
                 match wait_for_next(&receiver, Some(ERROR_RETRY_DELAY)) {
                     WaitOutcome::Run | WaitOutcome::Reschedule => continue,
                     WaitOutcome::Stop => return,
@@ -120,7 +121,7 @@ fn run_worker<R: Runtime>(
         let current_schedule = match config_snapshot(&app) {
             Ok(config) => config.auto_clean,
             Err(error) => {
-                log::error!("failed to verify auto-clean schedule: {error:#}");
+                report_background_error("scheduler_verify_config", &error);
                 continue;
             }
         };
@@ -134,7 +135,8 @@ fn run_worker<R: Runtime>(
         }
 
         if let Err(error) = run_now(&app) {
-            log::warn!("scheduled auto-clean skipped or failed: {error:#}");
+            let incident_id = report_background_error("scheduled_auto_clean", &error);
+            log::warn!("scheduled auto-clean skipped incident_id={incident_id}");
         }
     }
 }

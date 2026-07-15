@@ -9,7 +9,6 @@ import {
   useMemo,
   useState,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
@@ -53,6 +52,7 @@ import {
   type SidebarVariant,
 } from "@/lib/config";
 import { useI18n } from "@/lib/i18n";
+import { invokeCommand } from "@/lib/commands";
 
 interface DashboardSummary {
   recent: number;
@@ -89,7 +89,7 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
   const onDashboard = location.pathname === "/";
 
   useEffect(() => {
-    invoke<ConfigForm>("get_config")
+    invokeCommand<ConfigForm>("get_config")
       .then((value) => setConfig(configSchema.parse(value)))
       .catch((error) =>
         toast.error(error instanceof Error ? error.message : String(error)),
@@ -118,7 +118,7 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
   useEffect(() => {
     const openConfigDrawer = () => {
       setConfigDrawerOpen(true);
-      void invoke<PrivacyState>("privacy_state")
+      void invokeCommand<PrivacyState>("privacy_state")
         .then((state) => setPrivacyActive(state !== "Inactive"))
         .catch(() => setPrivacyActive(false));
     };

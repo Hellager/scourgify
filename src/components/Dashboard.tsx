@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Link } from "react-router-dom";
 import {
@@ -101,6 +100,7 @@ import {
   REFRESH_DASHBOARD_EVENT,
 } from "@/lib/app-events";
 import { type I18nKey, useI18n } from "@/lib/i18n";
+import { invokeCommand } from "@/lib/commands";
 import { PageHeader, useAppShell } from "@/components/AppShell";
 import {
   DatabaseRecoveryPanel,
@@ -417,14 +417,14 @@ export function Dashboard() {
   const pageCount = table.getPageCount();
 
   const loadCounts = useCallback(async () => {
-    setCounts(await invoke<QaCounts>("get_qa_counts"));
+    setCounts(await invokeCommand<QaCounts>("get_qa_counts"));
   }, []);
 
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
     setStatsError(null);
     try {
-      setStats(await invoke<Stats>("get_stats", { range: statsRange }));
+      setStats(await invokeCommand<Stats>("get_stats", { range: statsRange }));
     } catch (error) {
       setStats(null);
       setStatsError(errorMessage(error));
@@ -437,14 +437,14 @@ export function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const database = await invoke<DatabaseStatus>("get_database_status");
+      const database = await invokeCommand<DatabaseStatus>("get_database_status");
       setDatabase(database);
       if (database.available) {
         setItems(
-          await invoke<QaItem[]>("list_qa_items_classified", { qaType }),
+          await invokeCommand<QaItem[]>("list_qa_items_classified", { qaType }),
         );
       } else {
-        const legacyItems = await invoke<
+        const legacyItems = await invokeCommand<
           Array<Pick<QaItem, "path" | "name" | "last_interaction_at">>
         >("list_qa_items", { qaType });
         setItems(
@@ -465,7 +465,7 @@ export function Dashboard() {
   }, []);
 
   const syncPrivacyState = useCallback(async () => {
-    const state = await invoke<PrivacyState>("privacy_state");
+    const state = await invokeCommand<PrivacyState>("privacy_state");
     const active = state !== "Inactive";
     setPrivacyActive(active);
     return active;
@@ -580,15 +580,15 @@ export function Dashboard() {
       if (action === "remove" || action === "empty" || action === "smart") {
         const result =
           action === "remove"
-            ? await invoke<QaBatchResult>("remove_qa_items", {
+            ? await invokeCommand<QaBatchResult>("remove_qa_items", {
                 qaType: activeTab,
                 paths: Array.from(selectedPaths),
               })
             : action === "empty"
-              ? await invoke<QaBatchResult>("empty_qa_items", {
+              ? await invokeCommand<QaBatchResult>("empty_qa_items", {
                   qaType: activeTab,
                 })
-              : await invoke<QaBatchResult>("smart_clean", {
+              : await invokeCommand<QaBatchResult>("smart_clean", {
                   qaType: activeTab,
                 });
         const actionLabel = getOperationLabel(action, t);
@@ -613,7 +613,7 @@ export function Dashboard() {
           void notifyOperationComplete("Scourgify", message);
         }
       } else {
-        const result = await invoke<QaRestoreResult>("restore_qa_defaults", {
+        const result = await invokeCommand<QaRestoreResult>("restore_qa_defaults", {
           qaType: action === "restore-all" ? "all" : activeTab,
         });
         setLastOperationSummary(
@@ -698,7 +698,7 @@ export function Dashboard() {
         toast.warning(t("privacyWriteDisabled"));
         return;
       }
-      await invoke("pin_qa_folder", { path });
+      await invokeCommand("pin_qa_folder", { path });
       setPinFolderPath("");
       toast.success(t("pinnedFolder"));
       await refresh();
@@ -711,7 +711,7 @@ export function Dashboard() {
 
   const openLocation = async (path: string) => {
     try {
-      await invoke("open_in_explorer", { path });
+      await invokeCommand("open_in_explorer", { path });
     } catch (error) {
       toast.error(errorMessage(error));
     }

@@ -1,22 +1,57 @@
 use std::sync::Mutex;
 
+use serde::Serialize;
 use tauri::State;
 
 use crate::{
     app::settings,
     config::Config,
+    error::{CommandError, CommandResult, ErrorCode},
     privacy::{LockResult, PrivacyManager, PrivacyModeState},
 };
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct PrivacyTransition {
+    pub state: PrivacyModeState,
+    pub lock_result: Option<LockResult>,
+    pub reports: usize,
+    pub new_links: usize,
+    pub deleted_links: usize,
+    pub failed_link_deletions: usize,
+}
 
 #[tauri::command]
 pub(crate) fn privacy_enter(
     app: tauri::AppHandle,
     config: State<'_, Mutex<Config>>,
     privacy: State<'_, PrivacyManager>,
-) -> Result<LockResult, String> {
-    let result = privacy.enter().map_err(|error| error.to_string())?;
-    settings::persist_privacy_mode(&app, config.inner(), true)?;
-    Ok(result)
+) -> CommandResult<PrivacyTransition> {
+    let result = privacy.enter().map_err(|error| {
+        CommandError::unexpected(
+            "privacy_enter",
+            ErrorCode::QuickAccessOperationFailed,
+            "Privacy mode could not be enabled.",
+            true,
+            error,
+        )
+    })?;
+    settings::persist_privacy_mode(&app, config.inner(), true).map_err(|error| {
+        CommandError::unexpected(
+            "privacy_enter",
+            ErrorCode::ConfigPersistenceFailed,
+            "Privacy mode was enabled, but the preference could not be saved.",
+            true,
+            error,
+        )
+    })?;
+    Ok(PrivacyTransition {
+        state: privacy.state(),
+        lock_result: Some(result),
+        reports: 0,
+        new_links: 0,
+        deleted_links: 0,
+        failed_link_deletions: 0,
+    })
 }
 
 #[tauri::command]
@@ -24,9 +59,28 @@ pub(crate) fn privacy_exit(
     app: tauri::AppHandle,
     config: State<'_, Mutex<Config>>,
     privacy: State<'_, PrivacyManager>,
-) -> Result<(), String> {
-    let reports = privacy.exit().map_err(|error| error.to_string())?;
-    for report in reports {
+) -> CommandResult<PrivacyTransition> {
+    let reports = privacy.exit().map_err(|error| {
+        CommandError::unexpected(
+            "privacy_exit",
+            ErrorCode::QuickAccessOperationFailed,
+            "Privacy mode could not be disabled.",
+            true,
+            error,
+        )
+    })?;
+    let mut transition = PrivacyTransition {
+        state: privacy.state(),
+        lock_result: None,
+        reports: reports.len(),
+        new_links: 0,
+        deleted_links: 0,
+        failed_link_deletions: 0,
+    };
+    for report in &reports {
+        transition.new_links += report.new_lnk_paths().len();
+        transition.deleted_links += report.deleted_lnk_paths().len();
+        transition.failed_link_deletions += report.failed_lnk_deletions().len();
         log::debug!(
             "privacy unlock report: new={}, deleted={}, failed={}",
             report.new_lnk_paths().len(),
@@ -34,10 +88,19 @@ pub(crate) fn privacy_exit(
             report.failed_lnk_deletions().len()
         );
     }
-    settings::persist_privacy_mode(&app, config.inner(), false)
+    settings::persist_privacy_mode(&app, config.inner(), false).map_err(|error| {
+        CommandError::unexpected(
+            "privacy_exit",
+            ErrorCode::ConfigPersistenceFailed,
+            "Privacy mode was disabled, but the preference could not be saved.",
+            true,
+            error,
+        )
+    })?;
+    Ok(transition)
 }
 
 #[tauri::command]
-pub(crate) fn privacy_state(privacy: State<'_, PrivacyManager>) -> PrivacyModeState {
-    privacy.state()
+pub(crate) fn privacy_state(privacy: State<'_, PrivacyManager>) -> CommandResult<PrivacyModeState> {
+    Ok(privacy.state())
 }

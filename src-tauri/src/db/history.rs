@@ -1,12 +1,31 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use rusqlite::{
     params,
     types::{FromSql, FromSqlError, FromSqlResult, ValueRef},
     Connection,
 };
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 const MAX_PAGE_SIZE: u32 = 100;
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub(crate) enum HistoryError {
+    #[error("history page must be at least 1")]
+    Page,
+    #[error("history page_size must be between 1 and {MAX_PAGE_SIZE}")]
+    PageSize,
+    #[error("unsupported history sort field: {0}")]
+    SortField(String),
+    #[error("history sort_order must be asc or desc")]
+    SortOrder,
+    #[error("unsupported history item_type: {0}")]
+    ItemType(String),
+    #[error("unsupported history date_range: {0}")]
+    DateRange(String),
+    #[error("history export path is invalid: {0}")]
+    ExportPath(String),
+}
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -65,7 +84,7 @@ pub struct HistoryFilter {
     pub date_range: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum HistoryExportFormat {
     Csv,
@@ -84,6 +103,8 @@ impl HistoryExportFormat {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct HistoryExportResult {
     pub count: u64,
+    pub path: String,
+    pub format: HistoryExportFormat,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -230,10 +251,10 @@ pub fn insert_batch(
 
 pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordPage> {
     if query.page == 0 {
-        bail!("history page must be at least 1");
+        return Err(HistoryError::Page.into());
     }
     if !(1..=MAX_PAGE_SIZE).contains(&query.page_size) {
-        bail!("history page_size must be between 1 and {MAX_PAGE_SIZE}");
+        return Err(HistoryError::PageSize.into());
     }
 
     let sort_column = match query.sort_by.as_str() {
@@ -241,12 +262,12 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
         "item_path" => "item_path",
         "item_type" => "item_type",
         "rule_keyword" => "rule_keyword",
-        _ => bail!("unsupported history sort field: {}", query.sort_by),
+        _ => return Err(HistoryError::SortField(query.sort_by).into()),
     };
     let sort_order = match query.sort_order.as_str() {
         "asc" => "ASC",
         "desc" => "DESC",
-        _ => bail!("history sort_order must be asc or desc"),
+        _ => return Err(HistoryError::SortOrder.into()),
     };
     let filter = validate_history_filter(query.filter)?;
     let count_sql = format!("SELECT COUNT(*) FROM clean_records {HISTORY_FILTERS}");
@@ -313,13 +334,13 @@ pub(super) fn validate_history_filter(filter: HistoryFilter) -> Result<Validated
         None => None,
         Some("recent_file") => Some("recent_file"),
         Some("frequent_folder") => Some("frequent_folder"),
-        Some(value) => bail!("unsupported history item_type: {value}"),
+        Some(value) => return Err(HistoryError::ItemType(value.to_string()).into()),
     };
     let date_modifier = match filter.date_range.as_deref() {
         None => None,
         Some("7d") => Some("-6 days"),
         Some("30d") => Some("-29 days"),
-        Some(value) => bail!("unsupported history date_range: {value}"),
+        Some(value) => return Err(HistoryError::DateRange(value.to_string()).into()),
     };
     Ok(ValidatedHistoryFilter {
         search: history_search_pattern(&filter.search),
@@ -362,11 +383,11 @@ fn history_search_pattern(search: &str) -> Option<String> {
     Some(format!("%{escaped}%"))
 }
 
-pub fn clear(connection: &Connection) -> Result<()> {
-    connection
+pub fn clear(connection: &Connection) -> Result<u64> {
+    let affected = connection
         .execute("DELETE FROM clean_records", [])
         .context("failed to clear clean records")?;
-    Ok(())
+    u64::try_from(affected).context("cleared history count is too large")
 }
 
 pub fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {

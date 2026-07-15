@@ -1,14 +1,31 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde::Serialize;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
+use thiserror::Error;
 use wincent::prelude::{
     AddOptions, BatchOptions, FrequentRestoreReport, QuickAccess, QuickAccessItem,
     QuickAccessManager, RecentRestoreReport, RemoveOptions, RestoreDefaultsOptions,
     RestoreDefaultsReport, VisibilityOptions,
 };
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub(crate) enum QuickAccessError {
+    #[error("unsupported Quick Access type: {0}")]
+    UnsupportedType(String),
+    #[error("unsupported Quick Access write type: {0}")]
+    UnsupportedWriteType(String),
+    #[error("unsupported Quick Access visibility type: {0}")]
+    UnsupportedVisibilityType(String),
+    #[error("folder path is empty")]
+    EmptyFolderPath,
+    #[error("folder path does not exist: {0}")]
+    FolderNotFound(String),
+    #[error("path is not a folder: {0}")]
+    NotAFolder(String),
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct QaItem {
@@ -255,7 +272,7 @@ fn parse_qa_type(qa_type: &str) -> Result<QuickAccess> {
         "all" => Ok(QuickAccess::All),
         "recent" => Ok(QuickAccess::RecentFiles),
         "frequent" => Ok(QuickAccess::FrequentFolders),
-        _ => bail!("unsupported Quick Access type: {qa_type}"),
+        _ => Err(QuickAccessError::UnsupportedType(qa_type.to_string()).into()),
     }
 }
 
@@ -263,7 +280,7 @@ fn parse_write_qa_type(qa_type: &str) -> Result<QuickAccess> {
     match qa_type {
         "recent" => Ok(QuickAccess::RecentFiles),
         "frequent" => Ok(QuickAccess::FrequentFolders),
-        _ => bail!("unsupported Quick Access write type: {qa_type}"),
+        _ => Err(QuickAccessError::UnsupportedWriteType(qa_type.to_string()).into()),
     }
 }
 
@@ -272,7 +289,7 @@ fn parse_visibility_qa_type(qa_type: &str) -> Result<VisibilityTarget> {
         "recent" => Ok(VisibilityTarget::Recent),
         "frequent" => Ok(VisibilityTarget::Frequent),
         "start_recommended" => Ok(VisibilityTarget::StartRecommended),
-        _ => bail!("unsupported Quick Access visibility type: {qa_type}"),
+        _ => Err(QuickAccessError::UnsupportedVisibilityType(qa_type.to_string()).into()),
     }
 }
 
@@ -287,15 +304,15 @@ fn visibility_name(target: VisibilityTarget) -> &'static str {
 fn validate_pin_folder_path(path: &str) -> Result<PathBuf> {
     let path = path.trim();
     if path.is_empty() {
-        bail!("Folder path is empty");
+        return Err(QuickAccessError::EmptyFolderPath.into());
     }
 
     let path = PathBuf::from(path);
     if !path.exists() {
-        bail!("Folder path does not exist: {}", path.display());
+        return Err(QuickAccessError::FolderNotFound(path.display().to_string()).into());
     }
     if !path.is_dir() {
-        bail!("Path is not a folder: {}", path.display());
+        return Err(QuickAccessError::NotAFolder(path.display().to_string()).into());
     }
 
     Ok(path)
@@ -513,9 +530,12 @@ mod tests {
 
     #[test]
     fn rejects_empty_pin_folder_path() {
-        let error = validate_pin_folder_path("   ").unwrap_err().to_string();
+        let error = validate_pin_folder_path("   ").unwrap_err();
 
-        assert!(error.contains("Folder path is empty"));
+        assert_eq!(
+            error.downcast_ref::<QuickAccessError>(),
+            Some(&QuickAccessError::EmptyFolderPath)
+        );
     }
 
     #[test]
@@ -524,11 +544,12 @@ mod tests {
             "scourgify-missing-pin-folder-{}",
             std::process::id()
         ));
-        let error = validate_pin_folder_path(path.to_string_lossy().as_ref())
-            .unwrap_err()
-            .to_string();
+        let error = validate_pin_folder_path(path.to_string_lossy().as_ref()).unwrap_err();
 
-        assert!(error.contains("Folder path does not exist"));
+        assert!(matches!(
+            error.downcast_ref::<QuickAccessError>(),
+            Some(QuickAccessError::FolderNotFound(_))
+        ));
     }
 
     #[test]
@@ -536,12 +557,13 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("scourgify-pin-folder-file-{}", std::process::id()));
         std::fs::write(&path, b"test").unwrap();
-        let error = validate_pin_folder_path(path.to_string_lossy().as_ref())
-            .unwrap_err()
-            .to_string();
+        let error = validate_pin_folder_path(path.to_string_lossy().as_ref()).unwrap_err();
         std::fs::remove_file(&path).unwrap();
 
-        assert!(error.contains("Path is not a folder"));
+        assert!(matches!(
+            error.downcast_ref::<QuickAccessError>(),
+            Some(QuickAccessError::NotAFolder(_))
+        ));
     }
 
     #[test]

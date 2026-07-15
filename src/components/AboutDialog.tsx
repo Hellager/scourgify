@@ -1,6 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import packageJson from "../../package.json";
+import { invokeCommand } from "@/lib/commands";
 import { useI18n } from "@/lib/i18n";
 
 const GITHUB_URL = "https://github.com/hellager/scourgify";
@@ -13,7 +13,7 @@ export function AboutDialog() {
   };
 
   const close = async () => {
-    await invoke("hide_about");
+    await invokeCommand("hide_about");
   };
 
   return (

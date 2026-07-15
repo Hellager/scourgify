@@ -6,6 +6,7 @@ mod cleanup;
 mod cmd;
 mod config;
 mod db;
+mod error;
 mod privacy;
 mod quick_access;
 mod rules;

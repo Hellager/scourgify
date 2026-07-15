@@ -7,6 +7,7 @@ use crate::{
     cleanup::AutoCleanState,
     config::{AppMode, Config},
     db,
+    error::report_background_error,
     privacy::{LockResult, PrivacyManager},
 };
 
@@ -56,7 +57,7 @@ fn restore_privacy_mode(app: &tauri::AppHandle, config: &Config, privacy: &Priva
             );
         }
         Err(error) => {
-            log::error!("failed to restore privacy mode: {error}");
+            let incident_id = report_background_error("restore_privacy_mode", &error);
             let message = format!("Failed to restore privacy mode: {error}");
             alert::warning(
                 app,
@@ -64,6 +65,7 @@ fn restore_privacy_mode(app: &tauri::AppHandle, config: &Config, privacy: &Priva
                 &format!("Failed to restore privacy mode.\n\n{error}"),
             );
             notifier::notify_partial_failure(app, config, &message);
+            log::warn!("privacy mode restore failed incident_id={incident_id}");
         }
     }
 }

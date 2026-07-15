@@ -18,6 +18,7 @@ use crate::config::{AppMode, Config};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crate::error::install_panic_hook();
     tauri::Builder::default()
         .plugin(build_logger().build())
         .plugin(tauri_plugin_dialog::init())
@@ -65,6 +66,6 @@ fn build_logger() -> tauri_plugin_log::Builder {
     tauri_plugin_log::Builder::new()
         .level(level)
         .max_file_size(1_000_000)
-        .rotation_strategy(RotationStrategy::KeepAll)
+        .rotation_strategy(RotationStrategy::KeepSome(10))
         .targets(targets)
 }

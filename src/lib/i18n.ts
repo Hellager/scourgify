@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { invokeCommand, setCommandErrorLanguage } from "@/lib/commands";
 
 export type Language = "en-US" | "zh-CN" | "zh-TW" | "fr-FR" | "ru-RU";
 
@@ -81,6 +81,7 @@ const en = {
   databaseUnavailable: "Database unavailable",
   databaseUnavailableDescription:
     "Database features and rule-protected cleanup are disabled until access is restored.",
+  diagnostics: "Diagnostics",
   dark: "Dark",
   deleteRule: "Delete rule",
   deleteRuleDescription: "Delete the rule “{keyword}”?",
@@ -167,6 +168,7 @@ const en = {
   openAppearanceDrawer: "Open appearance drawer",
   openConfigDrawer: "Open Config Drawer",
   openDatabaseDirectory: "Open configuration directory",
+  openLogDirectory: "Open log directory",
   openLocation: "Open location",
   openLocationFor: "Open location for {name}",
   openSettings: "Open settings",
@@ -385,6 +387,7 @@ const dictionaries: Record<Language, Dictionary> = {
     databaseUnavailable: "数据库不可用",
     databaseUnavailableDescription:
       "恢复数据库访问前，数据库功能和依赖规则保护的清理已禁用。",
+    diagnostics: "诊断",
     dark: "深色",
     deleteRule: "删除规则",
     deleteRuleDescription: "删除规则“{keyword}”？",
@@ -434,6 +437,7 @@ const dictionaries: Record<Language, Dictionary> = {
     openAppearanceDrawer: "打开外观抽屉",
     openConfigDrawer: "打开配置抽屉",
     openDatabaseDirectory: "打开配置目录",
+    openLogDirectory: "打开日志目录",
     openLocation: "打开位置",
     openLocationFor: "打开 {name} 的位置",
     openSettings: "打开设置",
@@ -627,6 +631,7 @@ const dictionaries: Record<Language, Dictionary> = {
     databaseUnavailable: "資料庫無法使用",
     databaseUnavailableDescription:
       "恢復資料庫存取前，資料庫功能和依賴規則保護的清理已停用。",
+    diagnostics: "診斷",
     dark: "深色",
     deleteRule: "刪除規則",
     deleteRuleDescription: "刪除規則「{keyword}」？",
@@ -676,6 +681,7 @@ const dictionaries: Record<Language, Dictionary> = {
     openAppearanceDrawer: "開啟外觀抽屜",
     openConfigDrawer: "開啟設定抽屜",
     openDatabaseDirectory: "開啟設定目錄",
+    openLogDirectory: "開啟記錄目錄",
     openLocation: "開啟位置",
     openLocationFor: "開啟 {name} 的位置",
     openSettings: "開啟設定",
@@ -879,6 +885,7 @@ const dictionaries: Record<Language, Dictionary> = {
     databaseUnavailable: "Base de données indisponible",
     databaseUnavailableDescription:
       "Les fonctions de base de données et le nettoyage protégé par règles sont désactivés jusqu’au rétablissement de l’accès.",
+    diagnostics: "Diagnostic",
     dark: "Sombre",
     deleteRule: "Supprimer la règle",
     deleteRuleDescription: "Supprimer la règle « {keyword} » ?",
@@ -929,6 +936,7 @@ const dictionaries: Record<Language, Dictionary> = {
     openAppearanceDrawer: "Ouvrir le panneau d'apparence",
     openConfigDrawer: "Ouvrir le panneau de configuration",
     openDatabaseDirectory: "Ouvrir le dossier de configuration",
+    openLogDirectory: "Ouvrir le dossier des journaux",
     openLocation: "Ouvrir l'emplacement",
     openLocationFor: "Ouvrir l'emplacement de {name}",
     openSettings: "Ouvrir les paramètres",
@@ -1135,6 +1143,7 @@ const dictionaries: Record<Language, Dictionary> = {
     databaseUnavailable: "База данных недоступна",
     databaseUnavailableDescription:
       "Функции базы данных и очистка с защитой правилами отключены до восстановления доступа.",
+    diagnostics: "Диагностика",
     dark: "Темная",
     deleteRule: "Удалить правило",
     deleteRuleDescription: "Удалить правило «{keyword}»?",
@@ -1185,6 +1194,7 @@ const dictionaries: Record<Language, Dictionary> = {
     openAppearanceDrawer: "Открыть панель внешнего вида",
     openConfigDrawer: "Открыть панель настроек",
     openDatabaseDirectory: "Открыть папку конфигурации",
+    openLogDirectory: "Открыть папку журналов",
     openLocation: "Открыть расположение",
     openLocationFor: "Открыть расположение для {name}",
     openSettings: "Открыть настройки",
@@ -1273,12 +1283,21 @@ export function useI18n() {
   const [language, setLanguage] = useState<Language>("en-US");
 
   useEffect(() => {
-    invoke<string>("current_language")
-      .then((value) => setLanguage(toLanguage(value)))
-      .catch(() => setLanguage("en-US"));
+    invokeCommand<string>("current_language")
+      .then((value) => {
+        const language = toLanguage(value);
+        setCommandErrorLanguage(language);
+        setLanguage(language);
+      })
+      .catch(() => {
+        setCommandErrorLanguage("en-US");
+        setLanguage("en-US");
+      });
 
     const unlisten = listen<LanguageChanged>(LANGUAGE_CHANGED_EVENT, (event) => {
-      setLanguage(toLanguage(event.payload.language));
+      const language = toLanguage(event.payload.language);
+      setCommandErrorLanguage(language);
+      setLanguage(language);
     });
 
     return () => {

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { FolderOpen, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -8,6 +7,7 @@ import {
   REFRESH_DASHBOARD_EVENT,
 } from "@/lib/app-events";
 import { useI18n } from "@/lib/i18n";
+import { invokeCommand } from "@/lib/commands";
 
 export interface DatabaseStatus {
   available: boolean;
@@ -31,7 +31,7 @@ export function DatabaseRecoveryPanel({
   const retry = async () => {
     setRetrying(true);
     try {
-      const next = await invoke<DatabaseStatus>("retry_database");
+      const next = await invokeCommand<DatabaseStatus>("retry_database");
       onStatusChange(next);
       if (next.available) {
         toast.success(t("databaseRecovered"));
@@ -49,7 +49,7 @@ export function DatabaseRecoveryPanel({
 
   const openDirectory = async () => {
     try {
-      await invoke("open_database_directory");
+      await invokeCommand("open_database_directory");
     } catch (error) {
       toast.error(errorMessage(error));
     }

@@ -1,7 +1,8 @@
 use std::sync::{Mutex, MutexGuard, TryLockError};
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde::Serialize;
+use thiserror::Error;
 
 use super::smart_clean;
 use crate::{
@@ -10,9 +11,17 @@ use crate::{
     quick_access::QaBatchResult,
 };
 
-const AUTO_CLEAN_RUNNING_ERROR: &str = "Auto-clean is already running.";
-const AUTO_CLEAN_DATABASE_ERROR: &str = "Database is unavailable; auto-clean cannot run.";
-const AUTO_CLEAN_PRIVACY_ERROR: &str = "Privacy mode is active; auto-clean cannot run.";
+#[derive(Debug, Error, PartialEq, Eq)]
+pub(crate) enum AutoCleanError {
+    #[error("auto-clean is already running")]
+    AlreadyRunning,
+    #[error("database is unavailable; auto-clean cannot run")]
+    DatabaseUnavailable,
+    #[error("privacy mode is active; auto-clean cannot run")]
+    PrivacyModeActive,
+    #[error("auto-clean state is unavailable")]
+    StateUnavailable,
+}
 
 #[derive(Default)]
 pub(crate) struct AutoCleanState {
@@ -20,11 +29,11 @@ pub(crate) struct AutoCleanState {
 }
 
 impl AutoCleanState {
-    fn begin(&self) -> Result<MutexGuard<'_, ()>> {
+    fn begin(&self) -> Result<MutexGuard<'_, ()>, AutoCleanError> {
         match self.running.try_lock() {
             Ok(guard) => Ok(guard),
-            Err(TryLockError::WouldBlock) => bail!(AUTO_CLEAN_RUNNING_ERROR),
-            Err(TryLockError::Poisoned(_)) => bail!("Auto-clean state is unavailable."),
+            Err(TryLockError::WouldBlock) => Err(AutoCleanError::AlreadyRunning),
+            Err(TryLockError::Poisoned(_)) => Err(AutoCleanError::StateUnavailable),
         }
     }
 }
@@ -114,12 +123,15 @@ pub(crate) fn run(
     Ok(result)
 }
 
-fn ensure_allowed(database_available: bool, privacy_state: PrivacyModeState) -> Result<()> {
+fn ensure_allowed(
+    database_available: bool,
+    privacy_state: PrivacyModeState,
+) -> Result<(), AutoCleanError> {
     if !database_available {
-        bail!(AUTO_CLEAN_DATABASE_ERROR);
+        return Err(AutoCleanError::DatabaseUnavailable);
     }
     if privacy_state != PrivacyModeState::Inactive {
-        bail!(AUTO_CLEAN_PRIVACY_ERROR);
+        return Err(AutoCleanError::PrivacyModeActive);
     }
     Ok(())
 }
@@ -188,24 +200,21 @@ mod tests {
 
     #[test]
     fn rejects_unavailable_database_and_active_privacy() {
-        assert!(ensure_allowed(false, PrivacyModeState::Inactive)
-            .unwrap_err()
-            .to_string()
-            .contains("Database is unavailable"));
-        assert!(ensure_allowed(true, PrivacyModeState::ActiveFull)
-            .unwrap_err()
-            .to_string()
-            .contains("Privacy mode is active"));
+        assert_eq!(
+            ensure_allowed(false, PrivacyModeState::Inactive),
+            Err(AutoCleanError::DatabaseUnavailable)
+        );
+        assert_eq!(
+            ensure_allowed(true, PrivacyModeState::ActiveFull),
+            Err(AutoCleanError::PrivacyModeActive)
+        );
     }
 
     #[test]
     fn allows_only_one_run_at_a_time() {
         let state = AutoCleanState::default();
         let first = state.begin().unwrap();
-        assert_eq!(
-            state.begin().unwrap_err().to_string(),
-            AUTO_CLEAN_RUNNING_ERROR
-        );
+        assert!(matches!(state.begin(), Err(AutoCleanError::AlreadyRunning)));
         drop(first);
         assert!(state.begin().is_ok());
     }

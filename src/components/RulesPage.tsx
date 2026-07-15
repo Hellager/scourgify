@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { invoke } from "@tauri-apps/api/core";
 import { Controller, useForm } from "react-hook-form";
 import {
   Pencil,
@@ -55,6 +54,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useI18n } from "@/lib/i18n";
+import { invokeCommand } from "@/lib/commands";
 
 const ruleFormSchema = z.object({
   keyword: z.string().trim().min(1),
@@ -117,13 +117,13 @@ export function RulesPage() {
     setError(null);
     try {
       const [databaseStatus, privacyState] = await Promise.all([
-        invoke<DatabaseStatus>("get_database_status"),
-        invoke<PrivacyState>("privacy_state"),
+        invokeCommand<DatabaseStatus>("get_database_status"),
+        invokeCommand<PrivacyState>("privacy_state"),
       ]);
       setDatabase(databaseStatus);
       setPrivacyActive(privacyState !== "Inactive");
       setRules(
-        databaseStatus.available ? await invoke<Rule[]>("get_rules") : [],
+        databaseStatus.available ? await invokeCommand<Rule[]>("get_rules") : [],
       );
     } catch (loadError) {
       setRules([]);
@@ -191,11 +191,11 @@ export function RulesPage() {
   const saveRule = handleSubmit(async (values) => {
     try {
       const saved = editingRule
-        ? await invoke<Rule>("update_rule", {
+        ? await invokeCommand<Rule>("update_rule", {
             id: editingRule.id,
             rule: values,
           })
-        : await invoke<Rule>("add_rule", { rule: values });
+        : await invokeCommand<Rule>("add_rule", { rule: values });
       setRules((current) =>
         editingRule
           ? current.map((rule) => (rule.id === saved.id ? saved : rule))
@@ -212,7 +212,7 @@ export function RulesPage() {
   const toggleRule = async (rule: Rule, enabled: boolean) => {
     setMutatingId(rule.id);
     try {
-      const saved = await invoke<Rule>("toggle_rule", {
+      const saved = await invokeCommand<Rule>("toggle_rule", {
         id: rule.id,
         enabled,
       });
@@ -235,7 +235,7 @@ export function RulesPage() {
     const rule = pendingDelete;
     setMutatingId(rule.id);
     try {
-      await invoke("remove_rule", { id: rule.id });
+      await invokeCommand("remove_rule", { id: rule.id });
       setRules((current) => current.filter((item) => item.id !== rule.id));
       setPendingDelete(null);
       toast.success(t("ruleDeleted"));

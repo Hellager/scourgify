@@ -1,5 +1,4 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Controller, type Control, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -29,6 +28,7 @@ import {
 } from "@/lib/app-events";
 import { useI18n } from "@/lib/i18n";
 import { requestNotificationPermission } from "@/lib/notifications";
+import { invokeCommand } from "@/lib/commands";
 
 const GITHUB_URL = "https://github.com/hellager/scourgify";
 
@@ -94,9 +94,9 @@ export function SettingsPage() {
     let active = true;
 
     Promise.all([
-      invoke<ConfigForm>("get_config"),
-      invoke<QaVisibility>("get_qa_visibility"),
-      invoke<PrivacyState>("privacy_state"),
+      invokeCommand<ConfigForm>("get_config"),
+      invokeCommand<QaVisibility>("get_qa_visibility"),
+      invokeCommand<PrivacyState>("privacy_state"),
     ])
       .then(([config, visibility, privacyState]) => {
         if (active) {
@@ -169,7 +169,7 @@ export function SettingsPage() {
   const runAutoClean = async () => {
     setRunningAutoClean(true);
     try {
-      const result = await invoke<AutoCleanResult>("run_auto_clean_now");
+      const result = await invokeCommand<AutoCleanResult>("run_auto_clean_now");
       if (result.failed || result.section_errors || result.history_errors) {
         toast.warning(
           t("autoCleanCompletedWithIssues", {
@@ -214,7 +214,7 @@ export function SettingsPage() {
 
     setUpdatingVisibility(qaType);
     try {
-      const actual = await invoke<QaVisibility>("set_qa_visibility", {
+      const actual = await invokeCommand<QaVisibility>("set_qa_visibility", {
         qaType,
         visible,
       });
@@ -223,7 +223,7 @@ export function SettingsPage() {
     } catch (error) {
       try {
         applyActualVisibility(
-          await invoke<QaVisibility>("get_qa_visibility"),
+          await invokeCommand<QaVisibility>("get_qa_visibility"),
         );
       } catch {
         restoreVisibilityValue(qaType, visible);
@@ -266,18 +266,18 @@ export function SettingsPage() {
         return;
       }
       if (originalVisibility.current?.recent !== values.show_recent_files) {
-        await invoke("set_qa_visibility", {
+        await invokeCommand("set_qa_visibility", {
           qaType: "recent",
           visible: values.show_recent_files,
         });
       }
       if (originalVisibility.current?.frequent !== values.show_frequent_folders) {
-        await invoke("set_qa_visibility", {
+        await invokeCommand("set_qa_visibility", {
           qaType: "frequent",
           visible: values.show_frequent_folders,
         });
       }
-      const saved = await invoke<ConfigForm>("update_config", {
+      const saved = await invokeCommand<ConfigForm>("update_config", {
         nextConfig: values,
       });
       const parsed = configSchema.parse(saved);
@@ -662,6 +662,23 @@ export function SettingsPage() {
               variant="outline"
             >
               {t("open")}
+            </Button>
+          </div>
+          <div className="flex items-center justify-between gap-4 py-2">
+            <span className="text-sm text-muted-foreground">
+              {t("diagnostics")}
+            </span>
+            <Button
+              onClick={() =>
+                void invokeCommand("open_log_directory").catch((error) =>
+                  toast.error(errorMessage(error)),
+                )
+              }
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {t("openLogDirectory")}
             </Button>
           </div>
         </Section>

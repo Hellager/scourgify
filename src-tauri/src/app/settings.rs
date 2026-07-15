@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use anyhow::{Context, Result};
 use tauri::{Emitter, Manager, Runtime};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
@@ -16,11 +17,13 @@ pub(crate) fn update<R: Runtime>(
     database: &DbState,
     state: &Mutex<Config>,
     mut next: Config,
-) -> Result<Config, String> {
+) -> Result<Config> {
     next.language = config::normalize_language(&next.language);
-    next.validate().map_err(|error| error.to_string())?;
+    next.validate().context("invalid application settings")?;
     let (auto_start, language, history_retention, auto_clean) = {
-        let current = state.lock().map_err(|error| error.to_string())?;
+        let current = state
+            .lock()
+            .map_err(|error| anyhow::anyhow!("config state lock poisoned: {error}"))?;
         (
             current.auto_start,
             current.language.clone(),
@@ -32,17 +35,19 @@ pub(crate) fn update<R: Runtime>(
     if next.history_retention > 0
         && (history_retention == 0 || next.history_retention < history_retention)
     {
-        database
-            .with_connection(|connection| db::history::trim_to(connection, next.history_retention))
-            .map_err(|error| error.to_string())?;
+        database.with_connection(|connection| {
+            db::history::trim_to(connection, next.history_retention)
+        })?;
     }
     if auto_start != next.auto_start {
         set_auto_start_preference(app, next.auto_start)?;
     }
     {
-        let mut current = state.lock().map_err(|error| error.to_string())?;
+        let mut current = state
+            .lock()
+            .map_err(|error| anyhow::anyhow!("config state lock poisoned: {error}"))?;
         next.auto_clean_last_run = current.auto_clean_last_run;
-        config::save(app, &next).map_err(|error| error.to_string())?;
+        config::save(app, &next).context("failed to save application settings")?;
         *current = next.clone();
     }
     if auto_clean != next.auto_clean {
@@ -52,7 +57,7 @@ pub(crate) fn update<R: Runtime>(
             }
         }
     }
-    window::apply_strategy(app, next.app_mode).map_err(|error| error.to_string())?;
+    window::apply_strategy(app, next.app_mode).context("failed to apply window strategy")?;
     if language != next.language {
         emit_language_changed(app, &next.language);
     }
@@ -63,7 +68,7 @@ pub(crate) fn persist_privacy_mode<R: Runtime>(
     app: &tauri::AppHandle<R>,
     state: &Mutex<Config>,
     enabled: bool,
-) -> Result<(), String> {
+) -> Result<()> {
     persist(app, state, |config| config.privacy_mode = enabled)
 }
 
@@ -71,7 +76,7 @@ pub(crate) fn persist_auto_start<R: Runtime>(
     app: &tauri::AppHandle<R>,
     state: &Mutex<Config>,
     enabled: bool,
-) -> Result<(), String> {
+) -> Result<()> {
     persist(app, state, |config| config.auto_start = enabled)
 }
 
@@ -79,9 +84,9 @@ pub(crate) fn set_app_mode<R: Runtime>(
     app: &tauri::AppHandle<R>,
     state: &Mutex<Config>,
     mode: AppMode,
-) -> Result<AppMode, String> {
+) -> Result<AppMode> {
     persist(app, state, |config| config.app_mode = mode)?;
-    window::apply_strategy(app, mode).map_err(|error| error.to_string())?;
+    window::apply_strategy(app, mode).context("failed to apply window strategy")?;
     Ok(mode)
 }
 
@@ -89,10 +94,12 @@ pub(crate) fn set_language<R: Runtime>(
     app: &tauri::AppHandle<R>,
     state: &Mutex<Config>,
     language: &str,
-) -> Result<String, String> {
+) -> Result<String> {
     let language = config::normalize_language(language);
     let changed = {
-        let current = state.lock().map_err(|error| error.to_string())?;
+        let current = state
+            .lock()
+            .map_err(|error| anyhow::anyhow!("config state lock poisoned: {error}"))?;
         current.language != language
     };
     if changed {
@@ -119,23 +126,22 @@ fn persist<R: Runtime>(
     app: &tauri::AppHandle<R>,
     state: &Mutex<Config>,
     update: impl FnOnce(&mut Config),
-) -> Result<(), String> {
-    let mut config = state.lock().map_err(|error| error.to_string())?;
+) -> Result<()> {
+    let mut config = state
+        .lock()
+        .map_err(|error| anyhow::anyhow!("config state lock poisoned: {error}"))?;
     update(&mut config);
-    config::save(app, &config).map_err(|error| error.to_string())
+    config::save(app, &config).context("failed to persist application settings")
 }
 
-fn set_auto_start_preference<R: Runtime>(
-    app: &tauri::AppHandle<R>,
-    enabled: bool,
-) -> Result<(), String> {
+fn set_auto_start_preference<R: Runtime>(app: &tauri::AppHandle<R>, enabled: bool) -> Result<()> {
     let manager = app.autolaunch();
     if enabled {
         manager.enable()
     } else {
         manager.disable()
     }
-    .map_err(|error| error.to_string())
+    .context("failed to update autostart preference")
 }
 
 fn emit_language_changed<R: Runtime>(app: &tauri::AppHandle<R>, language: &str) {

@@ -1,6 +1,7 @@
 mod app;
 mod cleanup;
 mod database;
+mod diagnostics;
 mod history;
 mod privacy;
 mod quick_access;
@@ -8,12 +9,31 @@ mod rules;
 
 use std::sync::Mutex;
 
+use serde::Serialize;
 use tauri::State;
 
-use crate::{config::Config, privacy::PrivacyModeState};
+use crate::{
+    config::Config,
+    error::{CommandError, CommandGuardError, CommandResult, ErrorCode},
+    privacy::PrivacyModeState,
+};
 
-const PRIVACY_WRITE_ERROR: &str =
-    "Privacy mode is active; Quick Access write operations are disabled.";
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct ActionReceipt {
+    pub action: &'static str,
+    pub target: String,
+    pub affected: u64,
+}
+
+impl ActionReceipt {
+    fn new(action: &'static str, target: impl Into<String>, affected: u64) -> Self {
+        Self {
+            action,
+            target: target.into(),
+            affected,
+        }
+    }
+}
 
 pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
@@ -29,6 +49,8 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         database::get_database_status,
         database::retry_database,
         database::open_database_directory,
+        diagnostics::get_log_directory_status,
+        diagnostics::open_log_directory,
         rules::get_rules,
         rules::add_rule,
         rules::update_rule,
@@ -53,20 +75,36 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
     ]
 }
 
-fn ensure_quick_access_write_allowed(state: PrivacyModeState) -> Result<(), String> {
+fn ensure_quick_access_write_allowed(state: PrivacyModeState) -> CommandResult<()> {
     if matches!(state, PrivacyModeState::Inactive) {
         Ok(())
     } else {
-        log::warn!("Quick Access write operation blocked because privacy mode is active");
-        Err(PRIVACY_WRITE_ERROR.to_string())
+        let error = CommandGuardError::PrivacyWriteBlocked;
+        Err(CommandError::expected(
+            "quick_access_write_guard",
+            ErrorCode::PrivacyWriteBlocked,
+            "The operation is unavailable while privacy mode is active.",
+            true,
+            error,
+        ))
     }
 }
 
-fn history_retention(config: &State<'_, Mutex<Config>>) -> Result<usize, String> {
-    Ok(config
+fn history_retention(config: &State<'_, Mutex<Config>>) -> CommandResult<usize> {
+    config
         .lock()
-        .map_err(|error| error.to_string())?
-        .history_retention)
+        .map(|config| config.history_retention)
+        .map_err(|error| state_error("read_history_retention", error))
+}
+
+fn state_error(operation: &str, error: impl std::fmt::Display) -> CommandError {
+    CommandError::unexpected(
+        operation,
+        ErrorCode::InternalUnexpected,
+        "Application state is temporarily unavailable.",
+        true,
+        CommandGuardError::StateUnavailable(error.to_string()),
+    )
 }
 
 #[cfg(test)]
@@ -80,9 +118,21 @@ mod tests {
 
     #[test]
     fn rejects_writes_when_privacy_is_active() {
+        let error = ensure_quick_access_write_allowed(PrivacyModeState::ActiveFull).unwrap_err();
+
+        assert_eq!(error.code, ErrorCode::PrivacyWriteBlocked);
+        assert!(error.retryable);
+    }
+
+    #[test]
+    fn serializes_action_receipt_contract() {
         assert_eq!(
-            ensure_quick_access_write_allowed(PrivacyModeState::ActiveFull).unwrap_err(),
-            PRIVACY_WRITE_ERROR
+            serde_json::to_value(ActionReceipt::new("remove_rule", "42", 1)).unwrap(),
+            serde_json::json!({
+                "action": "remove_rule",
+                "target": "42",
+                "affected": 1
+            })
         );
     }
 }

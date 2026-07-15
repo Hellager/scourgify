@@ -1,13 +1,13 @@
 mod auto;
 mod matcher;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
 #[cfg(test)]
 pub(crate) use auto::AutoCleanSectionResult;
-pub(crate) use auto::{run as run_auto_clean, AutoCleanResult, AutoCleanState};
+pub(crate) use auto::{run as run_auto_clean, AutoCleanError, AutoCleanResult, AutoCleanState};
 
 use crate::{
     db::{
@@ -18,6 +18,13 @@ use crate::{
     rules::Rule,
 };
 use matcher::{classify, MatchResult};
+use thiserror::Error;
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub(crate) enum CleanupError {
+    #[error("unsupported Quick Access cleanup type: {0}")]
+    UnsupportedType(String),
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ClassifiedItem {
@@ -239,7 +246,7 @@ fn item_type_for(qa_type: &str) -> Result<&'static str> {
     match qa_type {
         "recent" => Ok("recent_file"),
         "frequent" => Ok("frequent_folder"),
-        _ => bail!("unsupported Quick Access cleanup type: {qa_type}"),
+        _ => Err(CleanupError::UnsupportedType(qa_type.to_string()).into()),
     }
 }
 

@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { save as saveFile } from "@tauri-apps/plugin-dialog";
 import {
   type Column,
@@ -72,6 +71,7 @@ import {
 } from "@/components/ui/table";
 import { type I18nKey, useI18n } from "@/lib/i18n";
 import { REFRESH_HISTORY_EVENT } from "@/lib/app-events";
+import { invokeCommand } from "@/lib/commands";
 
 interface CleanRecord {
   id: number;
@@ -100,6 +100,8 @@ interface HistoryFilter {
 
 interface HistoryExportResult {
   count: number;
+  path: string;
+  format: HistoryExportFormat;
 }
 
 type HistoryExportFormat = "csv" | "json";
@@ -200,8 +202,8 @@ export function HistoryPage() {
     setError(null);
     try {
       const [databaseStatus, privacyState] = await Promise.all([
-        invoke<DatabaseStatus>("get_database_status"),
-        invoke<PrivacyState>("privacy_state"),
+        invokeCommand<DatabaseStatus>("get_database_status"),
+        invokeCommand<PrivacyState>("privacy_state"),
       ]);
       if (request !== requestId.current) {
         return;
@@ -214,7 +216,7 @@ export function HistoryPage() {
         setOverallTotal(0);
         return;
       }
-      const result = await invoke<CleanRecordPage>("get_clean_records", {
+      const result = await invokeCommand<CleanRecordPage>("get_clean_records", {
         query: {
           page: pagination.pageIndex + 1,
           page_size: pagination.pageSize,
@@ -290,7 +292,7 @@ export function HistoryPage() {
   const clearHistory = async () => {
     setClearing(true);
     try {
-      await invoke("clear_clean_records");
+      await invokeCommand("clear_clean_records");
       setClearOpen(false);
       setRecords([]);
       setTotal(0);
@@ -318,7 +320,7 @@ export function HistoryPage() {
       if (!path) {
         return;
       }
-      const result = await invoke<HistoryExportResult>("export_clean_records", {
+      const result = await invokeCommand<HistoryExportResult>("export_clean_records", {
         path,
         format,
         filter: scope === "filtered" ? historyFilter : EMPTY_HISTORY_FILTER,
@@ -327,7 +329,7 @@ export function HistoryPage() {
         action: {
           label: t("openFolder"),
           onClick: () => {
-            void invoke("open_in_explorer", { path }).catch((openError) =>
+            void invokeCommand("open_in_explorer", { path: result.path }).catch((openError) =>
               toast.error(errorMessage(openError)),
             );
           },

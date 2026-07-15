@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -20,6 +19,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { configSchema, type ConfigForm } from "@/lib/config";
 import { useI18n } from "@/lib/i18n";
+import { invokeCommand } from "@/lib/commands";
 
 type VisibilityQaType = "recent" | "frequent";
 
@@ -56,7 +56,7 @@ export function ConfigDrawer({
 
     let active = true;
     setLoading(true);
-    invoke<QaVisibility>("get_qa_visibility")
+    invokeCommand<QaVisibility>("get_qa_visibility")
       .then((visibility) => {
         if (!active) {
           return;
@@ -101,7 +101,7 @@ export function ConfigDrawer({
 
     updateDraft(fieldName, visible);
     try {
-      await invoke("set_qa_visibility", { qaType, visible });
+      await invokeCommand("set_qa_visibility", { qaType, visible });
       originalVisibility.current = {
         recent: originalVisibility.current?.recent ?? true,
         frequent: originalVisibility.current?.frequent ?? true,
@@ -118,7 +118,7 @@ export function ConfigDrawer({
     setSaving(true);
     try {
       const saved = configSchema.parse(
-        await invoke<ConfigForm>("update_config", {
+        await invokeCommand<ConfigForm>("update_config", {
           nextConfig: draft,
         }),
       );

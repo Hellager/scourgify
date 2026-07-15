@@ -1,10 +1,19 @@
 use crate::rules::{NewRule, Rule, RuleType};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use rusqlite::{
     params,
     types::{FromSql, FromSqlError, FromSqlResult, ValueRef},
     Connection, OptionalExtension, Row,
 };
+use thiserror::Error;
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub(crate) enum RuleError {
+    #[error("rule keyword cannot be empty")]
+    EmptyKeyword,
+    #[error("rule {0} not found")]
+    NotFound(i64),
+}
 
 impl FromSql for RuleType {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
@@ -94,14 +103,14 @@ fn row_to_rule(row: &Row<'_>) -> rusqlite::Result<Rule> {
 fn normalize(mut rule: NewRule) -> Result<NewRule> {
     rule.keyword = rule.keyword.trim().to_string();
     if rule.keyword.is_empty() {
-        bail!("rule keyword cannot be empty");
+        return Err(RuleError::EmptyKeyword.into());
     }
     Ok(rule)
 }
 
 fn ensure_rule_changed(id: i64, changed: usize) -> Result<()> {
     if changed == 0 {
-        bail!("rule {id} not found");
+        return Err(RuleError::NotFound(id).into());
     }
     Ok(())
 }
