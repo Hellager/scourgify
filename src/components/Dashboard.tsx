@@ -41,7 +41,7 @@ import {
   ChevronRight,
   Columns3,
   FolderOpen,
-  FolderPlus,
+  Plus,
   RefreshCw,
   RotateCcw,
   Search,
@@ -228,7 +228,7 @@ export function Dashboard() {
   const [statsError, setStatsError] = useState<string | null>(null);
   const [privacyActive, setPrivacyActive] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
-  const [pinFolderPath, setPinFolderPath] = useState("");
+  const [addItemPath, setAddItemPath] = useState("");
   const [lastOperationSummary, setLastOperationSummary] =
     useState<OperationSummary | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -527,6 +527,7 @@ export function Dashboard() {
   const switchTab = (value: unknown) => {
     const nextTab = toQaType(value);
     setActiveTab(nextTab);
+    setAddItemPath("");
     setSelectedPaths(new Set());
     setQuery("");
     setPagination((current) => ({ ...current, pageIndex: 0 }));
@@ -566,7 +567,7 @@ export function Dashboard() {
   const removeDisabled = cleanupActionsDisabled || selectedCount === 0;
   const emptyDisabled = cleanupActionsDisabled || cleanableCount === 0;
   const smartDisabled = cleanupActionsDisabled || smartTargets.length === 0;
-  const pinDisabled = actionsDisabled || pinFolderPath.trim() === "";
+  const addDisabled = actionsDisabled || addItemPath.trim() === "";
 
   const executeAction = async (action: Exclude<PendingAction, null>) => {
     setPendingAction(null);
@@ -675,19 +676,22 @@ export function Dashboard() {
     }
   };
 
-  const choosePinFolder = async () => {
+  const chooseItem = async () => {
     try {
-      const selected = await open({ directory: true, multiple: false });
+      const selected = await open({
+        directory: activeTab === "frequent",
+        multiple: false,
+      });
       if (typeof selected === "string") {
-        setPinFolderPath(selected);
+        setAddItemPath(selected);
       }
     } catch (error) {
       toast.error(errorMessage(error));
     }
   };
 
-  const pinFolder = async () => {
-    const path = pinFolderPath.trim();
+  const addItem = async () => {
+    const path = addItemPath.trim();
     if (!path) {
       return;
     }
@@ -698,9 +702,9 @@ export function Dashboard() {
         toast.warning(t("privacyWriteDisabled"));
         return;
       }
-      await invokeCommand("pin_qa_folder", { path });
-      setPinFolderPath("");
-      toast.success(t("pinnedFolder"));
+      await invokeCommand("add_qa_item", { qaType: activeTab, path });
+      setAddItemPath("");
+      toast.success(t("addedItem"));
       await refresh();
     } catch (error) {
       toast.error(errorMessage(error));
@@ -805,29 +809,29 @@ export function Dashboard() {
 
       <section className="grid gap-3 px-6 pb-6 md:grid-cols-[1fr_auto_auto]">
         <label className="min-w-0">
-          <span className="sr-only">{t("pinFolderPath")}</span>
+          <span className="sr-only">{t("itemPath")}</span>
           <Input
             disabled={actionsDisabled}
-            onChange={(event) => setPinFolderPath(event.target.value)}
-            placeholder={t("pinFolderPath")}
-            value={pinFolderPath}
+            onChange={(event) => setAddItemPath(event.target.value)}
+            placeholder={t("itemPath")}
+            value={addItemPath}
           />
         </label>
         <Button
           disabled={actionsDisabled}
-          onClick={() => void choosePinFolder()}
+          onClick={() => void chooseItem()}
           type="button"
           variant="outline"
         >
           {t("browse")}
         </Button>
         <Button
-          disabled={pinDisabled}
-          onClick={() => void pinFolder()}
+          disabled={addDisabled}
+          onClick={() => void addItem()}
           type="button"
         >
-          <FolderPlus />
-          {t("pinFolder")}
+          <Plus />
+          {t("addItem")}
         </Button>
       </section>
 

@@ -22,13 +22,15 @@ pub(crate) fn get_qa_counts() -> CommandResult<QaCounts> {
 }
 
 #[tauri::command]
-pub(crate) fn pin_qa_folder(
+pub(crate) fn add_qa_item(
     privacy: State<'_, PrivacyManager>,
+    qa_type: String,
     path: String,
 ) -> CommandResult<ActionReceipt> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    quick_access::pin_folder(&path).map_err(|error| quick_access_error("pin_qa_folder", error))?;
-    Ok(ActionReceipt::new("pin_qa_folder", path, 1))
+    quick_access::add_item(&qa_type, &path)
+        .map_err(|error| quick_access_error("add_qa_item", error))?;
+    Ok(ActionReceipt::new("add_qa_item", path, 1))
 }
 
 #[tauri::command]

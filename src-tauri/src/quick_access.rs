@@ -19,10 +19,12 @@ pub(crate) enum QuickAccessError {
     UnsupportedWriteType(String),
     #[error("unsupported Quick Access visibility type: {0}")]
     UnsupportedVisibilityType(String),
-    #[error("folder path is empty")]
-    EmptyFolderPath,
-    #[error("folder path does not exist: {0}")]
-    FolderNotFound(String),
+    #[error("item path is empty")]
+    EmptyItemPath,
+    #[error("item path does not exist: {0}")]
+    ItemNotFound(String),
+    #[error("Recent Files requires a file path: {0}")]
+    NotAFile(String),
     #[error("path is not a folder: {0}")]
     NotAFolder(String),
 }
@@ -148,22 +150,28 @@ pub fn get_counts() -> Result<QaCounts> {
     })
 }
 
-pub fn pin_folder(path: &str) -> Result<()> {
-    let path = validate_pin_folder_path(path)?;
-    log::info!("wincent pin folder started path={}", path.display());
+pub fn add_item(qa_type: &str, path: &str) -> Result<()> {
+    let qa_type = parse_write_qa_type(qa_type)?;
+    let path = validate_add_item_path(qa_type, path)?;
+    log::info!(
+        "wincent add item started qa_type={} path={}",
+        qa_name(qa_type),
+        path.display()
+    );
 
-    match QuickAccessManager::new().add_item(
-        &path,
-        QuickAccess::FrequentFolders,
-        AddOptions::new().refresh_explorer(),
-    ) {
+    match QuickAccessManager::new().add_item(&path, qa_type, AddOptions::new().refresh_explorer()) {
         Ok(()) => {
-            log::info!("wincent pin folder succeeded path={}", path.display());
+            log::info!(
+                "wincent add item succeeded qa_type={} path={}",
+                qa_name(qa_type),
+                path.display()
+            );
             Ok(())
         }
         Err(error) => {
             log::error!(
-                "wincent pin folder failed path={} error={error}",
+                "wincent add item failed qa_type={} path={} error={error}",
+                qa_name(qa_type),
                 path.display()
             );
             Err(error.into())
@@ -301,18 +309,24 @@ fn visibility_name(target: VisibilityTarget) -> &'static str {
     }
 }
 
-fn validate_pin_folder_path(path: &str) -> Result<PathBuf> {
+fn validate_add_item_path(qa_type: QuickAccess, path: &str) -> Result<PathBuf> {
     let path = path.trim();
     if path.is_empty() {
-        return Err(QuickAccessError::EmptyFolderPath.into());
+        return Err(QuickAccessError::EmptyItemPath.into());
     }
 
     let path = PathBuf::from(path);
     if !path.exists() {
-        return Err(QuickAccessError::FolderNotFound(path.display().to_string()).into());
+        return Err(QuickAccessError::ItemNotFound(path.display().to_string()).into());
     }
-    if !path.is_dir() {
-        return Err(QuickAccessError::NotAFolder(path.display().to_string()).into());
+    match qa_type {
+        QuickAccess::RecentFiles if !path.is_file() => {
+            return Err(QuickAccessError::NotAFile(path.display().to_string()).into());
+        }
+        QuickAccess::FrequentFolders if !path.is_dir() => {
+            return Err(QuickAccessError::NotAFolder(path.display().to_string()).into());
+        }
+        _ => {}
     }
 
     Ok(path)
@@ -529,35 +543,39 @@ mod tests {
     }
 
     #[test]
-    fn rejects_empty_pin_folder_path() {
-        let error = validate_pin_folder_path("   ").unwrap_err();
+    fn rejects_empty_add_item_path() {
+        let error = validate_add_item_path(QuickAccess::RecentFiles, "   ").unwrap_err();
 
         assert_eq!(
             error.downcast_ref::<QuickAccessError>(),
-            Some(&QuickAccessError::EmptyFolderPath)
+            Some(&QuickAccessError::EmptyItemPath)
         );
     }
 
     #[test]
-    fn rejects_missing_pin_folder_path() {
-        let path = std::env::temp_dir().join(format!(
-            "scourgify-missing-pin-folder-{}",
-            std::process::id()
-        ));
-        let error = validate_pin_folder_path(path.to_string_lossy().as_ref()).unwrap_err();
+    fn rejects_missing_add_item_path() {
+        let path =
+            std::env::temp_dir().join(format!("scourgify-missing-add-item-{}", std::process::id()));
+        let error =
+            validate_add_item_path(QuickAccess::RecentFiles, path.to_string_lossy().as_ref())
+                .unwrap_err();
 
         assert!(matches!(
             error.downcast_ref::<QuickAccessError>(),
-            Some(QuickAccessError::FolderNotFound(_))
+            Some(QuickAccessError::ItemNotFound(_))
         ));
     }
 
     #[test]
-    fn rejects_file_pin_folder_path() {
+    fn rejects_file_for_frequent_folders() {
         let path =
-            std::env::temp_dir().join(format!("scourgify-pin-folder-file-{}", std::process::id()));
+            std::env::temp_dir().join(format!("scourgify-add-item-file-{}", std::process::id()));
         std::fs::write(&path, b"test").unwrap();
-        let error = validate_pin_folder_path(path.to_string_lossy().as_ref()).unwrap_err();
+        let error = validate_add_item_path(
+            QuickAccess::FrequentFolders,
+            path.to_string_lossy().as_ref(),
+        )
+        .unwrap_err();
         std::fs::remove_file(&path).unwrap();
 
         assert!(matches!(
@@ -567,8 +585,38 @@ mod tests {
     }
 
     #[test]
-    fn accepts_existing_pin_folder_path() {
-        assert!(validate_pin_folder_path(std::env::temp_dir().to_string_lossy().as_ref()).is_ok());
+    fn rejects_folder_for_recent_files() {
+        let error = validate_add_item_path(
+            QuickAccess::RecentFiles,
+            std::env::temp_dir().to_string_lossy().as_ref(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error.downcast_ref::<QuickAccessError>(),
+            Some(QuickAccessError::NotAFile(_))
+        ));
+    }
+
+    #[test]
+    fn accepts_existing_folder_for_frequent_folders() {
+        assert!(validate_add_item_path(
+            QuickAccess::FrequentFolders,
+            std::env::temp_dir().to_string_lossy().as_ref()
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn accepts_existing_file_for_recent_files() {
+        let path =
+            std::env::temp_dir().join(format!("scourgify-add-recent-file-{}", std::process::id()));
+        std::fs::write(&path, b"test").unwrap();
+        let result =
+            validate_add_item_path(QuickAccess::RecentFiles, path.to_string_lossy().as_ref());
+        std::fs::remove_file(&path).unwrap();
+
+        assert!(result.is_ok());
     }
 
     #[test]
