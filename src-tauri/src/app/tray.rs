@@ -4,16 +4,14 @@ use anyhow::Result;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, Runtime,
+    AppHandle, Manager, Runtime,
 };
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
+use super::{alert, i18n, settings, theme, window};
 use crate::{
-    alert,
-    config::{self, AppMode, Config},
-    i18n,
+    config::{AppMode, Config},
     privacy::{LockResult, PrivacyManager, PrivacyModeState},
-    theme,
 };
 
 const OPEN_DASHBOARD_ID: &str = "open-dashboard";
@@ -23,7 +21,6 @@ const ABOUT_ID: &str = "about";
 const QUIT_ID: &str = "quit";
 const MODE_PREFIX: &str = "mode:";
 const LANGUAGE_PREFIX: &str = "language:";
-const LANGUAGE_CHANGED_EVENT: &str = "language-changed";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
     let menu = build_menu(app)?;
@@ -217,13 +214,13 @@ fn language_item<R: Runtime>(
 }
 
 fn show_about<R: Runtime>(app: &AppHandle<R>) {
-    if let Err(error) = crate::show_about(app) {
+    if let Err(error) = window::show_about(app) {
         log::error!("failed to show about window: {error}");
     }
 }
 
 fn show_dashboard<R: Runtime>(app: &AppHandle<R>) {
-    if let Err(error) = crate::show_dashboard(app) {
+    if let Err(error) = window::show_dashboard(app) {
         log::error!("failed to show dashboard: {error}");
     }
 }
@@ -236,16 +233,13 @@ fn set_mode<R: Runtime>(app: &AppHandle<R>, mode: &str) {
     };
 
     if let Some(config) = app.try_state::<Mutex<Config>>() {
-        if let Err(error) = crate::persist_app_mode(app, &config, mode) {
+        if let Err(error) = settings::set_app_mode(app, config.inner(), mode) {
             log::error!("failed to persist app mode: {error}");
             refresh_menu(app);
             return;
         }
     }
 
-    if let Err(error) = crate::apply_window_strategy(app, mode) {
-        log::error!("failed to apply app mode: {error}");
-    }
     refresh_menu(app);
 }
 
@@ -262,7 +256,7 @@ fn toggle_auto_start<R: Runtime>(app: &AppHandle<R>) {
         Ok(()) => {
             let enabled = manager.is_enabled().unwrap_or(!enabled);
             if let Some(config) = app.try_state::<Mutex<Config>>() {
-                if let Err(error) = crate::persist_auto_start(app, &config, enabled) {
+                if let Err(error) = settings::persist_auto_start(app, config.inner(), enabled) {
                     log::error!("failed to persist autostart state: {error}");
                 }
             }
@@ -299,7 +293,7 @@ fn toggle_privacy_mode<R: Runtime>(app: &AppHandle<R>) {
             LockResult::Full
         })
     } else {
-        privacy.enter().map(|result| {
+        privacy.enter().inspect(|result| {
             log::info!("privacy mode entered: {result:?}");
             if matches!(result, LockResult::Partial) {
                 alert::warning(
@@ -308,14 +302,13 @@ fn toggle_privacy_mode<R: Runtime>(app: &AppHandle<R>) {
                     "Privacy mode is active with partial protection.",
                 );
             }
-            result
         })
     };
 
     match result {
         Ok(_) => {
             let enabled = !requested;
-            if let Err(error) = crate::persist_privacy_mode(app, &config, enabled) {
+            if let Err(error) = settings::persist_privacy_mode(app, config.inner(), enabled) {
                 log::error!("failed to persist privacy mode: {error}");
             }
             refresh_menu(app);
@@ -333,24 +326,13 @@ fn toggle_privacy_mode<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn set_language<R: Runtime>(app: &AppHandle<R>, language: &str) {
-    let language = config::normalize_language(language);
     if let Some(config) = app.try_state::<Mutex<Config>>() {
-        match config.lock() {
-            Ok(mut config) if config.language != language => {
-                config.language = language.clone();
-                if let Err(error) = config::save(app, &config) {
-                    log::error!("failed to persist language: {error}");
-                }
-            }
-            Ok(_) => {}
-            Err(error) => log::error!("failed to update language config: {error}"),
+        if let Err(error) = settings::set_language(app, config.inner(), language) {
+            log::error!("failed to update language: {error}");
         }
     }
 
     refresh_menu(app);
-    if let Err(error) = app.emit(LANGUAGE_CHANGED_EVENT, i18n::language_event(&language)) {
-        log::warn!("failed to emit language change: {error}");
-    }
 }
 
 fn refresh_menu<R: Runtime>(app: &AppHandle<R>) {
@@ -372,7 +354,7 @@ fn quit_app<R: Runtime>(app: &AppHandle<R>) {
         match privacy.exit() {
             Ok(_) => {
                 if let Some(config) = app.try_state::<Mutex<Config>>() {
-                    if let Err(error) = crate::persist_privacy_mode(app, &config, false) {
+                    if let Err(error) = settings::persist_privacy_mode(app, config.inner(), false) {
                         log::error!("failed to persist privacy mode before quit: {error}");
                     }
                 }

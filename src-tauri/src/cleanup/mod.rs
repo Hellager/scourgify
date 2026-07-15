@@ -1,27 +1,23 @@
+mod auto;
+mod matcher;
+
 use anyhow::{bail, Result};
 use serde::Serialize;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Mutex, MutexGuard, TryLockError},
-};
-use tauri::{AppHandle, Runtime};
+use std::collections::{HashMap, HashSet};
+
+#[cfg(test)]
+pub(crate) use auto::AutoCleanSectionResult;
+pub(crate) use auto::{run as run_auto_clean, AutoCleanResult, AutoCleanState};
 
 use crate::{
-    config::Config,
     db::{
-        records::{self, CleanSource, NewCleanRecord},
-        rules::{self, Rule},
-        DbState,
+        history::{self, CleanSource, NewCleanRecord},
+        rules, DbState,
     },
-    matcher::{classify, MatchResult},
-    notifier,
-    privacy::{PrivacyManager, PrivacyModeState},
     quick_access::{self, QaBatchResult},
+    rules::Rule,
 };
-
-const AUTO_CLEAN_RUNNING_ERROR: &str = "Auto-clean is already running.";
-const AUTO_CLEAN_DATABASE_ERROR: &str = "Database is unavailable; auto-clean cannot run.";
-const AUTO_CLEAN_PRIVACY_ERROR: &str = "Privacy mode is active; auto-clean cannot run.";
+use matcher::{classify, MatchResult};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ClassifiedItem {
@@ -31,140 +27,6 @@ pub struct ClassifiedItem {
     pub last_interaction_at: Option<u64>,
     #[serde(rename = "match")]
     pub match_result: MatchResult,
-}
-
-#[derive(Default)]
-pub struct AutoCleanState {
-    running: Mutex<()>,
-}
-
-impl AutoCleanState {
-    fn begin(&self) -> Result<MutexGuard<'_, ()>> {
-        match self.running.try_lock() {
-            Ok(guard) => Ok(guard),
-            Err(TryLockError::WouldBlock) => bail!(AUTO_CLEAN_RUNNING_ERROR),
-            Err(TryLockError::Poisoned(_)) => bail!("Auto-clean state is unavailable."),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct AutoCleanSectionResult {
-    pub result: Option<QaBatchResult>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct AutoCleanResult {
-    pub recent: AutoCleanSectionResult,
-    pub frequent: AutoCleanSectionResult,
-    pub total: usize,
-    pub succeeded: usize,
-    pub failed: usize,
-    pub skipped_protected: usize,
-    pub section_errors: usize,
-    pub history_errors: usize,
-}
-
-impl AutoCleanResult {
-    pub fn has_failures(&self) -> bool {
-        self.failed > 0 || self.section_errors > 0 || self.history_errors > 0
-    }
-
-    fn from_sections(recent: AutoCleanSectionResult, frequent: AutoCleanSectionResult) -> Self {
-        let mut aggregate = Self {
-            recent,
-            frequent,
-            total: 0,
-            succeeded: 0,
-            failed: 0,
-            skipped_protected: 0,
-            section_errors: 0,
-            history_errors: 0,
-        };
-
-        for section in [&aggregate.recent, &aggregate.frequent] {
-            if let Some(result) = &section.result {
-                aggregate.total += result.total;
-                aggregate.succeeded += result.succeeded.len();
-                aggregate.failed += result.failed.len();
-                aggregate.skipped_protected += result.skipped_protected.len();
-                aggregate.history_errors += usize::from(result.history_error.is_some());
-            }
-            aggregate.section_errors += usize::from(section.error.is_some());
-        }
-
-        aggregate
-    }
-}
-
-pub fn run_auto_clean<R: Runtime>(
-    app: &AppHandle<R>,
-    database: &DbState,
-    config: &Config,
-    privacy: &PrivacyManager,
-    state: &AutoCleanState,
-) -> Result<AutoCleanResult> {
-    ensure_auto_clean_allowed(database.status().available, privacy.state())?;
-    let _running = state.begin()?;
-    log::info!("auto-clean started");
-    let result = run_auto_clean_sections(|qa_type, source| {
-        smart_clean(database, qa_type, config.history_retention, source)
-    });
-    for (qa_type, section) in [("recent", &result.recent), ("frequent", &result.frequent)] {
-        if let Some(error) = &section.error {
-            log::warn!("auto-clean section failed qa_type={qa_type} error={error}");
-        }
-    }
-    if result.has_failures() {
-        log::warn!(
-            "auto-clean completed with issues total={} succeeded={} failed={} section_errors={} history_errors={}",
-            result.total,
-            result.succeeded,
-            result.failed,
-            result.section_errors,
-            result.history_errors
-        );
-    } else {
-        log::info!(
-            "auto-clean completed total={} succeeded={}",
-            result.total,
-            result.succeeded
-        );
-    }
-    notifier::notify_auto_clean(app, config, &result);
-    Ok(result)
-}
-
-fn ensure_auto_clean_allowed(
-    database_available: bool,
-    privacy_state: PrivacyModeState,
-) -> Result<()> {
-    if !database_available {
-        bail!(AUTO_CLEAN_DATABASE_ERROR);
-    }
-    if privacy_state != PrivacyModeState::Inactive {
-        bail!(AUTO_CLEAN_PRIVACY_ERROR);
-    }
-    Ok(())
-}
-
-fn run_auto_clean_sections(
-    mut clean: impl FnMut(&str, CleanSource) -> Result<QaBatchResult>,
-) -> AutoCleanResult {
-    let mut run_section = |qa_type| match clean(qa_type, CleanSource::Auto) {
-        Ok(result) => AutoCleanSectionResult {
-            result: Some(result),
-            error: None,
-        },
-        Err(error) => AutoCleanSectionResult {
-            result: None,
-            error: Some(format!("{error:#}")),
-        },
-    };
-    let recent = run_section("recent");
-    let frequent = run_section("frequent");
-    AutoCleanResult::from_sections(recent, frequent)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -303,7 +165,7 @@ fn execute(
             .map(|path| clean_record(path, item_type, matches.get(&path.to_lowercase()), source))
             .collect::<Vec<_>>();
         if let Err(error) = database.with_connection(|connection| {
-            records::insert_batch(connection, &records, history_retention)
+            history::insert_batch(connection, &records, history_retention)
         }) {
             let error = format!("{error:#}");
             log::error!("cleanup history write failed error={error}");
@@ -384,86 +246,7 @@ fn item_type_for(qa_type: &str) -> Result<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::rules::RuleType;
-    use crate::quick_access::QaBatchFailure;
-
-    #[test]
-    fn auto_clean_runs_both_sections_in_order_and_aggregates_results() {
-        let mut calls = Vec::new();
-
-        let result = run_auto_clean_sections(|qa_type, source| {
-            calls.push((qa_type.to_string(), source));
-            if qa_type == "recent" {
-                Ok(QaBatchResult {
-                    total: 3,
-                    succeeded: vec![r"C:\Temp\a.txt".to_string()],
-                    failed: vec![QaBatchFailure {
-                        path: r"C:\Temp\b.txt".to_string(),
-                        error: "in use".to_string(),
-                    }],
-                    skipped_protected: vec![r"C:\Work".to_string()],
-                    history_error: Some("database busy".to_string()),
-                })
-            } else {
-                Err(anyhow::anyhow!("frequent scan failed"))
-            }
-        });
-
-        assert_eq!(
-            calls,
-            [
-                ("recent".to_string(), CleanSource::Auto),
-                ("frequent".to_string(), CleanSource::Auto),
-            ]
-        );
-        assert_eq!(result.total, 3);
-        assert_eq!(result.succeeded, 1);
-        assert_eq!(result.failed, 1);
-        assert_eq!(result.skipped_protected, 1);
-        assert_eq!(result.section_errors, 1);
-        assert_eq!(result.history_errors, 1);
-        assert!(result.has_failures());
-        assert_eq!(
-            result.frequent.error.as_deref(),
-            Some("frequent scan failed")
-        );
-    }
-
-    #[test]
-    fn auto_clean_rejects_unavailable_database_and_active_privacy() {
-        assert!(ensure_auto_clean_allowed(false, PrivacyModeState::Inactive)
-            .unwrap_err()
-            .to_string()
-            .contains("Database is unavailable"));
-        assert!(
-            ensure_auto_clean_allowed(true, PrivacyModeState::ActiveFull)
-                .unwrap_err()
-                .to_string()
-                .contains("Privacy mode is active")
-        );
-        assert!(ensure_auto_clean_allowed(
-            true,
-            PrivacyModeState::ActivePartial {
-                recent: true,
-                frequent: false,
-            },
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn auto_clean_allows_only_one_run_at_a_time() {
-        let state = AutoCleanState::default();
-        let first = state.begin().unwrap();
-
-        assert_eq!(
-            state.begin().unwrap_err().to_string(),
-            AUTO_CLEAN_RUNNING_ERROR
-        );
-
-        drop(first);
-        assert!(state.begin().is_ok());
-    }
+    use crate::rules::RuleType;
 
     #[test]
     fn manual_cleanup_skips_protected_and_keeps_other_matches() {

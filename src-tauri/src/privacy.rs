@@ -62,7 +62,9 @@ impl PrivacyManager {
                 *state = PrivacyLockState::ActiveFull(lock);
                 return Ok(LockResult::Full);
             }
-            Err(error) => log::warn!("full Quick Access lock failed, trying partial locks: {error}"),
+            Err(error) => {
+                log::warn!("full Quick Access lock failed, trying partial locks: {error}")
+            }
         }
 
         let recent = self.manager.lock_recent_files().ok();
@@ -104,10 +106,12 @@ impl PrivacyManager {
         match &*self.state.lock().expect("privacy state mutex poisoned") {
             PrivacyLockState::Inactive => PrivacyModeState::Inactive,
             PrivacyLockState::ActiveFull(_) => PrivacyModeState::ActiveFull,
-            PrivacyLockState::ActivePartial { recent, frequent } => PrivacyModeState::ActivePartial {
-                recent: recent.is_some(),
-                frequent: frequent.is_some(),
-            },
+            PrivacyLockState::ActivePartial { recent, frequent } => {
+                PrivacyModeState::ActivePartial {
+                    recent: recent.is_some(),
+                    frequent: frequent.is_some(),
+                }
+            }
         }
     }
 

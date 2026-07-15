@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::db::rules::{Rule, RuleType};
+use crate::rules::{Rule, RuleType};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "snake_case")]

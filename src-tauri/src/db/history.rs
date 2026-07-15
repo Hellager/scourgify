@@ -1,9 +1,3 @@
-use std::{
-    fs::File,
-    io::{BufWriter, Write},
-    path::Path,
-};
-
 use anyhow::{bail, Context, Result};
 use rusqlite::{
     params,
@@ -79,7 +73,7 @@ pub enum HistoryExportFormat {
 }
 
 impl HistoryExportFormat {
-    fn extension(self) -> &'static str {
+    pub(super) fn extension(self) -> &'static str {
         match self {
             Self::Csv => "csv",
             Self::Json => "json",
@@ -104,7 +98,7 @@ pub struct CleanRecord {
 }
 
 #[derive(Debug, Serialize)]
-struct ExportCleanRecord {
+pub(super) struct ExportCleanRecord {
     item_path: String,
     item_type: String,
     rule_id: Option<i64>,
@@ -126,14 +120,15 @@ impl From<CleanRecord> for ExportCleanRecord {
     }
 }
 
-struct ValidatedHistoryFilter {
+pub(super) struct ValidatedHistoryFilter {
     search: Option<String>,
     item_type: Option<&'static str>,
     matched_by_rule: Option<i64>,
     date_modifier: Option<&'static str>,
 }
 
-const HISTORY_FILTERS: &str = "WHERE (?1 IS NULL OR item_path LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+pub(super) const HISTORY_FILTERS: &str =
+    "WHERE (?1 IS NULL OR item_path LIKE ?1 ESCAPE '\\' COLLATE NOCASE
                     OR COALESCE(rule_keyword, '') LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
            AND (?2 IS NULL OR item_type = ?2)
            AND (?3 IS NULL
@@ -142,7 +137,8 @@ const HISTORY_FILTERS: &str = "WHERE (?1 IS NULL OR item_path LIKE ?1 ESCAPE '\\
            AND (?4 IS NULL
                 OR cleaned_at >= datetime('now', 'localtime', 'start of day', ?4, 'utc'))";
 
-const HISTORY_COLUMNS: &str = "id, item_path, item_type, rule_id, rule_keyword, source, cleaned_at";
+pub(super) const HISTORY_COLUMNS: &str =
+    "id, item_path, item_type, rule_id, rule_keyword, source, cleaned_at";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CleanRecordPage {
@@ -186,7 +182,7 @@ pub enum StatsRange {
 }
 
 impl StatsRange {
-    fn date_modifier(self) -> Option<&'static str> {
+    pub(super) fn date_modifier(self) -> Option<&'static str> {
         match self {
             Self::Last7Days => Some("-6 days"),
             Self::Last30Days => Some("-29 days"),
@@ -309,87 +305,10 @@ pub fn export(
     format: HistoryExportFormat,
     filter: HistoryFilter,
 ) -> Result<HistoryExportResult> {
-    let path = validate_export_path(path, format)?;
-    let filter = validate_history_filter(filter)?;
-    let file = File::create(path)
-        .with_context(|| format!("failed to create history export at {}", path.display()))?;
-    let count = match format {
-        HistoryExportFormat::Csv => export_csv(connection, file, &filter)?,
-        HistoryExportFormat::Json => export_json(connection, file, &filter)?,
-    };
-    Ok(HistoryExportResult { count })
+    super::history_export::export(connection, path, format, filter)
 }
 
-fn export_csv(connection: &Connection, file: File, filter: &ValidatedHistoryFilter) -> Result<u64> {
-    let mut writer = csv::WriterBuilder::new()
-        .has_headers(false)
-        .from_writer(BufWriter::new(file));
-    writer
-        .write_record([
-            "item_path",
-            "item_type",
-            "rule_id",
-            "rule_keyword",
-            "source",
-            "cleaned_at",
-        ])
-        .context("failed to write CSV history header")?;
-    let count = visit_filtered_records(connection, filter, |record| {
-        writer
-            .serialize(ExportCleanRecord::from(record))
-            .context("failed to serialize CSV history record")
-    })?;
-    writer
-        .flush()
-        .context("failed to finish CSV history export")?;
-    Ok(count)
-}
-
-fn export_json(
-    connection: &Connection,
-    file: File,
-    filter: &ValidatedHistoryFilter,
-) -> Result<u64> {
-    let mut records = Vec::new();
-    let count = visit_filtered_records(connection, filter, |record| {
-        records.push(ExportCleanRecord::from(record));
-        Ok(())
-    })?;
-    let mut writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(&mut writer, &records)
-        .context("failed to serialize JSON history export")?;
-    writer
-        .flush()
-        .context("failed to finish JSON history export")?;
-    Ok(count)
-}
-
-fn visit_filtered_records(
-    connection: &Connection,
-    filter: &ValidatedHistoryFilter,
-    mut visit: impl FnMut(CleanRecord) -> Result<()>,
-) -> Result<u64> {
-    let sql = format!(
-        "SELECT {HISTORY_COLUMNS}
-         FROM clean_records
-         {HISTORY_FILTERS}
-         ORDER BY cleaned_at DESC, id DESC"
-    );
-    let mut statement = connection
-        .prepare(&sql)
-        .context("failed to prepare history export query")?;
-    let rows = statement
-        .query_map(history_filter_params(filter), read_clean_record)
-        .context("failed to query history export")?;
-    let mut count = 0_u64;
-    for row in rows {
-        visit(row.context("failed to read history export record")?)?;
-        count += 1;
-    }
-    Ok(count)
-}
-
-fn validate_history_filter(filter: HistoryFilter) -> Result<ValidatedHistoryFilter> {
+pub(super) fn validate_history_filter(filter: HistoryFilter) -> Result<ValidatedHistoryFilter> {
     let item_type = match filter.item_type.as_deref() {
         None => None,
         Some("recent_file") => Some("recent_file"),
@@ -410,7 +329,7 @@ fn validate_history_filter(filter: HistoryFilter) -> Result<ValidatedHistoryFilt
     })
 }
 
-fn history_filter_params(filter: &ValidatedHistoryFilter) -> [&dyn rusqlite::ToSql; 4] {
+pub(super) fn history_filter_params(filter: &ValidatedHistoryFilter) -> [&dyn rusqlite::ToSql; 4] {
     [
         &filter.search,
         &filter.item_type,
@@ -419,7 +338,7 @@ fn history_filter_params(filter: &ValidatedHistoryFilter) -> [&dyn rusqlite::ToS
     ]
 }
 
-fn read_clean_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanRecord> {
+pub(super) fn read_clean_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanRecord> {
     Ok(CleanRecord {
         id: row.get(0)?,
         item_path: row.get(1)?,
@@ -429,30 +348,6 @@ fn read_clean_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanRecord> {
         source: row.get(5)?,
         cleaned_at: row.get(6)?,
     })
-}
-
-fn validate_export_path(path: &str, format: HistoryExportFormat) -> Result<&Path> {
-    if path.trim().is_empty() {
-        bail!("history export path is empty");
-    }
-    let path = Path::new(path);
-    if !path.is_absolute() {
-        bail!("history export path must be absolute");
-    }
-    let extension_matches = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case(format.extension()));
-    if !extension_matches {
-        bail!(
-            "history export path must use the .{} extension",
-            format.extension()
-        );
-    }
-    path.parent()
-        .filter(|parent| parent.is_dir())
-        .context("history export directory does not exist")?;
-    Ok(path)
 }
 
 fn history_search_pattern(search: &str) -> Option<String> {
@@ -475,130 +370,7 @@ pub fn clear(connection: &Connection) -> Result<()> {
 }
 
 pub fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
-    let (total, recent_files, frequent_folders) = connection
-        .query_row(
-            "SELECT COUNT(*),
-                    COALESCE(SUM(item_type = 'recent_file'), 0),
-                    COALESCE(SUM(item_type = 'frequent_folder'), 0)
-             FROM clean_records",
-            [],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
-        )
-        .context("failed to count cleanup statistics")?;
-
-    let total = u64::try_from(total).context("cleanup total is negative")?;
-    let (daily_trend, weekly_trend) = if total == 0 {
-        (Vec::new(), Vec::new())
-    } else {
-        (
-            trend(connection, range, false, "daily cleanup trend")?,
-            trend(connection, range, true, "weekly cleanup trend")?,
-        )
-    };
-
-    Ok(Stats {
-        total,
-        recent_files: u64::try_from(recent_files).context("recent file total is negative")?,
-        frequent_folders: u64::try_from(frequent_folders)
-            .context("frequent folder total is negative")?,
-        daily_trend,
-        weekly_trend,
-        rule_hits: rule_hits(connection)?,
-    })
-}
-
-fn trend(
-    connection: &Connection,
-    range: StatsRange,
-    weekly: bool,
-    label: &str,
-) -> Result<Vec<StatsTrendPoint>> {
-    let mut statement = connection
-        .prepare(
-            "WITH RECURSIVE
-             bounds(start_day, end_day) AS (
-                 SELECT
-                     COALESCE(
-                         CASE
-                             WHEN ?1 IS NULL THEN (
-                                 SELECT MIN(date(cleaned_at, 'localtime')) FROM clean_records
-                             )
-                             ELSE date('now', 'localtime', ?1)
-                         END,
-                         date('now', 'localtime')
-                     ),
-                     date('now', 'localtime')
-             ),
-             days(day) AS (
-                 SELECT start_day FROM bounds
-                 UNION ALL
-                 SELECT date(day, '+1 day')
-                 FROM days, bounds
-                 WHERE day < end_day
-             ),
-             record_days(day, count) AS (
-                 SELECT date(cleaned_at, 'localtime'), COUNT(*)
-                 FROM clean_records
-                 GROUP BY date(cleaned_at, 'localtime')
-             )
-             SELECT
-                 CASE
-                     WHEN ?2 = 1 THEN date(days.day, 'weekday 0', '-6 days')
-                     ELSE days.day
-                 END AS period,
-                 COALESCE(SUM(record_days.count), 0)
-             FROM days
-             LEFT JOIN record_days ON record_days.day = days.day
-             GROUP BY period
-             ORDER BY period",
-        )
-        .with_context(|| format!("failed to prepare {label}"))?;
-    let rows = statement
-        .query_map(params![range.date_modifier(), weekly], |row| {
-            let count = row.get::<_, i64>(1)?;
-            Ok((row.get::<_, String>(0)?, count))
-        })
-        .with_context(|| format!("failed to query {label}"))?;
-    rows.map(|row| {
-        let (period, count) = row.with_context(|| format!("failed to read {label}"))?;
-        Ok(StatsTrendPoint {
-            period,
-            count: u64::try_from(count).context("cleanup trend count is negative")?,
-        })
-    })
-    .collect()
-}
-
-fn rule_hits(connection: &Connection) -> Result<Vec<RuleHitStat>> {
-    let mut statement = connection
-        .prepare(
-            "SELECT rule_keyword, COUNT(*) AS hit_count
-             FROM clean_records
-             WHERE rule_keyword IS NOT NULL
-             GROUP BY rule_keyword COLLATE NOCASE
-             ORDER BY hit_count DESC, rule_keyword COLLATE NOCASE
-             LIMIT 10",
-        )
-        .context("failed to prepare rule hit statistics")?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })
-        .context("failed to query rule hit statistics")?;
-    rows.map(|row| {
-        let (keyword, count) = row.context("failed to read rule hit statistics")?;
-        Ok(RuleHitStat {
-            keyword,
-            count: u64::try_from(count).context("rule hit count is negative")?,
-        })
-    })
-    .collect()
+    super::stats::stats(connection, range)
 }
 
 pub fn trim_to(connection: &Connection, retention: usize) -> Result<()> {
@@ -871,7 +643,6 @@ mod tests {
                     date_range: Some("30d".to_string()),
                     ..HistoryFilter::default()
                 },
-                ..history_query()
             },
         )
         .unwrap();

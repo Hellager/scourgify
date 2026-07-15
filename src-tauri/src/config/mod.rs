@@ -1,79 +1,60 @@
-use anyhow::{Context, Result};
+mod store;
+
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use tauri::{AppHandle, Manager, Runtime};
 
-const CONFIG_FILE: &str = "config.json";
 const FALLBACK_LANGUAGE: &str = "en-US";
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) use store::{load, save};
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AppMode {
     Minimal,
+    #[default]
     Dashboard,
 }
 
-impl Default for AppMode {
-    fn default() -> Self {
-        Self::Dashboard
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum CloseBehavior {
+    #[default]
     Hide,
     Quit,
 }
 
-impl Default for CloseBehavior {
-    fn default() -> Self {
-        Self::Hide
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemePreference {
+    #[default]
     System,
     Light,
     Dark,
 }
 
-impl Default for ThemePreference {
-    fn default() -> Self {
-        Self::System
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SidebarVariant {
+    #[default]
     Sidebar,
     Inset,
     Floating,
 }
 
-impl Default for SidebarVariant {
-    fn default() -> Self {
-        Self::Sidebar
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AutoCleanSchedule {
+    #[default]
     Disabled,
     OnStartup,
-    EveryHours { hours: u32 },
-    DailyAt { hour: u8, minute: u8 },
-}
-
-impl Default for AutoCleanSchedule {
-    fn default() -> Self {
-        Self::Disabled
-    }
+    EveryHours {
+        hours: u32,
+    },
+    DailyAt {
+        hour: u8,
+        minute: u8,
+    },
 }
 
 impl AutoCleanSchedule {
@@ -138,7 +119,7 @@ pub struct Config {
 }
 
 impl Config {
-    fn new(language: String) -> Self {
+    pub(super) fn new(language: String) -> Self {
         Self {
             app_mode: AppMode::Dashboard,
             language,
@@ -168,46 +149,6 @@ impl Config {
     }
 }
 
-pub fn load<R: Runtime>(app: &AppHandle<R>) -> Result<Config> {
-    let path = config_path(app)?;
-    let mut config = if path.exists() {
-        let raw = std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        serde_json::from_str::<Config>(&raw)
-            .with_context(|| format!("failed to parse {}", path.display()))?
-    } else {
-        Config::new(detect_language())
-    };
-
-    config.language = normalize_language(&config.language);
-    config.validate()?;
-    save(app, &config)?;
-    Ok(config)
-}
-
-pub fn save<R: Runtime>(app: &AppHandle<R>, config: &Config) -> Result<()> {
-    config.validate()?;
-    let path = config_path(app)?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .with_context(|| format!("failed to create {}", dir.display()))?;
-    }
-
-    let json = serde_json::to_string_pretty(config)?;
-    std::fs::write(&path, json).with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-pub fn config_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf> {
-    Ok(app.path().app_config_dir()?.join(CONFIG_FILE))
-}
-
-pub fn detect_language() -> String {
-    tauri_plugin_os::locale()
-        .map(|locale| normalize_language(&locale))
-        .unwrap_or_else(default_language)
-}
-
 pub fn normalize_language(language: &str) -> String {
     let tag = language.trim().replace('_', "-").to_ascii_lowercase();
     let parts: Vec<&str> = tag.split('-').filter(|part| !part.is_empty()).collect();
@@ -217,7 +158,10 @@ pub fn normalize_language(language: &str) -> String {
         Some("fr") => "fr-FR".to_string(),
         Some("ru") => "ru-RU".to_string(),
         Some("zh") => {
-            if parts.iter().any(|part| matches!(*part, "hant" | "tw" | "hk" | "mo")) {
+            if parts
+                .iter()
+                .any(|part| matches!(*part, "hant" | "tw" | "hk" | "mo"))
+            {
                 "zh-TW".to_string()
             } else {
                 "zh-CN".to_string()
@@ -227,7 +171,7 @@ pub fn normalize_language(language: &str) -> String {
     }
 }
 
-fn default_language() -> String {
+pub(super) fn default_language() -> String {
     FALLBACK_LANGUAGE.to_string()
 }
 
@@ -326,14 +270,26 @@ mod tests {
 
     #[test]
     fn serializes_app_mode_as_lowercase() {
-        assert_eq!(serde_json::to_string(&AppMode::Dashboard).unwrap(), r#""dashboard""#);
-        assert_eq!(serde_json::to_string(&AppMode::Minimal).unwrap(), r#""minimal""#);
+        assert_eq!(
+            serde_json::to_string(&AppMode::Dashboard).unwrap(),
+            r#""dashboard""#
+        );
+        assert_eq!(
+            serde_json::to_string(&AppMode::Minimal).unwrap(),
+            r#""minimal""#
+        );
     }
 
     #[test]
     fn serializes_settings_enums_as_lowercase() {
-        assert_eq!(serde_json::to_string(&CloseBehavior::Hide).unwrap(), r#""hide""#);
-        assert_eq!(serde_json::to_string(&ThemePreference::System).unwrap(), r#""system""#);
+        assert_eq!(
+            serde_json::to_string(&CloseBehavior::Hide).unwrap(),
+            r#""hide""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ThemePreference::System).unwrap(),
+            r#""system""#
+        );
         assert_eq!(
             serde_json::to_string(&SidebarVariant::Floating).unwrap(),
             r#""floating""#
@@ -342,6 +298,9 @@ mod tests {
 
     #[test]
     fn new_config_defaults_to_dashboard_mode() {
-        assert_eq!(Config::new("en-US".to_string()).app_mode, AppMode::Dashboard);
+        assert_eq!(
+            Config::new("en-US".to_string()).app_mode,
+            AppMode::Dashboard
+        );
     }
 }

@@ -62,12 +62,12 @@ pub fn run_now<R: Runtime>(app: &AppHandle<R>) -> Result<AutoCleanResult> {
     let privacy = app.state::<PrivacyManager>();
     let auto_clean = app.state::<AutoCleanState>();
     let result = cleanup::run_auto_clean(
-        app,
         database.inner(),
-        &config,
+        config.history_retention,
         privacy.inner(),
         auto_clean.inner(),
     )?;
+    super::notifier::notify_auto_clean(app, &config, &result);
     record_completion(app, &result)?;
     Ok(result)
 }

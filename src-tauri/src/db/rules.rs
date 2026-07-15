@@ -1,26 +1,10 @@
+use crate::rules::{NewRule, Rule, RuleType};
 use anyhow::{bail, Context, Result};
 use rusqlite::{
     params,
     types::{FromSql, FromSqlError, FromSqlResult, ValueRef},
     Connection, OptionalExtension, Row,
 };
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum RuleType {
-    Whitelist,
-    Blacklist,
-}
-
-impl RuleType {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Whitelist => "whitelist",
-            Self::Blacklist => "blacklist",
-        }
-    }
-}
 
 impl FromSql for RuleType {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
@@ -30,22 +14,6 @@ impl FromSql for RuleType {
             _ => Err(FromSqlError::InvalidType),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct Rule {
-    pub id: i64,
-    pub keyword: String,
-    pub rule_type: RuleType,
-    pub enabled: bool,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct NewRule {
-    pub keyword: String,
-    pub rule_type: RuleType,
-    pub enabled: bool,
 }
 
 pub fn list(connection: &Connection) -> Result<Vec<Rule>> {
