@@ -6,9 +6,9 @@ use std::{
 };
 use thiserror::Error;
 use wincent::prelude::{
-    AddOptions, BatchOptions, FrequentRestoreReport, QuickAccess, QuickAccessItem,
-    QuickAccessManager, RecentRestoreReport, RemoveOptions, RestoreDefaultsOptions,
-    RestoreDefaultsReport, VisibilityOptions,
+    AddOptions, BatchOptions, FrequentFolderPinStatus, FrequentRestoreReport, QuickAccess,
+    QuickAccessItem, QuickAccessManager, RecentRestoreReport, RemoveOptions,
+    RestoreDefaultsOptions, RestoreDefaultsReport, VisibilityOptions,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -34,6 +34,7 @@ pub struct QaItem {
     pub path: String,
     pub name: String,
     pub last_interaction_at: Option<u64>,
+    pub pinned: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,9 +98,42 @@ pub fn list_items(qa_type: &str) -> Result<Vec<QaItem>> {
         .map(|path| QaItem {
             name: item_name(&path),
             last_interaction_at: interaction_times.get(&path.to_lowercase()).copied(),
+            pinned: frequent_folder_pinned(&manager, qa_type, &path),
             path,
         })
         .collect())
+}
+
+fn frequent_folder_pinned(
+    manager: &QuickAccessManager,
+    qa_type: QuickAccess,
+    path: &str,
+) -> Option<bool> {
+    if qa_type != QuickAccess::FrequentFolders {
+        return None;
+    }
+
+    match manager.frequent_folder_pin_status(path) {
+        Ok(status) => {
+            let pinned = pin_status_value(status);
+            if pinned.is_none() {
+                log::warn!("wincent pin status missing for listed frequent folder path={path}");
+            }
+            pinned
+        }
+        Err(error) => {
+            log::warn!("wincent pin status unavailable path={path} error={error}");
+            None
+        }
+    }
+}
+
+fn pin_status_value(status: FrequentFolderPinStatus) -> Option<bool> {
+    match status {
+        FrequentFolderPinStatus::Pinned => Some(true),
+        FrequentFolderPinStatus::Unpinned => Some(false),
+        FrequentFolderPinStatus::NotFound => None,
+    }
 }
 
 const FILETIME_UNIX_EPOCH_OFFSET: u64 = 116_444_736_000_000_000;
@@ -492,6 +526,39 @@ mod tests {
         assert!(result.failed.is_empty());
         assert!(result.skipped_protected.is_empty());
         assert_eq!(result.history_error, None);
+    }
+
+    #[test]
+    fn serializes_item_pin_status() {
+        let item = QaItem {
+            path: r"C:\Work".to_string(),
+            name: "Work".to_string(),
+            last_interaction_at: None,
+            pinned: Some(true),
+        };
+
+        assert_eq!(
+            serde_json::to_value(item).unwrap(),
+            serde_json::json!({
+                "path": r"C:\Work",
+                "name": "Work",
+                "last_interaction_at": null,
+                "pinned": true
+            })
+        );
+    }
+
+    #[test]
+    fn maps_frequent_folder_pin_status() {
+        assert_eq!(
+            pin_status_value(FrequentFolderPinStatus::Pinned),
+            Some(true)
+        );
+        assert_eq!(
+            pin_status_value(FrequentFolderPinStatus::Unpinned),
+            Some(false)
+        );
+        assert_eq!(pin_status_value(FrequentFolderPinStatus::NotFound), None);
     }
 
     #[test]

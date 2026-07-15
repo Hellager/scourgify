@@ -41,6 +41,8 @@ import {
   ChevronRight,
   Columns3,
   FolderOpen,
+  Pin,
+  PinOff,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -119,6 +121,7 @@ interface QaItem {
   name: string;
   item_type: "recent_file" | "frequent_folder";
   last_interaction_at: number | null;
+  pinned: boolean | null;
   match: QaMatch;
 }
 
@@ -346,6 +349,29 @@ export function Dashboard() {
           );
         },
       },
+      ...(activeTab === "frequent"
+        ? [
+            {
+              accessorKey: "pinned",
+              header: t("pinStatus"),
+              cell: ({ row }: { row: { original: QaTableRow } }) => {
+                const pinned = row.original.pinned;
+                if (pinned === null) {
+                  return (
+                    <span className="text-muted-foreground">{t("unknown")}</span>
+                  );
+                }
+                const Icon = pinned ? Pin : PinOff;
+                return (
+                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
+                    <Icon className="size-4" />
+                    {t(pinned ? "pinned" : "unpinned")}
+                  </span>
+                );
+              },
+            },
+          ]
+        : []),
       {
         id: "match",
         accessorFn: (row) => row.match.status,
@@ -381,7 +407,7 @@ export function Dashboard() {
         ),
       },
     ],
-    [language, selectedPaths, t],
+    [activeTab, language, selectedPaths, t],
   );
 
   const table = useReactTable({
@@ -445,7 +471,7 @@ export function Dashboard() {
         );
       } else {
         const legacyItems = await invokeCommand<
-          Array<Pick<QaItem, "path" | "name" | "last_interaction_at">>
+          Array<Pick<QaItem, "path" | "name" | "last_interaction_at" | "pinned">>
         >("list_qa_items", { qaType });
         setItems(
           legacyItems.map((item) => ({
@@ -1569,6 +1595,9 @@ function getHeaderClassName(columnId: string) {
   if (columnId === "match") {
     return "w-48";
   }
+  if (columnId === "pinned") {
+    return "w-32";
+  }
   if (columnId === "type") {
     return "w-36";
   }
@@ -1592,6 +1621,7 @@ function getColumnLabel(
     match: "ruleMatch",
     name: "name",
     path: "path",
+    pinned: "pinStatus",
     type: "type",
   };
   return labels[columnId] ? t(labels[columnId]) : columnId;
