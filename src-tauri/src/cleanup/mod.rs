@@ -12,6 +12,7 @@ pub(crate) use auto::{run as run_auto_clean, AutoCleanError, AutoCleanResult, Au
 use crate::{
     db::{
         history::{self, CleanSource, NewCleanRecord},
+        history_runs::{self, CleanupAction, CleanupTrigger, NewCleanupRun, RunCompletion},
         rules, DbState,
     },
     quick_access::{self, QaBatchResult, QaItem},
@@ -108,8 +109,13 @@ pub fn remove_selected(
     let item_type = item_type_for(qa_type)?;
     let rules = load_rules(database)?;
     let prepared = prepare_cleanup(paths, &rules, Selection::AllUnprotected);
-    execute(
+    run_operation(
         database,
+        NewCleanupRun {
+            action: CleanupAction::RemoveSelected,
+            trigger: CleanupTrigger::Manual,
+            qa_type,
+        },
         qa_type,
         item_type,
         prepared,
@@ -130,8 +136,13 @@ pub fn empty_current(
         .map(|item| item.path)
         .collect();
     let prepared = prepare_cleanup(paths, &rules, Selection::AllUnprotected);
-    execute(
+    run_operation(
         database,
+        NewCleanupRun {
+            action: CleanupAction::Empty,
+            trigger: CleanupTrigger::Manual,
+            qa_type,
+        },
         qa_type,
         item_type,
         prepared,
@@ -153,6 +164,35 @@ pub fn smart_clean(
         .map(|item| item.path)
         .collect();
     let prepared = prepare_cleanup(paths, &rules, Selection::TargetedOnly);
+    run_operation(
+        database,
+        NewCleanupRun {
+            action: CleanupAction::SmartClean,
+            trigger: CleanupTrigger::Manual,
+            qa_type,
+        },
+        qa_type,
+        item_type,
+        prepared,
+        history_retention,
+        source,
+    )
+}
+
+pub(crate) fn smart_clean_in_run(
+    database: &DbState,
+    qa_type: &str,
+    history_retention: usize,
+    source: CleanSource,
+    run_id: i64,
+) -> Result<QaBatchResult> {
+    let item_type = item_type_for(qa_type)?;
+    let rules = load_rules(database)?;
+    let paths = quick_access::list_items(qa_type)?
+        .into_iter()
+        .map(|item| item.path)
+        .collect();
+    let prepared = prepare_cleanup(paths, &rules, Selection::TargetedOnly);
     execute(
         database,
         qa_type,
@@ -160,7 +200,76 @@ pub fn smart_clean(
         prepared,
         history_retention,
         source,
+        run_id,
     )
+}
+
+fn run_operation(
+    database: &DbState,
+    run: NewCleanupRun<'_>,
+    qa_type: &str,
+    item_type: &str,
+    prepared: PreparedCleanup,
+    history_retention: usize,
+    source: CleanSource,
+) -> Result<QaBatchResult> {
+    let requested = prepared.total;
+    let run_id = database.with_connection(|connection| history_runs::begin(connection, run))?;
+    match execute(
+        database,
+        qa_type,
+        item_type,
+        prepared,
+        history_retention,
+        source,
+        run_id,
+    ) {
+        Ok(mut result) => {
+            let completion = completion_from_batch(&result);
+            if let Err(error) = database.with_connection(|connection| {
+                history_runs::finish(connection, run_id, &completion, history_retention)
+            }) {
+                let error = format!("{error:#}");
+                log::error!("cleanup run completion failed run_id={run_id} error={error}");
+                result.history_error = Some(match result.history_error.take() {
+                    Some(current) => format!("{current}; {error}"),
+                    None => error,
+                });
+            }
+            Ok(result)
+        }
+        Err(error) => {
+            let completion = RunCompletion {
+                requested,
+                failed: requested,
+                ..RunCompletion::default()
+            };
+            if let Err(finish_error) = database.with_connection(|connection| {
+                history_runs::finish(connection, run_id, &completion, history_retention)
+            }) {
+                log::error!(
+                    "failed cleanup run could not be finalized run_id={run_id} error={finish_error:#}"
+                );
+            }
+            Err(error)
+        }
+    }
+}
+
+pub(crate) fn completion_from_batch(result: &QaBatchResult) -> RunCompletion {
+    RunCompletion {
+        requested: result.total,
+        succeeded: result.succeeded.len(),
+        failed: result.failed.len(),
+        protected: result.skipped_protected.len(),
+        warnings: result.warnings.len(),
+        history_errors: usize::from(result.history_error.is_some()),
+        section_errors: 0,
+        incident_id: result
+            .failed
+            .first()
+            .map(|failure| failure.error.incident_id.clone()),
+    }
 }
 
 fn execute(
@@ -170,6 +279,7 @@ fn execute(
     prepared: PreparedCleanup,
     history_retention: usize,
     source: CleanSource,
+    run_id: i64,
 ) -> Result<QaBatchResult> {
     let matches = prepared
         .candidates
@@ -198,7 +308,15 @@ fn execute(
         let records = result
             .succeeded
             .iter()
-            .map(|path| clean_record(path, item_type, matches.get(&path.to_lowercase()), source))
+            .map(|path| {
+                clean_record(
+                    path,
+                    item_type,
+                    matches.get(&path.to_lowercase()),
+                    source,
+                    Some(run_id),
+                )
+            })
             .collect::<Vec<_>>();
         if let Err(error) = database.with_connection(|connection| {
             history::insert_batch(connection, &records, history_retention)
@@ -257,12 +375,14 @@ fn clean_record(
     item_type: &str,
     match_result: Option<&MatchResult>,
     source: CleanSource,
+    run_id: Option<i64>,
 ) -> NewCleanRecord {
     let (rule_id, rule_keyword) = match match_result {
         Some(MatchResult::Targeted { rule_id, keyword }) => (Some(*rule_id), Some(keyword.clone())),
         _ => (None, None),
     };
     NewCleanRecord {
+        run_id,
         item_path: path.to_string(),
         item_type: item_type.to_string(),
         rule_id,
@@ -378,8 +498,15 @@ mod tests {
             "recent_file",
             Some(&targeted),
             CleanSource::Manual,
+            None,
         );
-        let neutral_record = clean_record(r"C:\Docs\a.txt", "recent_file", None, CleanSource::Auto);
+        let neutral_record = clean_record(
+            r"C:\Docs\a.txt",
+            "recent_file",
+            None,
+            CleanSource::Auto,
+            None,
+        );
 
         assert_eq!(targeted_record.rule_id, Some(7));
         assert_eq!(targeted_record.rule_keyword.as_deref(), Some("Temp"));

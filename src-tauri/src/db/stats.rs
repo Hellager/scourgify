@@ -4,8 +4,9 @@ use rusqlite::{params, Connection};
 use super::history::{HistoryTotals, RuleHitStat, Stats, StatsRange, StatsTrendPoint};
 
 pub(super) fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
-    let totals = totals(connection)?;
-    let (daily_trend, weekly_trend) = if totals.total == 0 {
+    let retained = totals(connection)?;
+    let lifetime = super::history_runs::lifetime_totals(connection)?;
+    let (daily_trend, weekly_trend) = if retained.total == 0 {
         (Vec::new(), Vec::new())
     } else {
         (
@@ -15,9 +16,10 @@ pub(super) fn stats(connection: &Connection, range: StatsRange) -> Result<Stats>
     };
 
     Ok(Stats {
-        total: totals.total,
-        recent_files: totals.recent_files,
-        frequent_folders: totals.frequent_folders,
+        total: lifetime.cleaned_total,
+        recent_files: lifetime.cleaned_files,
+        frequent_folders: lifetime.cleaned_folders,
+        retained_total: retained.total,
         daily_trend,
         weekly_trend,
         rule_hits: rule_hits(connection)?,

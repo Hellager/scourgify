@@ -1,7 +1,7 @@
 use tauri::State;
 
-use super::ensure_quick_access_write_allowed;
 use crate::{
+    db::history_runs::{CleanupRunFilter, CleanupRunPage, CleanupRunQuery},
     db::{
         history::{
             self, CleanRecordPage, HistoryError, HistoryExportFormat, HistoryExportResult,
@@ -10,10 +10,7 @@ use crate::{
         DatabaseStateError, DbState,
     },
     error::{CommandError, CommandResult, ErrorCode},
-    privacy::PrivacyManager,
 };
-
-use super::ActionReceipt;
 
 #[tauri::command]
 pub(crate) fn get_clean_records(
@@ -33,24 +30,41 @@ pub(crate) fn export_clean_records(
     filter: HistoryFilter,
 ) -> CommandResult<HistoryExportResult> {
     database
-        .with_connection(|connection| history::export(connection, &path, format, filter))
+        .read_connection()
+        .and_then(|connection| history::export(&connection, &path, format, filter))
         .map_err(|error| history_error("export_clean_records", error))
+}
+
+#[tauri::command]
+pub(crate) fn get_cleanup_runs(
+    database: State<'_, DbState>,
+    query: CleanupRunQuery,
+) -> CommandResult<CleanupRunPage> {
+    database
+        .with_connection(|connection| crate::db::history_runs::list(connection, query))
+        .map_err(|error| history_error("get_cleanup_runs", error))
+}
+
+#[tauri::command]
+pub(crate) fn export_cleanup_runs(
+    database: State<'_, DbState>,
+    path: String,
+    format: HistoryExportFormat,
+    filter: CleanupRunFilter,
+) -> CommandResult<HistoryExportResult> {
+    database
+        .read_connection()
+        .and_then(|connection| history::export_runs(&connection, &path, format, filter))
+        .map_err(|error| history_error("export_cleanup_runs", error))
 }
 
 #[tauri::command]
 pub(crate) fn clear_clean_records(
     database: State<'_, DbState>,
-    privacy: State<'_, PrivacyManager>,
-) -> CommandResult<ActionReceipt> {
-    ensure_quick_access_write_allowed(privacy.state())?;
-    let affected = database
-        .with_connection(|connection| history::clear(connection))
-        .map_err(|error| history_error("clear_clean_records", error))?;
-    Ok(ActionReceipt::new(
-        "clear_clean_records",
-        "clean_records",
-        affected,
-    ))
+) -> CommandResult<history::HistoryClearResult> {
+    database
+        .with_connection(history::clear)
+        .map_err(|error| history_error("clear_clean_records", error))
 }
 
 #[tauri::command]

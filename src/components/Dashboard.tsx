@@ -210,6 +210,7 @@ interface Stats {
   total: number;
   recent_files: number;
   frequent_folders: number;
+  retained_total: number;
   daily_trend: StatsTrendPoint[];
   weekly_trend: StatsTrendPoint[];
   rule_hits: RuleHitStat[];
@@ -1496,6 +1497,9 @@ function HistoryStats({
               value={stats.frequent_folders}
             />
           </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {t("retainedHistory")}: {stats.retained_total}
+          </p>
           <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
             <div className="min-w-0 rounded-md border bg-card p-4 text-card-foreground">
               <div className="flex flex-wrap items-center justify-between gap-3">

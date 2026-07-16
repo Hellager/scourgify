@@ -29,6 +29,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { CleanupRunsPanel } from "@/components/CleanupRunsPanel";
 import { PageHeader } from "@/components/AppShell";
 import {
   DatabaseRecoveryPanel,
@@ -75,6 +76,7 @@ import { invokeCommand } from "@/lib/commands";
 
 interface CleanRecord {
   id: number;
+  run_id: number | null;
   item_path: string;
   item_type: "recent_file" | "frequent_folder";
   rule_id: number | null;
@@ -95,6 +97,8 @@ interface HistoryFilter {
   search: string;
   item_type: CleanRecord["item_type"] | null;
   matched_by_rule: boolean | null;
+  source: "manual" | "auto" | null;
+  run_id: number | null;
   date_range: "7d" | "30d" | null;
 }
 
@@ -111,13 +115,10 @@ const EMPTY_HISTORY_FILTER: HistoryFilter = {
   search: "",
   item_type: null,
   matched_by_rule: null,
+  source: null,
+  run_id: null,
   date_range: null,
 };
-
-type PrivacyState =
-  | "Inactive"
-  | "ActiveFull"
-  | { ActivePartial: { recent: boolean; frequent: boolean } };
 
 export function HistoryPage() {
   const { t } = useI18n();
@@ -125,12 +126,12 @@ export function HistoryPage() {
   const [total, setTotal] = useState(0);
   const [overallTotal, setOverallTotal] = useState(0);
   const [database, setDatabase] = useState<DatabaseStatus | null>(null);
-  const [privacyActive, setPrivacyActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [historyView, setHistoryView] = useState<"items" | "runs">("items");
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: 20,
@@ -142,9 +143,8 @@ export function HistoryPage() {
   const [itemType, setItemType] = useState<
     "all" | CleanRecord["item_type"]
   >("all");
-  const [ruleSource, setRuleSource] = useState<"all" | "manual" | "matched">(
-    "all",
-  );
+  const [sourceFilter, setSourceFilter] = useState<"all" | "manual" | "auto">("all");
+  const [ruleSource, setRuleSource] = useState<"all" | "matched" | "unmatched">("all");
   const [dateRange, setDateRange] = useState<"all" | "7d" | "30d">("all");
   const requestId = useRef(0);
   const refreshTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -155,9 +155,11 @@ export function HistoryPage() {
       search,
       item_type: itemType === "all" ? null : itemType,
       matched_by_rule: ruleSource === "all" ? null : ruleSource === "matched",
+      source: sourceFilter === "all" ? null : sourceFilter,
+      run_id: null,
       date_range: dateRange === "all" ? null : dateRange,
     }),
-    [dateRange, itemType, ruleSource, search],
+    [dateRange, itemType, ruleSource, search, sourceFilter],
   );
 
   const columns = useMemo<ColumnDef<CleanRecord>[]>(
@@ -187,6 +189,12 @@ export function HistoryPage() {
           ),
       },
       {
+        accessorKey: "source",
+        header: t("cleanupSource"),
+        cell: ({ row }) =>
+          row.original.source === "manual" ? t("manualCleanup") : t("automatic"),
+      },
+      {
         accessorKey: "rule_keyword",
         header: t("sourceRule"),
         cell: ({ row }) => row.original.rule_keyword ?? t("noRule"),
@@ -201,15 +209,11 @@ export function HistoryPage() {
     setLoading(true);
     setError(null);
     try {
-      const [databaseStatus, privacyState] = await Promise.all([
-        invokeCommand<DatabaseStatus>("get_database_status"),
-        invokeCommand<PrivacyState>("privacy_state"),
-      ]);
+      const databaseStatus = await invokeCommand<DatabaseStatus>("get_database_status");
       if (request !== requestId.current) {
         return;
       }
       setDatabase(databaseStatus);
-      setPrivacyActive(privacyState !== "Inactive");
       if (!databaseStatus.available) {
         setRecords([]);
         setTotal(0);
@@ -344,11 +348,7 @@ export function HistoryPage() {
 
   const pageCount = table.getPageCount();
   const clearDisabled =
-    loading ||
-    clearing ||
-    overallTotal === 0 ||
-    database?.available !== true ||
-    privacyActive;
+    loading || clearing || overallTotal === 0 || database?.available !== true;
   const exportDisabled =
     loading || exporting || database?.available !== true;
 
@@ -356,7 +356,7 @@ export function HistoryPage() {
     <>
       <PageHeader
         actions={
-          <>
+          historyView === "items" ? <>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -424,13 +424,32 @@ export function HistoryPage() {
               <Trash2 />
               {t("clearHistory")}
             </Button>
-          </>
+          </> : undefined
         }
         subtitle={t("historySubtitle")}
         title={t("history")}
       />
 
       <div className="mx-auto grid max-w-7xl gap-4 p-6">
+        <div className="inline-flex w-fit rounded-md border p-0.5" role="group">
+          <Button
+            onClick={() => setHistoryView("items")}
+            size="sm"
+            type="button"
+            variant={historyView === "items" ? "secondary" : "ghost"}
+          >
+            {t("historyItems")}
+          </Button>
+          <Button
+            onClick={() => setHistoryView("runs")}
+            size="sm"
+            type="button"
+            variant={historyView === "runs" ? "secondary" : "ghost"}
+          >
+            {t("cleanupRuns")}
+          </Button>
+        </div>
+
         {database && !database.available ? (
           <DatabaseRecoveryPanel
             onRecovered={loadRecords}
@@ -439,16 +458,7 @@ export function HistoryPage() {
           />
         ) : null}
 
-        {privacyActive ? (
-          <section className="border-l-2 border-border px-4 py-2">
-            <h2 className="text-sm font-semibold">{t("privacyActive")}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("historyClearPrivacyDisabled")}
-            </p>
-          </section>
-        ) : null}
-
-        {error ? (
+        {historyView === "items" && error ? (
           <section className="flex items-center justify-between gap-4 border-l-2 border-destructive px-4 py-2">
             <p className="min-w-0 break-words text-sm text-destructive">
               {error}
@@ -464,8 +474,12 @@ export function HistoryPage() {
           </section>
         ) : null}
 
+        {historyView === "runs" ? (
+          <CleanupRunsPanel />
+        ) : (
+          <>
         <section className="grid gap-3" aria-label={t("searchHistory")}>
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem_12rem_10rem]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_11rem_10rem_10rem_9rem]">
             <label className="relative min-w-0">
               <span className="sr-only">{t("searchHistory")}</span>
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -498,21 +512,37 @@ export function HistoryPage() {
                 </SelectItem>
               </SelectContent>
             </Select>
-            <Select
-              onValueChange={(value) => {
-                setRuleSource(value as "all" | "manual" | "matched");
+              <Select
+                onValueChange={(value) => {
+                  setSourceFilter(value as "all" | "manual" | "auto");
+                  setPagination((current) => ({ ...current, pageIndex: 0 }));
+                }}
+                value={sourceFilter}
+              >
+                <SelectTrigger aria-label={t("cleanupSource")} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("all")}</SelectItem>
+                  <SelectItem value="manual">{t("manualCleanup")}</SelectItem>
+                  <SelectItem value="auto">{t("automatic")}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                onValueChange={(value) => {
+                setRuleSource(value as "all" | "matched" | "unmatched");
                 setPagination((current) => ({ ...current, pageIndex: 0 }));
               }}
-              value={ruleSource}
-            >
-              <SelectTrigger aria-label={t("sourceRule")} className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("all")}</SelectItem>
-                <SelectItem value="manual">{t("manualCleanup")}</SelectItem>
-                <SelectItem value="matched">{t("ruleMatched")}</SelectItem>
-              </SelectContent>
+                value={ruleSource}
+              >
+                <SelectTrigger aria-label={t("ruleMatch")} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("all")}</SelectItem>
+                  <SelectItem value="matched">{t("ruleMatched")}</SelectItem>
+                  <SelectItem value="unmatched">{t("ruleUnmatched")}</SelectItem>
+                </SelectContent>
             </Select>
             <Select
               onValueChange={(value) => {
@@ -572,6 +602,7 @@ export function HistoryPage() {
                     message={
                       search ||
                       itemType !== "all" ||
+                      sourceFilter !== "all" ||
                       ruleSource !== "all" ||
                       dateRange !== "all"
                         ? t("noMatches")
@@ -638,6 +669,8 @@ export function HistoryPage() {
             </div>
           </div>
         </section>
+          </>
+        )}
       </div>
 
       <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>
@@ -696,7 +729,7 @@ function SortableHeader({
 function HistoryTableMessage({ message }: { message: string }) {
   return (
     <TableRow>
-      <TableCell className="h-40 text-center text-muted-foreground" colSpan={4}>
+      <TableCell className="h-40 text-center text-muted-foreground" colSpan={5}>
         {message}
       </TableCell>
     </TableRow>

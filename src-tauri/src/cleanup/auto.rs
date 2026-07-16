@@ -4,9 +4,13 @@ use anyhow::Result;
 use serde::Serialize;
 use thiserror::Error;
 
-use super::smart_clean;
+use super::smart_clean_in_run;
 use crate::{
-    db::{history::CleanSource, DbState},
+    db::{
+        history::CleanSource,
+        history_runs::{self, CleanupAction, CleanupTrigger, NewCleanupRun, RunCompletion},
+        DbState,
+    },
     privacy::{PrivacyManager, PrivacyModeState},
     quick_access::QaBatchResult,
 };
@@ -99,12 +103,32 @@ pub(crate) fn run(
     history_retention: usize,
     privacy: &PrivacyManager,
     state: &AutoCleanState,
+    trigger: CleanupTrigger,
 ) -> Result<AutoCleanResult> {
     ensure_allowed(database.status().available, privacy.state())?;
     let _running = state.begin()?;
+    let run_id = database.with_connection(|connection| {
+        history_runs::begin(
+            connection,
+            NewCleanupRun {
+                action: CleanupAction::AutoClean,
+                trigger,
+                qa_type: "all",
+            },
+        )
+    })?;
     log::info!("auto-clean started");
-    let result =
-        run_sections(|qa_type, source| smart_clean(database, qa_type, history_retention, source));
+    let mut result = run_sections(|qa_type, source| {
+        smart_clean_in_run(database, qa_type, history_retention, source, run_id)
+    });
+
+    let completion = completion_from_result(&result);
+    if let Err(error) = database.with_connection(|connection| {
+        history_runs::finish(connection, run_id, &completion, history_retention)
+    }) {
+        result.history_errors += 1;
+        log::error!("auto-clean run completion failed run_id={run_id} error={error:#}");
+    }
 
     for (qa_type, section) in [("recent", &result.recent), ("frequent", &result.frequent)] {
         if let Some(error) = &section.error {
@@ -129,6 +153,25 @@ pub(crate) fn run(
         );
     }
     Ok(result)
+}
+
+fn completion_from_result(result: &AutoCleanResult) -> RunCompletion {
+    let incident_id = [&result.recent, &result.frequent]
+        .into_iter()
+        .filter_map(|section| section.result.as_ref())
+        .flat_map(|result| result.failed.iter())
+        .next()
+        .map(|failure| failure.error.incident_id.clone());
+    RunCompletion {
+        requested: result.total,
+        succeeded: result.succeeded,
+        failed: result.failed,
+        protected: result.skipped_protected,
+        warnings: result.warnings,
+        history_errors: result.history_errors,
+        section_errors: result.section_errors,
+        incident_id,
+    }
 }
 
 fn ensure_allowed(

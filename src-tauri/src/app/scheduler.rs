@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::{
     cleanup::{self, AutoCleanError, AutoCleanResult, AutoCleanState},
     config::{self, AutoCleanPolicy, Config},
-    db::DbState,
+    db::{history_runs::CleanupTrigger, DbState},
     error::report_background_error,
     privacy::PrivacyManager,
     quick_access::QuickAccessCache,
@@ -78,12 +78,16 @@ pub struct AutoCleanFinished {
 
 pub fn run_now<R: Runtime>(app: &AppHandle<R>) -> Result<AutoCleanResult> {
     let config = config_snapshot(app)?;
-    let result = execute(app, &config)?;
+    let result = execute(app, &config, CleanupTrigger::Manual)?;
     finish(app, &config, &result)?;
     Ok(result)
 }
 
-fn execute<R: Runtime>(app: &AppHandle<R>, config: &Config) -> Result<AutoCleanResult> {
+fn execute<R: Runtime>(
+    app: &AppHandle<R>,
+    config: &Config,
+    trigger: CleanupTrigger,
+) -> Result<AutoCleanResult> {
     let database = app.state::<DbState>();
     let privacy = app.state::<PrivacyManager>();
     let auto_clean = app.state::<AutoCleanState>();
@@ -92,6 +96,7 @@ fn execute<R: Runtime>(app: &AppHandle<R>, config: &Config) -> Result<AutoCleanR
         config.history_retention,
         privacy.inner(),
         auto_clean.inner(),
+        trigger,
     )?;
     if let Some(cache) = app.try_state::<QuickAccessCache>() {
         cache.refresh_after_write(app, "all");
@@ -134,7 +139,7 @@ fn run_monitor_once<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
     if config.auto_clean != AutoCleanPolicy::Monitor {
         return Ok(());
     }
-    let result = execute(app, &config)?;
+    let result = execute(app, &config, CleanupTrigger::Monitor)?;
     if result.total > 0 || result.has_issues() {
         finish(app, &config, &result)?;
     }
@@ -194,11 +199,18 @@ fn run_worker<R: Runtime>(app: AppHandle<R>, receiver: Receiver<SchedulerMessage
             | AutoCleanPolicy::DailyAt { .. } => {}
         }
 
-        if let Err(error) = run_now(&app) {
+        if let Err(error) = run_scheduled(&app) {
             let incident_id = report_background_error("scheduled_auto_clean", &error);
             log::warn!("scheduled auto-clean skipped incident_id={incident_id}");
         }
     }
+}
+
+fn run_scheduled<R: Runtime>(app: &AppHandle<R>) -> Result<AutoCleanResult> {
+    let config = config_snapshot(app)?;
+    let result = execute(app, &config, CleanupTrigger::Scheduled)?;
+    finish(app, &config, &result)?;
+    Ok(result)
 }
 
 fn next_delay(

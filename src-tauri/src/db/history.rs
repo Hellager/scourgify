@@ -55,6 +55,7 @@ impl FromSql for CleanSource {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewCleanRecord {
+    pub run_id: Option<i64>,
     pub item_path: String,
     pub item_type: String,
     pub rule_id: Option<i64>,
@@ -80,6 +81,10 @@ pub struct HistoryFilter {
     pub item_type: Option<String>,
     #[serde(default)]
     pub matched_by_rule: Option<bool>,
+    #[serde(default)]
+    pub source: Option<CleanSource>,
+    #[serde(default)]
+    pub run_id: Option<i64>,
     #[serde(default)]
     pub date_range: Option<String>,
 }
@@ -110,6 +115,7 @@ pub struct HistoryExportResult {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CleanRecord {
     pub id: i64,
+    pub run_id: Option<i64>,
     pub item_path: String,
     pub item_type: String,
     pub rule_id: Option<i64>,
@@ -120,6 +126,7 @@ pub struct CleanRecord {
 
 #[derive(Debug, Serialize)]
 pub(super) struct ExportCleanRecord {
+    run_id: Option<i64>,
     item_path: String,
     item_type: String,
     rule_id: Option<i64>,
@@ -131,6 +138,7 @@ pub(super) struct ExportCleanRecord {
 impl From<CleanRecord> for ExportCleanRecord {
     fn from(record: CleanRecord) -> Self {
         Self {
+            run_id: record.run_id,
             item_path: record.item_path,
             item_type: record.item_type,
             rule_id: record.rule_id,
@@ -145,6 +153,8 @@ pub(super) struct ValidatedHistoryFilter {
     search: Option<String>,
     item_type: Option<&'static str>,
     matched_by_rule: Option<i64>,
+    source: Option<&'static str>,
+    run_id: Option<i64>,
     date_modifier: Option<&'static str>,
 }
 
@@ -156,10 +166,12 @@ pub(super) const HISTORY_FILTERS: &str =
                 OR (?3 = 1 AND rule_keyword IS NOT NULL)
                 OR (?3 = 0 AND rule_keyword IS NULL))
            AND (?4 IS NULL
-                OR cleaned_at >= datetime('now', 'localtime', 'start of day', ?4, 'utc'))";
+                OR cleaned_at >= datetime('now', 'localtime', 'start of day', ?4, 'utc'))
+           AND (?5 IS NULL OR source = ?5)
+           AND (?6 IS NULL OR run_id = ?6)";
 
 pub(super) const HISTORY_COLUMNS: &str =
-    "id, item_path, item_type, rule_id, rule_keyword, source, cleaned_at";
+    "id, run_id, item_path, item_type, rule_id, rule_keyword, source, cleaned_at";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CleanRecordPage {
@@ -187,6 +199,7 @@ pub struct Stats {
     pub total: u64,
     pub recent_files: u64,
     pub frequent_folders: u64,
+    pub retained_total: u64,
     pub daily_trend: Vec<StatsTrendPoint>,
     pub weekly_trend: Vec<StatsTrendPoint>,
     pub rule_hits: Vec<RuleHitStat>,
@@ -234,13 +247,15 @@ pub fn insert_batch(
     {
         let mut statement = transaction
             .prepare(
-                "INSERT INTO clean_records (item_path, item_type, rule_id, rule_keyword, source)
-                 VALUES (?1, ?2, (SELECT id FROM rules WHERE id = ?3), ?4, ?5)",
+                "INSERT INTO clean_records
+                    (run_id, item_path, item_type, rule_id, rule_keyword, source)
+                 VALUES (?1, ?2, ?3, (SELECT id FROM rules WHERE id = ?4), ?5, ?6)",
             )
             .context("failed to prepare clean record insert")?;
         for record in records {
             statement
                 .execute(params![
+                    record.run_id,
                     record.item_path,
                     record.item_type,
                     record.rule_id,
@@ -250,6 +265,26 @@ pub fn insert_batch(
                 .with_context(|| format!("failed to record cleanup for {}", record.item_path))?;
         }
     }
+    let cleaned_files = records
+        .iter()
+        .filter(|record| record.item_type == "recent_file")
+        .count();
+    let cleaned_folders = records.len() - cleaned_files;
+    transaction
+        .execute(
+            "UPDATE cleanup_totals
+             SET cleaned_total = cleaned_total + ?1,
+                 cleaned_files = cleaned_files + ?2,
+                 cleaned_folders = cleaned_folders + ?3,
+                 updated_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
+             WHERE id = 1",
+            params![
+                i64::try_from(records.len()).context("clean record count is too large")?,
+                i64::try_from(cleaned_files).context("cleaned file count is too large")?,
+                i64::try_from(cleaned_folders).context("cleaned folder count is too large")?,
+            ],
+        )
+        .context("failed to update lifetime cleanup totals")?;
     trim(&transaction, retention)?;
     transaction
         .commit()
@@ -297,7 +332,7 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
          FROM clean_records
          {HISTORY_FILTERS}
          ORDER BY {sort_column} {sort_order}, id {sort_order}
-         LIMIT ?5 OFFSET ?6"
+         LIMIT ?7 OFFSET ?8"
     );
     let mut statement = connection
         .prepare(&sql)
@@ -309,6 +344,8 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
                 filter.item_type,
                 filter.matched_by_rule,
                 filter.date_modifier,
+                filter.source,
+                filter.run_id,
                 i64::from(query.page_size),
                 offset
             ],
@@ -336,6 +373,15 @@ pub fn export(
     super::history_export::export(connection, path, format, filter)
 }
 
+pub fn export_runs(
+    connection: &Connection,
+    path: &str,
+    format: HistoryExportFormat,
+    filter: super::history_runs::CleanupRunFilter,
+) -> Result<HistoryExportResult> {
+    super::history_export::export_runs(connection, path, format, filter)
+}
+
 pub(super) fn validate_history_filter(filter: HistoryFilter) -> Result<ValidatedHistoryFilter> {
     let item_type = match filter.item_type.as_deref() {
         None => None,
@@ -353,28 +399,33 @@ pub(super) fn validate_history_filter(filter: HistoryFilter) -> Result<Validated
         search: history_search_pattern(&filter.search),
         item_type,
         matched_by_rule: filter.matched_by_rule.map(i64::from),
+        source: filter.source.map(CleanSource::as_str),
+        run_id: filter.run_id,
         date_modifier,
     })
 }
 
-pub(super) fn history_filter_params(filter: &ValidatedHistoryFilter) -> [&dyn rusqlite::ToSql; 4] {
+pub(super) fn history_filter_params(filter: &ValidatedHistoryFilter) -> [&dyn rusqlite::ToSql; 6] {
     [
         &filter.search,
         &filter.item_type,
         &filter.matched_by_rule,
         &filter.date_modifier,
+        &filter.source,
+        &filter.run_id,
     ]
 }
 
 pub(super) fn read_clean_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanRecord> {
     Ok(CleanRecord {
         id: row.get(0)?,
-        item_path: row.get(1)?,
-        item_type: row.get(2)?,
-        rule_id: row.get(3)?,
-        rule_keyword: row.get(4)?,
-        source: row.get(5)?,
-        cleaned_at: row.get(6)?,
+        run_id: row.get(1)?,
+        item_path: row.get(2)?,
+        item_type: row.get(3)?,
+        rule_id: row.get(4)?,
+        rule_keyword: row.get(5)?,
+        source: row.get(6)?,
+        cleaned_at: row.get(7)?,
     })
 }
 
@@ -390,11 +441,29 @@ fn history_search_pattern(search: &str) -> Option<String> {
     Some(format!("%{escaped}%"))
 }
 
-pub fn clear(connection: &Connection) -> Result<u64> {
-    let affected = connection
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct HistoryClearResult {
+    pub clean_records: u64,
+    pub cleanup_runs: u64,
+}
+
+pub fn clear(connection: &mut Connection) -> Result<HistoryClearResult> {
+    let transaction = connection
+        .transaction()
+        .context("failed to start history clear transaction")?;
+    let clean_records = transaction
         .execute("DELETE FROM clean_records", [])
         .context("failed to clear clean records")?;
-    u64::try_from(affected).context("cleared history count is too large")
+    let cleanup_runs = transaction
+        .execute("DELETE FROM cleanup_runs", [])
+        .context("failed to clear cleanup runs")?;
+    transaction
+        .commit()
+        .context("failed to commit history clear")?;
+    Ok(HistoryClearResult {
+        clean_records: u64::try_from(clean_records).context("cleared record count is too large")?,
+        cleanup_runs: u64::try_from(cleanup_runs).context("cleared run count is too large")?,
+    })
 }
 
 pub fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
@@ -402,7 +471,12 @@ pub fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
 }
 
 pub fn totals(connection: &Connection) -> Result<HistoryTotals> {
-    super::stats::totals(connection)
+    let totals = super::history_runs::lifetime_totals(connection)?;
+    Ok(HistoryTotals {
+        total: totals.cleaned_total,
+        recent_files: totals.cleaned_files,
+        frequent_folders: totals.cleaned_folders,
+    })
 }
 
 pub fn trim_to(connection: &Connection, retention: usize) -> Result<()> {
@@ -741,19 +815,20 @@ mod tests {
         assert_eq!(
             reader.headers().unwrap().iter().collect::<Vec<_>>(),
             [
+                "run_id",
                 "item_path",
                 "item_type",
                 "rule_id",
                 "rule_keyword",
                 "source",
-                "cleaned_at"
+                "cleaned_at",
             ]
         );
         let rows = reader.records().collect::<csv::Result<Vec<_>>>().unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(&rows[0][0], special_path);
-        assert_eq!(&rows[0][3], special_keyword);
-        assert_eq!(&rows[0][4], "auto");
+        assert_eq!(&rows[0][1], special_path);
+        assert_eq!(&rows[0][4], special_keyword);
+        assert_eq!(&rows[0][5], "auto");
         std::fs::remove_file(path).unwrap();
     }
 
@@ -793,7 +868,8 @@ mod tests {
                 "item_type",
                 "rule_id",
                 "rule_keyword",
-                "source"
+                "run_id",
+                "source",
             ]
         );
         std::fs::remove_file(path).unwrap();
@@ -905,7 +981,7 @@ mod tests {
         )
         .unwrap();
 
-        clear(&connection).unwrap();
+        clear(&mut connection).unwrap();
 
         assert_eq!(record_count(&connection), 0);
     }
@@ -943,6 +1019,13 @@ mod tests {
                 )
                 .unwrap();
         }
+        connection
+            .execute(
+                "UPDATE cleanup_totals
+                 SET cleaned_total = 4, cleaned_files = 2, cleaned_folders = 2",
+                [],
+            )
+            .unwrap();
 
         let stats = stats(&connection, StatsRange::All).unwrap();
 
@@ -981,6 +1064,28 @@ mod tests {
     }
 
     #[test]
+    fn lifetime_totals_survive_detail_retention() {
+        let mut connection = test_connection();
+        insert_batch(
+            &mut connection,
+            &[
+                record(r"C:\first.txt", "recent_file", None, None),
+                record(r"C:\second.txt", "recent_file", None, None),
+                record(r"C:\folder", "frequent_folder", None, None),
+            ],
+            0,
+        )
+        .unwrap();
+        trim_to(&connection, 1).unwrap();
+
+        let lifetime = totals(&connection).unwrap();
+        assert_eq!(lifetime.total, 3);
+        assert_eq!(lifetime.recent_files, 2);
+        assert_eq!(lifetime.frequent_folders, 1);
+        assert_eq!(list(&connection, history_query()).unwrap().total, 1);
+    }
+
+    #[test]
     fn fills_local_date_ranges_and_matches_history_boundaries() {
         let connection = test_connection();
         for (path, modifier) in [
@@ -997,6 +1102,12 @@ mod tests {
                 )
                 .unwrap();
         }
+        connection
+            .execute(
+                "UPDATE cleanup_totals SET cleaned_total = 3, cleaned_files = 3",
+                [],
+            )
+            .unwrap();
 
         let last_seven = stats(&connection, StatsRange::Last7Days).unwrap();
         let last_thirty = stats(&connection, StatsRange::Last30Days).unwrap();
@@ -1060,6 +1171,7 @@ mod tests {
         rule_keyword: Option<&str>,
     ) -> NewCleanRecord {
         NewCleanRecord {
+            run_id: None,
             item_path: item_path.to_string(),
             item_type: item_type.to_string(),
             rule_id,

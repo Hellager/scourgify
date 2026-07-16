@@ -22,6 +22,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-os",
  "tauri-plugin-single-instance",
+ "tempfile",
  "thiserror 2.0.18",
  "wincent",
  "winreg 0.56.0",

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use std::{
     path::{Path, PathBuf},
@@ -10,6 +10,7 @@ use thiserror::Error;
 
 pub(crate) mod history;
 mod history_export;
+pub(crate) mod history_runs;
 mod migrations;
 pub(crate) mod rules;
 mod stats;
@@ -128,6 +129,37 @@ impl DbState {
         )
     }
 
+    pub(crate) fn read_connection(&self) -> Result<Connection> {
+        {
+            let inner = self
+                .inner
+                .lock()
+                .map_err(|error| DatabaseStateError::StateUnavailable(error.to_string()))?;
+            if inner.connection.is_none() {
+                return Err(DatabaseStateError::Unavailable(
+                    inner
+                        .error
+                        .clone()
+                        .unwrap_or_else(|| "unknown initialization error".to_string()),
+                )
+                .into());
+            }
+        }
+        let path = self
+            .path
+            .as_deref()
+            .context("database path is unavailable")?;
+        let connection = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .with_context(|| format!("failed to open read-only database at {}", path.display()))?;
+        connection
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .context("failed to configure read-only database timeout")?;
+        Ok(connection)
+    }
+
     fn available(path: PathBuf, connection: Connection, schema_version: u32) -> Self {
         Self {
             path: Some(path),
@@ -217,6 +249,7 @@ fn open_database(path: &Path) -> Result<(Connection, u32)> {
         .execute_batch("PRAGMA foreign_keys = ON;")
         .context("failed to enable SQLite foreign keys")?;
     let schema_version = migrate(&mut connection)?;
+    history_runs::mark_interrupted(&connection)?;
     Ok((connection, schema_version))
 }
 
@@ -236,6 +269,8 @@ mod tests {
         assert_eq!(user_version(&connection), SCHEMA_VERSION);
         assert_eq!(table_count(&connection, "rules"), 1);
         assert_eq!(table_count(&connection, "clean_records"), 1);
+        assert_eq!(table_count(&connection, "cleanup_runs"), 1);
+        assert_eq!(table_count(&connection, "cleanup_totals"), 1);
 
         let keywords = connection
             .prepare("SELECT keyword FROM rules ORDER BY id")
@@ -274,7 +309,7 @@ mod tests {
 
         assert_eq!(user_version(&connection), 1);
         assert_eq!(migrate(&mut connection).unwrap(), SCHEMA_VERSION);
-        assert_eq!(user_version(&connection), 2);
+        assert_eq!(user_version(&connection), 3);
         assert_eq!(
             connection
                 .query_row("SELECT source FROM clean_records", [], |row| {

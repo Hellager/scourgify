@@ -34,6 +34,7 @@ tauri-plugin-notification = "2.0.0"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 chrono = { version = "0.4.45", features = ["clock", "serde"] }
 csv = "1.4.0"
+tempfile = "3.20"
 
 [target.'cfg(windows)'.dependencies]
 wincent = "0.2.6"

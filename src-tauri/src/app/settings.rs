@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{
     config::{self, AppMode, Config},
-    db::{self, DbState},
+    db::{self, history_runs, DbState},
 };
 
 const LANGUAGE_CHANGED_EVENT: &str = "language-changed";
@@ -40,7 +40,8 @@ pub(crate) fn update<R: Runtime>(
         && (history_retention == 0 || next.history_retention < history_retention)
     {
         database.with_connection(|connection| {
-            db::history::trim_to(connection, next.history_retention)
+            db::history::trim_to(connection, next.history_retention)?;
+            history_runs::trim_to(connection, next.history_retention)
         })?;
     }
     if auto_start != next.auto_start {
