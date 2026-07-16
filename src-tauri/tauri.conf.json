@@ -16,6 +16,8 @@
         "title": "Scourgify",
         "width": 600,
         "height": 400,
+        "minWidth": 400,
+        "minHeight": 320,
         "visible": false,
         "dragDropEnabled": false,
         "decorations": false,

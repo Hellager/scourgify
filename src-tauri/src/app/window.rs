@@ -7,7 +7,7 @@ pub(crate) fn show_dashboard<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<()
 }
 
 pub(crate) fn show_grid<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {
-    show_window(app, "#/grid", LogicalSize::new(560.0, 560.0), false)
+    show_window(app, "#/grid", LogicalSize::new(600.0, 400.0), true)
 }
 
 fn show_window<R: Runtime>(
@@ -18,6 +18,7 @@ fn show_window<R: Runtime>(
 ) -> Result<(), tauri::Error> {
     if let Some(window) = app.get_webview_window("main") {
         window.unmaximize()?;
+        window.set_decorations(false)?;
         window.set_resizable(resizable)?;
         window.set_size(size)?;
         window.eval(format!("window.location.hash = '{route}'"))?;

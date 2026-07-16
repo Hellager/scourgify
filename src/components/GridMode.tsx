@@ -1,16 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import {
-  Ban,
-  FileCheck2,
-  FileClock,
-  FolderCheck,
-  FolderClock,
-  History,
-  Layers3,
-  ShieldCheck,
-  Trash2,
-} from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TitleBar } from "@/components/TitleBar";
 import { invokeCommand } from "@/lib/commands";
 import { useI18n } from "@/lib/i18n";
 
@@ -36,6 +27,7 @@ export function GridMode() {
   const { t } = useI18n();
   const [summary, setSummary] = useState<GridSummary | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const loading = summary === null && !unavailable;
 
   const loadSummary = useCallback(async () => {
     try {
@@ -60,120 +52,83 @@ export function GridMode() {
     () => [
       {
         key: "recentFiles",
-        icon: FileClock,
         label: t("recentFiles"),
         value: summary?.recent_files,
-        detail: unavailable ? t("dataUnavailable") : t("currentItems"),
       },
       {
         key: "quickAccess",
-        icon: Layers3,
         label: t("quickAccess"),
         value: summary?.quick_access,
-        detail: unavailable ? t("dataUnavailable") : t("currentTotal"),
       },
       {
         key: "frequentFolders",
-        icon: FolderClock,
         label: t("frequentFolders"),
         value: summary?.frequent_folders,
-        detail: unavailable ? t("dataUnavailable") : t("currentItems"),
       },
       {
         key: "blacklistRules",
-        icon: Ban,
         label: t("blacklistRules"),
         value: summary?.blacklist_rules,
-        detail:
-          unavailable || summary?.blacklist_rules == null
-            ? t("dataUnavailable")
-            : t("enabledRules"),
       },
       {
         key: "toClean",
-        icon: Trash2,
         label: t("toClean"),
         value: summary?.to_clean,
-        detail:
-          unavailable ||
-          summary?.to_clean_recent == null ||
-          summary.to_clean_frequent == null
-            ? t("dataUnavailable")
-            : t("itemTypeSplit", {
-                files: summary.to_clean_recent,
-                folders: summary.to_clean_frequent,
-              }),
       },
       {
         key: "whitelistRules",
-        icon: ShieldCheck,
         label: t("whitelistRules"),
         value: summary?.whitelist_rules,
-        detail:
-          unavailable || summary?.protected_items == null
-            ? t("dataUnavailable")
-            : t("protectedItems", { count: summary.protected_items }),
       },
       {
         key: "cleanedFiles",
-        icon: FileCheck2,
         label: t("cleanedFiles"),
         value: summary?.cleaned_files,
-        detail:
-          unavailable || summary?.cleaned_files == null
-            ? t("dataUnavailable")
-            : t("retainedHistory"),
       },
       {
         key: "cleanedTotal",
-        icon: History,
         label: t("totalCleaned"),
         value: summary?.cleaned_total,
-        detail:
-          unavailable || summary?.cleaned_total == null
-            ? t("dataUnavailable")
-            : t("retainedHistory"),
       },
       {
         key: "cleanedFolders",
-        icon: FolderCheck,
         label: t("cleanedFolders"),
         value: summary?.cleaned_folders,
-        detail:
-          unavailable || summary?.cleaned_folders == null
-            ? t("dataUnavailable")
-            : t("retainedHistory"),
       },
     ],
-    [summary, t, unavailable],
+    [summary, t],
   );
 
   return (
-    <main className="grid min-h-screen place-items-center bg-background p-5 text-foreground">
+    <main className="flex h-screen flex-col bg-border text-foreground">
+      <TitleBar
+        closeLabel={t("closeWindow")}
+        dashboardLabel={t("dashboard")}
+        maximizeLabel={t("maximizeWindow")}
+        minimizeLabel={t("minimizeWindow")}
+      />
       <div
-        aria-busy={summary === null && !unavailable}
-        className="grid w-full max-w-lg grid-cols-3 gap-3"
+        aria-busy={loading}
+        className="grid min-h-0 flex-1 grid-cols-3 grid-rows-3 gap-px"
       >
-        {tiles.map(({ detail, icon: Icon, key, label, value }) => (
+        {tiles.map(({ key, label, value }) => (
           <section
-            className="flex h-36 min-w-0 flex-col items-center justify-center gap-2 rounded-md border bg-card px-3 text-center text-card-foreground"
+            className="group relative flex min-w-0 flex-col items-center justify-center bg-card px-3 py-4 text-center text-card-foreground transition-[background-color,box-shadow] duration-200 hover:z-10 hover:bg-accent hover:shadow-lg"
             key={key}
           >
-            <Icon className="size-5 shrink-0 text-muted-foreground" />
-            <strong className="text-3xl font-semibold tabular-nums">
-              {value ?? "--"}
-            </strong>
-            <div className="min-w-0">
-              <h2 className="line-clamp-2 text-sm font-medium" title={label}>
-                {label}
-              </h2>
-              <p
-                className="mt-0.5 line-clamp-2 break-words text-xs text-muted-foreground"
-                title={detail}
-              >
-                {detail}
-              </p>
-            </div>
+            <h2
+              className="mb-2 line-clamp-2 text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground"
+              title={label}
+            >
+              {label}
+            </h2>
+            {loading ? (
+              <Skeleton className="h-9 w-14" />
+            ) : (
+              <strong className="min-h-9 text-3xl font-semibold tabular-nums">
+                {value ?? "--"}
+              </strong>
+            )}
           </section>
         ))}
       </div>

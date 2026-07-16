@@ -23,6 +23,7 @@ import {
 import { toast } from "sonner";
 import { AppCommandPalette } from "@/components/AppCommandPalette";
 import { ConfigDrawer } from "@/components/ConfigDrawer";
+import { TitleBar } from "@/components/TitleBar";
 import {
   Sidebar,
   SidebarContent,
@@ -144,89 +145,103 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
 
   return (
     <AppShellContext.Provider value={context}>
-      <SidebarProvider>
-        <Sidebar collapsible="icon" variant="sidebar">
-          <SidebarHeader>
-            <div className="px-2 py-1">
-              <div className="text-sm font-semibold">Scourgify</div>
-              <div className="text-xs text-muted-foreground">
-                {t("quickAccess")}
+      <div className="flex h-svh flex-col">
+        <TitleBar
+          closeLabel={t("closeWindow")}
+          dashboardLabel={t("dashboard")}
+          maximizeLabel={t("maximizeWindow")}
+          minimizeLabel={t("minimizeWindow")}
+        />
+        <SidebarProvider className="min-h-0 flex-1">
+          <Sidebar
+            className="top-8 h-[calc(100svh-2rem)]"
+            collapsible="icon"
+            variant="sidebar"
+          >
+            <SidebarHeader>
+              <div className="px-2 py-1">
+                <div className="text-sm font-semibold">Scourgify</div>
+                <div className="text-xs text-muted-foreground">
+                  {t("quickAccess")}
+                </div>
               </div>
-            </div>
-          </SidebarHeader>
-          <SidebarSeparator />
-          <SidebarContent>
-            <SidebarGroup>
-              <SidebarGroupLabel>{t("commandNavigation")}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {navigation.map(({ icon: Icon, label, path }) => (
-                    <SidebarMenuItem key={path}>
+            </SidebarHeader>
+            <SidebarSeparator />
+            <SidebarContent>
+              <SidebarGroup>
+                <SidebarGroupLabel>{t("commandNavigation")}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {navigation.map(({ icon: Icon, label, path }) => (
+                      <SidebarMenuItem key={path}>
+                        <SidebarMenuButton
+                          isActive={location.pathname === path}
+                          render={<Link to={path} />}
+                          tooltip={label}
+                        >
+                          <Icon />
+                          <span>{label}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                    <SidebarMenuItem>
                       <SidebarMenuButton
-                        isActive={location.pathname === path}
-                        render={<Link to={path} />}
-                        tooltip={label}
+                        render={<Link to="/about" />}
+                        tooltip={t("about")}
                       >
-                        <Icon />
-                        <span>{label}</span>
+                        <Info />
+                        <span>{t("about")}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
-                  ))}
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      render={<Link to="/about" />}
-                      tooltip={t("about")}
-                    >
-                      <Info />
-                      <span>{t("about")}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      onClick={() => dispatchAppEvent(OPEN_CONFIG_DRAWER_EVENT)}
-                      tooltip={t("appearance")}
-                      type="button"
-                    >
-                      <Paintbrush />
-                      <span>{t("appearance")}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-            <SidebarGroup>
-              <SidebarGroupLabel>{t("counts")}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <div className="grid gap-1 px-2 text-xs text-muted-foreground">
-                  <span>
-                    {t("recent")}: {summary.recent}
-                  </span>
-                  <span>
-                    {t("frequent")}: {summary.frequent}
-                  </span>
-                  <span>
-                    {t("selected")}: {summary.selected}
-                  </span>
-                </div>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          </SidebarContent>
-        </Sidebar>
-        <SidebarInset className="min-h-screen bg-background text-foreground">
-          <div className={onDashboard ? "min-w-0" : "hidden"}>
-            {dashboard}
-          </div>
-          {onDashboard ? null : <Outlet />}
-        </SidebarInset>
-        <ConfigDrawer
-          config={config}
-          onConfigSaved={setConfig}
-          onOpenChange={setConfigDrawerOpen}
-          open={configDrawerOpen}
-          privacyActive={privacyActive}
-        />
-        <AppCommandPalette />
-      </SidebarProvider>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        onClick={() =>
+                          dispatchAppEvent(OPEN_CONFIG_DRAWER_EVENT)
+                        }
+                        tooltip={t("appearance")}
+                        type="button"
+                      >
+                        <Paintbrush />
+                        <span>{t("appearance")}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+              <SidebarGroup>
+                <SidebarGroupLabel>{t("counts")}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <div className="grid gap-1 px-2 text-xs text-muted-foreground">
+                    <span>
+                      {t("recent")}: {summary.recent}
+                    </span>
+                    <span>
+                      {t("frequent")}: {summary.frequent}
+                    </span>
+                    <span>
+                      {t("selected")}: {summary.selected}
+                    </span>
+                  </div>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            </SidebarContent>
+          </Sidebar>
+          <SidebarInset className="min-h-0 overflow-auto bg-background text-foreground">
+            <div className={onDashboard ? "min-w-0" : "hidden"}>
+              {dashboard}
+            </div>
+            {onDashboard ? null : <Outlet />}
+          </SidebarInset>
+          <ConfigDrawer
+            config={config}
+            onConfigSaved={setConfig}
+            onOpenChange={setConfigDrawerOpen}
+            open={configDrawerOpen}
+            privacyActive={privacyActive}
+          />
+          <AppCommandPalette />
+        </SidebarProvider>
+      </div>
     </AppShellContext.Provider>
   );
 }
