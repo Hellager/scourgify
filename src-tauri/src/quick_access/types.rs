@@ -109,7 +109,7 @@ pub struct QaRawPathCleanupResult {
     pub error: Option<CommandError>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub struct QaVisibility {
     pub recent: bool,
     pub frequent: bool,

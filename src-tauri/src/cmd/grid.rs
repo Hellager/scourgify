@@ -2,6 +2,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::{
+    backend::QuickAccessBackendState,
     cleanup,
     db::{history, rules, DatabaseStateError, DbState},
     error::{wincent_command_error, CommandError, CommandResult, ErrorCode},
@@ -29,10 +30,11 @@ pub(crate) struct GridSummary {
 pub(crate) fn get_grid_summary(
     app: AppHandle,
     cache: State<'_, QuickAccessCache>,
+    backend: State<'_, QuickAccessBackendState>,
     database: State<'_, DbState>,
 ) -> CommandResult<GridSummary> {
-    let recent = load_items(&app, &cache, "recent")?;
-    let frequent = load_items(&app, &cache, "frequent")?;
+    let recent = load_items(&app, &cache, &backend, "recent")?;
+    let frequent = load_items(&app, &cache, &backend, "frequent")?;
     let mut summary = empty_database_summary(&recent, &frequent);
 
     let database_values = database
@@ -78,10 +80,11 @@ pub(crate) fn get_grid_summary(
 fn load_items(
     app: &AppHandle,
     cache: &QuickAccessCache,
+    backend: &QuickAccessBackendState,
     qa_type: &str,
 ) -> CommandResult<Vec<QaItem>> {
     cache
-        .items(app, qa_type, false)
+        .items(app, backend, qa_type, false)
         .map_err(|error| wincent_command_error("get_grid_summary", error))
 }
 

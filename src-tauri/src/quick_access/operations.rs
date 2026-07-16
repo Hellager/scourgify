@@ -66,10 +66,6 @@ fn metadata_from_entry(entry: DestListEntry) -> QaItemMetadata {
     }
 }
 
-pub(crate) fn items_from_paths(qa_type: QuickAccess, items: Vec<String>) -> Vec<QaItem> {
-    items_from_paths_with_manager(&QuickAccessManager::new(), qa_type, items)
-}
-
 fn items_from_paths_with_manager(
     manager: &QuickAccessManager,
     qa_type: QuickAccess,

@@ -15,6 +15,7 @@ import {
   Gauge,
   History,
   Info,
+  FlaskConical,
   Paintbrush,
   Settings,
   ShieldCheck,
@@ -136,6 +137,9 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
     { icon: ShieldCheck, label: t("rules"), path: "/rules" },
     { icon: History, label: t("history"), path: "/history" },
     { icon: Settings, label: t("settings"), path: "/settings" },
+    ...(import.meta.env.DEV
+      ? [{ icon: FlaskConical, label: "Mock Lab", path: "/mock" }]
+      : []),
   ];
 
   return (

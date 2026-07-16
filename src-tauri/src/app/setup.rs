@@ -8,6 +8,7 @@ use super::{
     settings, theme, tray, window,
 };
 use crate::{
+    backend::QuickAccessBackendState,
     cleanup::AutoCleanState,
     config::{AppMode, Config},
     db,
@@ -21,11 +22,13 @@ pub(crate) fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     settings::sync_auto_start(app.handle(), &mut config);
     let database = db::initialize(app.handle());
     let privacy = PrivacyManager::new(config.privacy_mode_cleanup_links);
+    let backend = QuickAccessBackendState::new();
     restore_privacy_mode(app.handle(), &config, &privacy);
 
     app.manage(Mutex::new(config));
     app.manage(database);
     app.manage(privacy);
+    app.manage(backend.clone());
     app.manage(AutoCleanState::default());
     app.manage(AutoCleanScheduler::start(app.handle().clone())?);
     let auto_clean_monitor = AutoCleanMonitor::start(app.handle().clone())?;
@@ -36,6 +39,7 @@ pub(crate) fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     app.manage(QuickAccessWatchers::start(
         app.handle().clone(),
         quick_access_cache,
+        backend,
     ));
 
     let mode = app

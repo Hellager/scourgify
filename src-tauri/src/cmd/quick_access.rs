@@ -4,13 +4,14 @@ use tauri::{AppHandle, State};
 
 use super::ensure_quick_access_write_allowed;
 use crate::{
+    backend::{BackendMode, PathKind, QuickAccessBackendState},
     error::{
         wincent_command_error, wincent_post_mutation_warning, CommandError, CommandResult,
         ErrorCode, ValidationError,
     },
     privacy::PrivacyManager,
     quick_access::{
-        self, QaCounts, QaItem, QaItemMetadata, QaMutationResult, QaRestoreResult, QaVisibility,
+        QaCounts, QaItem, QaItemMetadata, QaMutationResult, QaRestoreResult, QaVisibility,
         QuickAccessCache, QuickAccessError,
     },
 };
@@ -21,11 +22,12 @@ use super::ActionReceipt;
 pub(crate) fn list_qa_items(
     app: AppHandle,
     cache: State<'_, QuickAccessCache>,
+    backend: State<'_, QuickAccessBackendState>,
     qa_type: String,
     fresh: Option<bool>,
 ) -> CommandResult<Vec<QaItem>> {
     cache
-        .items(&app, &qa_type, fresh.unwrap_or(true))
+        .items(&app, backend.inner(), &qa_type, fresh.unwrap_or(true))
         .map_err(|error| quick_access_error("list_qa_items", error))
 }
 
@@ -33,16 +35,22 @@ pub(crate) fn list_qa_items(
 pub(crate) fn get_qa_counts(
     app: AppHandle,
     cache: State<'_, QuickAccessCache>,
+    backend: State<'_, QuickAccessBackendState>,
     fresh: Option<bool>,
 ) -> CommandResult<QaCounts> {
     cache
-        .counts(&app, fresh.unwrap_or(false))
+        .counts(&app, backend.inner(), fresh.unwrap_or(false))
         .map_err(|error| quick_access_error("get_qa_counts", error))
 }
 
 #[tauri::command]
-pub(crate) fn list_qa_item_metadata(qa_type: String) -> CommandResult<Vec<QaItemMetadata>> {
-    quick_access::list_item_metadata(&qa_type)
+pub(crate) fn list_qa_item_metadata(
+    backend: State<'_, QuickAccessBackendState>,
+    qa_type: String,
+) -> CommandResult<Vec<QaItemMetadata>> {
+    backend
+        .backend()
+        .and_then(|backend| backend.list_item_metadata(&qa_type))
         .map_err(|error| quick_access_error("list_qa_item_metadata", error))
 }
 
@@ -50,13 +58,17 @@ pub(crate) fn list_qa_item_metadata(qa_type: String) -> CommandResult<Vec<QaItem
 pub(crate) fn add_qa_item(
     app: AppHandle,
     cache: State<'_, QuickAccessCache>,
+    backend: State<'_, QuickAccessBackendState>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
     path: String,
 ) -> CommandResult<QaMutationResult> {
     ensure_quick_access_write_allowed(privacy.state())?;
     let mut warnings = Vec::new();
-    if let Err(error) = quick_access::add_item(&qa_type, &path) {
+    if let Err(error) = backend
+        .backend()
+        .and_then(|backend| backend.add_item(&qa_type, &path))
+    {
         let warning = error
             .downcast_ref::<wincent::prelude::WincentError>()
             .and_then(|error| wincent_post_mutation_warning("add_qa_item", error));
@@ -66,7 +78,7 @@ pub(crate) fn add_qa_item(
             return Err(quick_access_error("add_qa_item", error));
         }
     }
-    cache.refresh_after_write(&app, &qa_type);
+    cache.refresh_after_write(&app, backend.inner(), &qa_type);
     Ok(QaMutationResult {
         action: "add_qa_item",
         target: path,
@@ -79,53 +91,73 @@ pub(crate) fn add_qa_item(
 pub(crate) fn restore_qa_defaults(
     app: AppHandle,
     cache: State<'_, QuickAccessCache>,
+    backend: State<'_, QuickAccessBackendState>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
 ) -> CommandResult<QaRestoreResult> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    let result = quick_access::restore_defaults(&qa_type)
+    let result = backend
+        .backend()
+        .and_then(|backend| backend.restore_defaults(&qa_type))
         .map_err(|error| quick_access_error("restore_qa_defaults", error))?;
-    cache.refresh_after_write(&app, &qa_type);
+    cache.refresh_after_write(&app, backend.inner(), &qa_type);
     Ok(result)
 }
 
 #[tauri::command]
-pub(crate) fn get_qa_visibility() -> CommandResult<QaVisibility> {
-    quick_access::get_visibility().map_err(|error| quick_access_error("get_qa_visibility", error))
+pub(crate) fn get_qa_visibility(
+    backend: State<'_, QuickAccessBackendState>,
+) -> CommandResult<QaVisibility> {
+    backend
+        .backend()
+        .and_then(|backend| backend.get_visibility())
+        .map_err(|error| quick_access_error("get_qa_visibility", error))
 }
 
 #[tauri::command]
 pub(crate) fn set_qa_visibility(
     app: AppHandle,
     cache: State<'_, QuickAccessCache>,
+    backend: State<'_, QuickAccessBackendState>,
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
     visible: bool,
 ) -> CommandResult<QaVisibility> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    let result = quick_access::set_visibility(&qa_type, visible)
+    let result = backend
+        .backend()
+        .and_then(|backend| backend.set_visibility(&qa_type, visible))
         .map_err(|error| quick_access_error("set_qa_visibility", error))?;
     if matches!(qa_type.as_str(), "recent" | "frequent") {
-        cache.refresh_after_write(&app, &qa_type);
+        cache.refresh_after_write(&app, backend.inner(), &qa_type);
     }
     Ok(result)
 }
 
 #[tauri::command]
-pub(crate) fn open_in_explorer(path: String) -> CommandResult<ActionReceipt> {
-    let path =
-        validate_open_path(&path).map_err(|error| validation_error("open_in_explorer", error))?;
+pub(crate) fn open_in_explorer(
+    backend: State<'_, QuickAccessBackendState>,
+    path: String,
+) -> CommandResult<ActionReceipt> {
+    let kind = backend
+        .backend()
+        .map_err(|error| quick_access_error("open_in_explorer", error))?
+        .path_kind(&path);
+    let path = validate_open_path(&path, kind)
+        .map_err(|error| validation_error("open_in_explorer", error))?;
     log::info!("open in explorer started path={}", path.display());
 
-    tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|error| {
-        CommandError::unexpected(
-            "open_in_explorer",
-            ErrorCode::SystemOperationFailed,
-            "The item could not be revealed in Explorer.",
-            true,
-            anyhow::Error::new(error).context(format!("failed to reveal {}", path.display())),
-        )
-    })?;
+    if backend.mode() == BackendMode::Real {
+        tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|error| {
+            CommandError::unexpected(
+                "open_in_explorer",
+                ErrorCode::SystemOperationFailed,
+                "The item could not be revealed in Explorer.",
+                true,
+                anyhow::Error::new(error).context(format!("failed to reveal {}", path.display())),
+            )
+        })?;
+    }
     Ok(ActionReceipt::new(
         "open_in_explorer",
         path.to_string_lossy(),
@@ -133,7 +165,7 @@ pub(crate) fn open_in_explorer(path: String) -> CommandResult<ActionReceipt> {
     ))
 }
 
-fn validate_open_path(path: &str) -> Result<PathBuf, ValidationError> {
+fn validate_open_path(path: &str, kind: PathKind) -> Result<PathBuf, ValidationError> {
     if path.trim().is_empty() {
         return Err(ValidationError::InvalidArgument(
             "path is empty".to_string(),
@@ -141,7 +173,7 @@ fn validate_open_path(path: &str) -> Result<PathBuf, ValidationError> {
     }
 
     let path = PathBuf::from(path);
-    if !path.exists() {
+    if kind == PathKind::Missing {
         return Err(ValidationError::NotFound(path.display().to_string()));
     }
     Ok(path)
@@ -186,7 +218,7 @@ mod tests {
     #[test]
     fn rejects_empty_open_path() {
         assert!(matches!(
-            validate_open_path("   "),
+            validate_open_path("   ", PathKind::Missing),
             Err(ValidationError::InvalidArgument(_))
         ));
     }
@@ -198,7 +230,7 @@ mod tests {
             std::process::id()
         ));
         assert!(matches!(
-            validate_open_path(path.to_string_lossy().as_ref()),
+            validate_open_path(path.to_string_lossy().as_ref(), PathKind::Missing),
             Err(ValidationError::NotFound(_))
         ));
     }

@@ -11,6 +11,7 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::{
+    backend::QuickAccessBackendState,
     cleanup::{self, AutoCleanError, AutoCleanResult, AutoCleanState},
     config::{self, AutoCleanPolicy, Config},
     db::{history_runs::CleanupTrigger, DbState},
@@ -89,17 +90,19 @@ fn execute<R: Runtime>(
     trigger: CleanupTrigger,
 ) -> Result<AutoCleanResult> {
     let database = app.state::<DbState>();
+    let backend = app.state::<QuickAccessBackendState>();
     let privacy = app.state::<PrivacyManager>();
     let auto_clean = app.state::<AutoCleanState>();
     let result = cleanup::run_auto_clean(
         database.inner(),
+        backend.inner(),
         config.history_retention,
         privacy.inner(),
         auto_clean.inner(),
         trigger,
     )?;
     if let Some(cache) = app.try_state::<QuickAccessCache>() {
-        cache.refresh_after_write(app, "all");
+        cache.refresh_after_write(app, backend.inner(), "all");
     }
     Ok(result)
 }

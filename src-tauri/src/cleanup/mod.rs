@@ -10,12 +10,13 @@ pub(crate) use auto::AutoCleanSectionResult;
 pub(crate) use auto::{run as run_auto_clean, AutoCleanError, AutoCleanResult, AutoCleanState};
 
 use crate::{
+    backend::QuickAccessBackendState,
     db::{
         history::{self, CleanSource, NewCleanRecord},
         history_runs::{self, CleanupAction, CleanupTrigger, NewCleanupRun, RunCompletion},
         rules, DbState,
     },
-    quick_access::{self, QaBatchResult, QaItem},
+    quick_access::{QaBatchResult, QaItem},
     rules::Rule,
 };
 use matcher::{classify, MatchResult};
@@ -102,22 +103,22 @@ pub(crate) fn validate_list_type(qa_type: &str) -> Result<()> {
 
 pub fn remove_selected(
     database: &DbState,
+    backend: &QuickAccessBackendState,
     qa_type: &str,
     paths: Vec<String>,
     history_retention: usize,
 ) -> Result<QaBatchResult> {
-    let item_type = item_type_for(qa_type)?;
     let rules = load_rules(database)?;
     let prepared = prepare_cleanup(paths, &rules, Selection::AllUnprotected);
     run_operation(
         database,
+        backend,
         NewCleanupRun {
             action: CleanupAction::RemoveSelected,
             trigger: CleanupTrigger::Manual,
             qa_type,
         },
         qa_type,
-        item_type,
         prepared,
         history_retention,
         CleanSource::Manual,
@@ -126,25 +127,27 @@ pub fn remove_selected(
 
 pub fn empty_current(
     database: &DbState,
+    backend: &QuickAccessBackendState,
     qa_type: &str,
     history_retention: usize,
 ) -> Result<QaBatchResult> {
-    let item_type = item_type_for(qa_type)?;
     let rules = load_rules(database)?;
-    let paths = quick_access::list_items(qa_type)?
+    let paths = backend
+        .backend()?
+        .list_items(qa_type)?
         .into_iter()
         .map(|item| item.path)
         .collect();
     let prepared = prepare_cleanup(paths, &rules, Selection::AllUnprotected);
     run_operation(
         database,
+        backend,
         NewCleanupRun {
             action: CleanupAction::Empty,
             trigger: CleanupTrigger::Manual,
             qa_type,
         },
         qa_type,
-        item_type,
         prepared,
         history_retention,
         CleanSource::Manual,
@@ -153,26 +156,28 @@ pub fn empty_current(
 
 pub fn smart_clean(
     database: &DbState,
+    backend: &QuickAccessBackendState,
     qa_type: &str,
     history_retention: usize,
     source: CleanSource,
 ) -> Result<QaBatchResult> {
-    let item_type = item_type_for(qa_type)?;
     let rules = load_rules(database)?;
-    let paths = quick_access::list_items(qa_type)?
+    let paths = backend
+        .backend()?
+        .list_items(qa_type)?
         .into_iter()
         .map(|item| item.path)
         .collect();
     let prepared = prepare_cleanup(paths, &rules, Selection::TargetedOnly);
     run_operation(
         database,
+        backend,
         NewCleanupRun {
             action: CleanupAction::SmartClean,
             trigger: CleanupTrigger::Manual,
             qa_type,
         },
         qa_type,
-        item_type,
         prepared,
         history_retention,
         source,
@@ -181,22 +186,24 @@ pub fn smart_clean(
 
 pub(crate) fn smart_clean_in_run(
     database: &DbState,
+    backend: &QuickAccessBackendState,
     qa_type: &str,
     history_retention: usize,
     source: CleanSource,
     run_id: i64,
 ) -> Result<QaBatchResult> {
-    let item_type = item_type_for(qa_type)?;
     let rules = load_rules(database)?;
-    let paths = quick_access::list_items(qa_type)?
+    let paths = backend
+        .backend()?
+        .list_items(qa_type)?
         .into_iter()
         .map(|item| item.path)
         .collect();
     let prepared = prepare_cleanup(paths, &rules, Selection::TargetedOnly);
     execute(
         database,
+        backend,
         qa_type,
-        item_type,
         prepared,
         history_retention,
         source,
@@ -206,9 +213,9 @@ pub(crate) fn smart_clean_in_run(
 
 fn run_operation(
     database: &DbState,
+    backend: &QuickAccessBackendState,
     run: NewCleanupRun<'_>,
     qa_type: &str,
-    item_type: &str,
     prepared: PreparedCleanup,
     history_retention: usize,
     source: CleanSource,
@@ -217,8 +224,8 @@ fn run_operation(
     let run_id = database.with_connection(|connection| history_runs::begin(connection, run))?;
     match execute(
         database,
+        backend,
         qa_type,
-        item_type,
         prepared,
         history_retention,
         source,
@@ -274,13 +281,14 @@ pub(crate) fn completion_from_batch(result: &QaBatchResult) -> RunCompletion {
 
 fn execute(
     database: &DbState,
+    backend: &QuickAccessBackendState,
     qa_type: &str,
-    item_type: &str,
     prepared: PreparedCleanup,
     history_retention: usize,
     source: CleanSource,
     run_id: i64,
 ) -> Result<QaBatchResult> {
+    let item_type = item_type_for(qa_type)?;
     let matches = prepared
         .candidates
         .iter()
@@ -299,7 +307,7 @@ fn execute(
     let mut result = if paths.is_empty() {
         QaBatchResult::default()
     } else {
-        quick_access::remove_items(qa_type, paths)?
+        backend.backend()?.remove_items(qa_type, paths)?
     };
     result.total = prepared.total;
     result.skipped_protected = prepared.skipped_protected;

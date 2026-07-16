@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use super::smart_clean_in_run;
 use crate::{
+    backend::QuickAccessBackendState,
     db::{
         history::CleanSource,
         history_runs::{self, CleanupAction, CleanupTrigger, NewCleanupRun, RunCompletion},
@@ -100,6 +101,7 @@ impl AutoCleanResult {
 
 pub(crate) fn run(
     database: &DbState,
+    backend: &QuickAccessBackendState,
     history_retention: usize,
     privacy: &PrivacyManager,
     state: &AutoCleanState,
@@ -119,7 +121,14 @@ pub(crate) fn run(
     })?;
     log::info!("auto-clean started");
     let mut result = run_sections(|qa_type, source| {
-        smart_clean_in_run(database, qa_type, history_retention, source, run_id)
+        smart_clean_in_run(
+            database,
+            backend,
+            qa_type,
+            history_retention,
+            source,
+            run_id,
+        )
     });
 
     let completion = completion_from_result(&result);

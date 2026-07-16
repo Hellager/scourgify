@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Result};
 use serde::Serialize;
+#[cfg(debug_assertions)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use wincent::prelude::{
     QuickAccessLock, QuickAccessManager, QuickAccessUnlockOptions, QuickAccessUnlockReport,
@@ -36,6 +38,10 @@ pub struct PrivacyManager {
     manager: QuickAccessManager,
     state: Mutex<PrivacyLockState>,
     cleanup_links: bool,
+    #[cfg(debug_assertions)]
+    mock_mode: AtomicBool,
+    #[cfg(debug_assertions)]
+    mock_state: Mutex<PrivacyModeState>,
 }
 
 impl PrivacyManager {
@@ -44,10 +50,23 @@ impl PrivacyManager {
             manager: QuickAccessManager::new(),
             state: Mutex::new(PrivacyLockState::Inactive),
             cleanup_links,
+            #[cfg(debug_assertions)]
+            mock_mode: AtomicBool::new(false),
+            #[cfg(debug_assertions)]
+            mock_state: Mutex::new(PrivacyModeState::Inactive),
         }
     }
 
     pub fn enter(&self) -> Result<LockResult> {
+        #[cfg(debug_assertions)]
+        if self.mock_mode.load(Ordering::Relaxed) {
+            *self
+                .mock_state
+                .lock()
+                .expect("mock privacy state mutex poisoned") = PrivacyModeState::ActiveFull;
+            return Ok(LockResult::Full);
+        }
+
         let mut state = self.state.lock().expect("privacy state mutex poisoned");
         if !matches!(*state, PrivacyLockState::Inactive) {
             return Ok(match &*state {
@@ -79,6 +98,15 @@ impl PrivacyManager {
     }
 
     pub fn exit(&self) -> Result<Vec<QuickAccessUnlockReport>> {
+        #[cfg(debug_assertions)]
+        if self.mock_mode.load(Ordering::Relaxed) {
+            *self
+                .mock_state
+                .lock()
+                .expect("mock privacy state mutex poisoned") = PrivacyModeState::Inactive;
+            return Ok(Vec::new());
+        }
+
         let state = std::mem::replace(
             &mut *self.state.lock().expect("privacy state mutex poisoned"),
             PrivacyLockState::Inactive,
@@ -103,6 +131,14 @@ impl PrivacyManager {
     }
 
     pub fn state(&self) -> PrivacyModeState {
+        #[cfg(debug_assertions)]
+        if self.mock_mode.load(Ordering::Relaxed) {
+            return *self
+                .mock_state
+                .lock()
+                .expect("mock privacy state mutex poisoned");
+        }
+
         match &*self.state.lock().expect("privacy state mutex poisoned") {
             PrivacyLockState::Inactive => PrivacyModeState::Inactive,
             PrivacyLockState::ActiveFull(_) => PrivacyModeState::ActiveFull,
@@ -121,6 +157,21 @@ impl PrivacyManager {
         } else {
             QuickAccessUnlockOptions::new()
         }
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn set_mock_mode(&self, enabled: bool) -> Result<()> {
+        if enabled && !matches!(self.state(), PrivacyModeState::Inactive) {
+            return Err(anyhow!(
+                "privacy mode must be inactive before enabling mock mode"
+            ));
+        }
+        self.mock_mode.store(enabled, Ordering::Relaxed);
+        *self
+            .mock_state
+            .lock()
+            .expect("mock privacy state mutex poisoned") = PrivacyModeState::Inactive;
+        Ok(())
     }
 }
 
@@ -142,5 +193,16 @@ mod tests {
 
         assert!(cleanup.cleanup_new_recent_links_enabled());
         assert!(!keep.cleanup_new_recent_links_enabled());
+    }
+
+    #[test]
+    fn debug_mock_mode_never_acquires_windows_locks() {
+        let manager = PrivacyManager::new(true);
+        manager.set_mock_mode(true).unwrap();
+
+        assert_eq!(manager.enter().unwrap(), LockResult::Full);
+        assert_eq!(manager.state(), PrivacyModeState::ActiveFull);
+        assert!(manager.exit().unwrap().is_empty());
+        assert_eq!(manager.state(), PrivacyModeState::Inactive);
     }
 }

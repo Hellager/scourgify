@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
+        Arc, Mutex, RwLock,
     },
     time::Duration,
 };
@@ -12,7 +12,10 @@ use wincent::prelude::{
     QuickAccess, QuickAccessManager, QuickAccessMonitor, QuickAccessMonitorOptions,
 };
 
-use crate::{app::scheduler::AutoCleanMonitor, error::report_background_error};
+use crate::{
+    app::scheduler::AutoCleanMonitor, backend::QuickAccessBackendState,
+    error::report_background_error,
+};
 
 use super::{operations, QaCounts, QaItem};
 
@@ -41,29 +44,41 @@ impl QuickAccessCache {
     pub(crate) fn items<R: Runtime>(
         &self,
         app: &AppHandle<R>,
+        backend: &QuickAccessBackendState,
         qa_type: &str,
         fresh: bool,
     ) -> Result<Vec<QaItem>> {
         let qa_type = operations::parse_qa_type(qa_type)?;
         match qa_type {
             QuickAccess::RecentFiles | QuickAccess::FrequentFolders => {
-                self.category_items(app, qa_type, fresh)
+                self.category_items(app, backend, qa_type, fresh)
             }
             QuickAccess::All => {
-                let mut items = self.category_items(app, QuickAccess::RecentFiles, fresh)?;
-                items.extend(self.category_items(app, QuickAccess::FrequentFolders, fresh)?);
+                let mut items =
+                    self.category_items(app, backend, QuickAccess::RecentFiles, fresh)?;
+                items.extend(self.category_items(
+                    app,
+                    backend,
+                    QuickAccess::FrequentFolders,
+                    fresh,
+                )?);
                 Ok(items)
             }
             _ => unreachable!("wincent QuickAccess gained an unsupported variant"),
         }
     }
 
-    pub(crate) fn counts<R: Runtime>(&self, app: &AppHandle<R>, fresh: bool) -> Result<QaCounts> {
+    pub(crate) fn counts<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        backend: &QuickAccessBackendState,
+        fresh: bool,
+    ) -> Result<QaCounts> {
         let recent = self
-            .category_items(app, QuickAccess::RecentFiles, fresh)?
+            .category_items(app, backend, QuickAccess::RecentFiles, fresh)?
             .len();
         let frequent = self
-            .category_items(app, QuickAccess::FrequentFolders, fresh)?
+            .category_items(app, backend, QuickAccess::FrequentFolders, fresh)?
             .len();
         Ok(QaCounts {
             recent,
@@ -72,8 +87,13 @@ impl QuickAccessCache {
         })
     }
 
-    pub(crate) fn refresh_after_write<R: Runtime>(&self, app: &AppHandle<R>, qa_type: &str) {
-        if let Err(error) = self.items(app, qa_type, true) {
+    pub(crate) fn refresh_after_write<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        backend: &QuickAccessBackendState,
+        qa_type: &str,
+    ) {
+        if let Err(error) = self.items(app, backend, qa_type, true) {
             let incident_id = report_background_error("refresh_quick_access_cache", error);
             log::warn!(
                 "Quick Access cache refresh after write failed qa_type={qa_type} incident_id={incident_id}"
@@ -84,6 +104,7 @@ impl QuickAccessCache {
     fn category_items<R: Runtime>(
         &self,
         app: &AppHandle<R>,
+        backend: &QuickAccessBackendState,
         qa_type: QuickAccess,
         fresh: bool,
     ) -> Result<Vec<QaItem>> {
@@ -95,7 +116,7 @@ impl QuickAccessCache {
         }
 
         log::debug!("Quick Access cache refresh qa_type={}", qa_name(qa_type));
-        let items = operations::list_items(qa_name(qa_type))?;
+        let items = backend.backend()?.list_items(qa_name(qa_type))?;
         self.update(app, qa_type, items.clone())?;
         Ok(items)
     }
@@ -164,46 +185,97 @@ impl QuickAccessCache {
     fn update_from_paths<R: Runtime>(
         &self,
         app: &AppHandle<R>,
+        backend: &QuickAccessBackendState,
         qa_type: QuickAccess,
-        paths: Vec<String>,
     ) -> Result<()> {
-        self.update(app, qa_type, operations::items_from_paths(qa_type, paths))
+        self.update(
+            app,
+            qa_type,
+            backend.backend()?.list_items(qa_name(qa_type))?,
+        )
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn clear(&self) -> Result<()> {
+        let mut snapshot = self
+            .inner
+            .write()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        snapshot.recent = None;
+        snapshot.frequent = None;
+        Ok(())
     }
 }
 
 pub(crate) struct QuickAccessWatchers {
-    _monitors: Vec<QuickAccessMonitor>,
+    _monitors: Mutex<Vec<QuickAccessMonitor>>,
 }
 
 impl QuickAccessWatchers {
-    pub(crate) fn start(app: AppHandle, cache: QuickAccessCache) -> Self {
-        let mut monitors = Vec::with_capacity(2);
-        for qa_type in [QuickAccess::RecentFiles, QuickAccess::FrequentFolders] {
-            match start_monitor(app.clone(), cache.clone(), qa_type) {
-                Ok(monitor) => monitors.push(monitor),
-                Err(error) => {
-                    let incident_id = report_background_error("start_quick_access_monitor", error);
-                    log::warn!(
-                        "Quick Access monitor unavailable qa_type={} incident_id={incident_id}",
-                        qa_name(qa_type)
-                    );
-                }
-            }
-        }
-        log::info!(
-            "Quick Access monitoring started interval_secs={} monitors={}",
-            POLL_INTERVAL.as_secs(),
-            monitors.len()
-        );
+    pub(crate) fn start(
+        app: AppHandle,
+        cache: QuickAccessCache,
+        backend: QuickAccessBackendState,
+    ) -> Self {
         Self {
-            _monitors: monitors,
+            _monitors: Mutex::new(start_real_monitors(app, cache, backend)),
         }
     }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn pause(&self) -> Result<()> {
+        self._monitors
+            .lock()
+            .map_err(|error| anyhow::anyhow!("Quick Access watcher state is unavailable: {error}"))?
+            .clear();
+        Ok(())
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn resume(
+        &self,
+        app: AppHandle,
+        cache: QuickAccessCache,
+        backend: QuickAccessBackendState,
+    ) -> Result<()> {
+        let monitors = start_real_monitors(app, cache, backend);
+        *self._monitors.lock().map_err(|error| {
+            anyhow::anyhow!("Quick Access watcher state is unavailable: {error}")
+        })? = monitors;
+        Ok(())
+    }
+}
+
+fn start_real_monitors(
+    app: AppHandle,
+    cache: QuickAccessCache,
+    backend: QuickAccessBackendState,
+) -> Vec<QuickAccessMonitor> {
+    let mut monitors = Vec::with_capacity(2);
+    for qa_type in [QuickAccess::RecentFiles, QuickAccess::FrequentFolders] {
+        match start_monitor(app.clone(), cache.clone(), backend.clone(), qa_type) {
+            Ok(monitor) => monitors.push(monitor),
+            Err(error) => {
+                let incident_id = report_background_error("start_quick_access_monitor", error);
+                log::warn!(
+                    "Quick Access monitor unavailable qa_type={} incident_id={incident_id}",
+                    qa_name(qa_type)
+                );
+            }
+        }
+    }
+    log::info!(
+        "Quick Access monitoring started interval_secs={} monitors={}",
+        POLL_INTERVAL.as_secs(),
+        monitors.len()
+    );
+    monitors
 }
 
 fn start_monitor(
     app: AppHandle,
     cache: QuickAccessCache,
+    backend: QuickAccessBackendState,
     qa_type: QuickAccess,
 ) -> Result<QuickAccessMonitor> {
     let options = QuickAccessMonitorOptions::new()
@@ -215,9 +287,7 @@ fn start_monitor(
             Ok(event) => {
                 error_reported.store(false, Ordering::Relaxed);
                 let has_added_items = !event.added_items().is_empty();
-                if let Err(error) =
-                    cache.update_from_paths(&app, qa_type, event.current_items().to_vec())
-                {
+                if let Err(error) = cache.update_from_paths(&app, &backend, qa_type) {
                     report_background_error("update_quick_access_cache", error);
                 }
                 if has_added_items {

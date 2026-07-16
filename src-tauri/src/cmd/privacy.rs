@@ -5,6 +5,7 @@ use tauri::{Manager, State};
 
 use crate::{
     app::{scheduler::AutoCleanMonitor, settings},
+    backend::{BackendMode, QuickAccessBackendState},
     config::Config,
     error::{CommandError, CommandResult, ErrorCode},
     privacy::{LockResult, PrivacyManager, PrivacyModeState},
@@ -25,6 +26,7 @@ pub(crate) fn privacy_enter(
     app: tauri::AppHandle,
     config: State<'_, Mutex<Config>>,
     privacy: State<'_, PrivacyManager>,
+    backend: State<'_, QuickAccessBackendState>,
 ) -> CommandResult<PrivacyTransition> {
     let result = privacy.enter().map_err(|error| {
         CommandError::unexpected(
@@ -35,15 +37,17 @@ pub(crate) fn privacy_enter(
             error,
         )
     })?;
-    settings::persist_privacy_mode(&app, config.inner(), true).map_err(|error| {
-        CommandError::unexpected(
-            "privacy_enter",
-            ErrorCode::ConfigPersistenceFailed,
-            "Privacy mode was enabled, but the preference could not be saved.",
-            true,
-            error,
-        )
-    })?;
+    if backend.mode() == BackendMode::Real {
+        settings::persist_privacy_mode(&app, config.inner(), true).map_err(|error| {
+            CommandError::unexpected(
+                "privacy_enter",
+                ErrorCode::ConfigPersistenceFailed,
+                "Privacy mode was enabled, but the preference could not be saved.",
+                true,
+                error,
+            )
+        })?;
+    }
     Ok(PrivacyTransition {
         state: privacy.state(),
         lock_result: Some(result),
@@ -59,6 +63,7 @@ pub(crate) fn privacy_exit(
     app: tauri::AppHandle,
     config: State<'_, Mutex<Config>>,
     privacy: State<'_, PrivacyManager>,
+    backend: State<'_, QuickAccessBackendState>,
 ) -> CommandResult<PrivacyTransition> {
     let reports = privacy.exit().map_err(|error| {
         CommandError::unexpected(
@@ -88,15 +93,17 @@ pub(crate) fn privacy_exit(
             report.failed_lnk_deletions().len()
         );
     }
-    settings::persist_privacy_mode(&app, config.inner(), false).map_err(|error| {
-        CommandError::unexpected(
-            "privacy_exit",
-            ErrorCode::ConfigPersistenceFailed,
-            "Privacy mode was disabled, but the preference could not be saved.",
-            true,
-            error,
-        )
-    })?;
+    if backend.mode() == BackendMode::Real {
+        settings::persist_privacy_mode(&app, config.inner(), false).map_err(|error| {
+            CommandError::unexpected(
+                "privacy_exit",
+                ErrorCode::ConfigPersistenceFailed,
+                "Privacy mode was disabled, but the preference could not be saved.",
+                true,
+                error,
+            )
+        })?;
+    }
     if let Some(monitor) = app.try_state::<AutoCleanMonitor>() {
         if let Err(error) = monitor.trigger() {
             log::warn!("failed to trigger monitored auto-clean after privacy exit: {error:#}");

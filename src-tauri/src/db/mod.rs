@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
+#[cfg(debug_assertions)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     path::{Path, PathBuf},
     sync::Mutex,
@@ -45,13 +47,37 @@ struct DbInner {
     error: Option<String>,
 }
 
+#[cfg(debug_assertions)]
+struct MockDb {
+    inner: DbInner,
+    path: tempfile::TempPath,
+}
+
 pub struct DbState {
     path: Option<PathBuf>,
     inner: Mutex<DbInner>,
+    #[cfg(debug_assertions)]
+    mock_enabled: AtomicBool,
+    #[cfg(debug_assertions)]
+    mock: Mutex<Option<MockDb>>,
 }
 
 impl DbState {
     pub fn status(&self) -> DatabaseStatus {
+        #[cfg(debug_assertions)]
+        if self.mock_enabled.load(Ordering::Relaxed) {
+            return match self.mock.lock() {
+                Ok(mock) => mock.as_ref().map_or_else(
+                    || unavailable_status(None, DATABASE_STATE_UNAVAILABLE),
+                    |mock| database_status(Some(mock.path.as_ref()), &mock.inner),
+                ),
+                Err(error) => {
+                    log::error!("mock database state lock poisoned: {error}");
+                    unavailable_status(None, DATABASE_STATE_UNAVAILABLE)
+                }
+            };
+        }
+
         match self.inner.lock() {
             Ok(inner) => database_status(self.path.as_deref(), &inner),
             Err(error) => {
@@ -62,6 +88,11 @@ impl DbState {
     }
 
     pub fn retry(&self) -> DatabaseStatus {
+        #[cfg(debug_assertions)]
+        if self.mock_enabled.load(Ordering::Relaxed) {
+            return self.status();
+        }
+
         let mut inner = match self.inner.lock() {
             Ok(inner) => inner,
             Err(error) => {
@@ -103,6 +134,17 @@ impl DbState {
     }
 
     pub fn directory(&self) -> Option<PathBuf> {
+        #[cfg(debug_assertions)]
+        if self.mock_enabled.load(Ordering::Relaxed) {
+            return self
+                .mock
+                .lock()
+                .ok()?
+                .as_ref()?
+                .path
+                .parent()
+                .map(Path::to_path_buf);
+        }
         self.path.as_ref()?.parent().map(Path::to_path_buf)
     }
 
@@ -110,6 +152,23 @@ impl DbState {
         &self,
         operation: impl FnOnce(&mut Connection) -> Result<T>,
     ) -> Result<T> {
+        #[cfg(debug_assertions)]
+        if self.mock_enabled.load(Ordering::Relaxed) {
+            let mut mock = self
+                .mock
+                .lock()
+                .map_err(|error| DatabaseStateError::StateUnavailable(error.to_string()))?;
+            let mock = mock
+                .as_mut()
+                .context("mock database state is unavailable")?;
+            return operation(
+                mock.inner
+                    .connection
+                    .as_mut()
+                    .context("mock database connection is unavailable")?,
+            );
+        }
+
         let mut inner = self
             .inner
             .lock()
@@ -130,6 +189,21 @@ impl DbState {
     }
 
     pub(crate) fn read_connection(&self) -> Result<Connection> {
+        #[cfg(debug_assertions)]
+        if self.mock_enabled.load(Ordering::Relaxed) {
+            let path = {
+                let mock = self
+                    .mock
+                    .lock()
+                    .map_err(|error| DatabaseStateError::StateUnavailable(error.to_string()))?;
+                mock.as_ref()
+                    .context("mock database state is unavailable")?
+                    .path
+                    .to_path_buf()
+            };
+            return open_read_connection(&path);
+        }
+
         {
             let inner = self
                 .inner
@@ -149,15 +223,7 @@ impl DbState {
             .path
             .as_deref()
             .context("database path is unavailable")?;
-        let connection = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .with_context(|| format!("failed to open read-only database at {}", path.display()))?;
-        connection
-            .busy_timeout(std::time::Duration::from_secs(5))
-            .context("failed to configure read-only database timeout")?;
-        Ok(connection)
+        open_read_connection(path)
     }
 
     fn available(path: PathBuf, connection: Connection, schema_version: u32) -> Self {
@@ -168,6 +234,10 @@ impl DbState {
                 schema_version: Some(schema_version),
                 error: None,
             }),
+            #[cfg(debug_assertions)]
+            mock_enabled: AtomicBool::new(false),
+            #[cfg(debug_assertions)]
+            mock: Mutex::new(None),
         }
     }
 
@@ -179,8 +249,56 @@ impl DbState {
                 schema_version: None,
                 error: Some(error.into()),
             }),
+            #[cfg(debug_assertions)]
+            mock_enabled: AtomicBool::new(false),
+            #[cfg(debug_assertions)]
+            mock: Mutex::new(None),
         }
     }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn set_mock_mode(&self, enabled: bool) -> Result<()> {
+        if enabled {
+            let path = tempfile::NamedTempFile::new()
+                .context("failed to create mock database file")?
+                .into_temp_path();
+            let (connection, schema_version) = open_database(path.as_ref())?;
+            *self
+                .mock
+                .lock()
+                .map_err(|error| DatabaseStateError::StateUnavailable(error.to_string()))? =
+                Some(MockDb {
+                    inner: DbInner {
+                        connection: Some(connection),
+                        schema_version: Some(schema_version),
+                        error: None,
+                    },
+                    path,
+                });
+        } else {
+            self.mock_enabled.store(false, Ordering::Relaxed);
+            *self
+                .mock
+                .lock()
+                .map_err(|error| DatabaseStateError::StateUnavailable(error.to_string()))? = None;
+        }
+        if enabled {
+            self.mock_enabled.store(true, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+}
+
+fn open_read_connection(path: &Path) -> Result<Connection> {
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .with_context(|| format!("failed to open read-only database at {}", path.display()))?;
+    connection
+        .busy_timeout(std::time::Duration::from_secs(5))
+        .context("failed to configure read-only database timeout")?;
+    Ok(connection)
 }
 
 pub fn initialize<R: Runtime>(app: &AppHandle<R>) -> DbState {
@@ -384,6 +502,44 @@ mod tests {
         assert!(status.available);
         assert_eq!(status.schema_version, Some(SCHEMA_VERSION));
         assert!(path.exists());
+        drop(state);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn debug_mock_database_is_isolated_from_the_real_connection() {
+        let directory = unique_temp_path("database-mock");
+        let path = directory.join(DATABASE_FILE);
+        let state = initialize_path(path.clone());
+        state
+            .with_connection(|connection| {
+                connection.execute("DELETE FROM rules", [])?;
+                Ok(())
+            })
+            .unwrap();
+
+        state.set_mock_mode(true).unwrap();
+        assert_ne!(
+            state.status().path.as_deref(),
+            Some(path.to_string_lossy().as_ref())
+        );
+        assert!(!state
+            .with_connection(|connection| rules::list(connection))
+            .unwrap()
+            .is_empty());
+
+        state.set_mock_mode(false).unwrap();
+        assert_eq!(
+            state.status().path,
+            Some(path.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            state
+                .with_connection(|connection| rules::list(connection))
+                .unwrap()
+                .len(),
+            0
+        );
         drop(state);
         std::fs::remove_dir_all(directory).unwrap();
     }
