@@ -1,10 +1,10 @@
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::{
-    app::settings,
+    app::{scheduler::AutoCleanMonitor, settings},
     config::Config,
     error::{CommandError, CommandResult, ErrorCode},
     privacy::{LockResult, PrivacyManager, PrivacyModeState},
@@ -97,6 +97,11 @@ pub(crate) fn privacy_exit(
             error,
         )
     })?;
+    if let Some(monitor) = app.try_state::<AutoCleanMonitor>() {
+        if let Err(error) = monitor.trigger() {
+            log::warn!("failed to trigger monitored auto-clean after privacy exit: {error:#}");
+        }
+    }
     Ok(transition)
 }
 

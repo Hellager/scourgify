@@ -8,7 +8,7 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
-use super::{alert, i18n, settings, theme, window};
+use super::{alert, i18n, scheduler::AutoCleanMonitor, settings, theme, window};
 use crate::{
     config::{AppMode, Config},
     privacy::{LockResult, PrivacyManager, PrivacyModeState},
@@ -146,13 +146,14 @@ fn build_mode_menu<R: Runtime>(
         "dashboard",
         text.mode_dashboard,
     )?;
-    let minimal = mode_item(app, current, AppMode::Minimal, "minimal", text.mode_minimal)?;
+    let grid = mode_item(app, current, AppMode::Grid, "grid", text.mode_grid)?;
+    let tray = mode_item(app, current, AppMode::Tray, "tray", text.mode_tray)?;
 
     Ok(Submenu::with_items(
         app,
         text.mode,
         true,
-        &[&dashboard, &minimal],
+        &[&dashboard, &grid, &tray],
     )?)
 }
 
@@ -217,7 +218,8 @@ fn show_dashboard<R: Runtime>(app: &AppHandle<R>) {
 fn set_mode<R: Runtime>(app: &AppHandle<R>, mode: &str) {
     let mode = match mode {
         "dashboard" => AppMode::Dashboard,
-        "minimal" => AppMode::Minimal,
+        "grid" => AppMode::Grid,
+        "tray" => AppMode::Tray,
         _ => return,
     };
 
@@ -300,6 +302,15 @@ fn toggle_privacy_mode<R: Runtime>(app: &AppHandle<R>) {
             if let Err(error) = settings::persist_privacy_mode(app, config.inner(), enabled) {
                 log::error!("failed to persist privacy mode: {error}");
             }
+            if requested {
+                if let Some(monitor) = app.try_state::<AutoCleanMonitor>() {
+                    if let Err(error) = monitor.trigger() {
+                        log::warn!(
+                            "failed to trigger monitored auto-clean after privacy exit: {error:#}"
+                        );
+                    }
+                }
+            }
             refresh_menu(app);
         }
         Err(error) => {
@@ -356,8 +367,14 @@ fn quit_app<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn handle_left_click<R: Runtime>(app: &AppHandle<R>) {
-    if matches!(current_app_mode(app), AppMode::Dashboard) {
-        show_dashboard(app);
+    match current_app_mode(app) {
+        AppMode::Dashboard => show_dashboard(app),
+        AppMode::Grid => {
+            if let Err(error) = window::show_grid(app) {
+                log::error!("failed to show grid: {error}");
+            }
+        }
+        AppMode::Tray => {}
     }
 }
 

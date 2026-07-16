@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
-  type AutoCleanSchedule,
+  type AutoCleanPolicy,
   configSchema,
   defaultConfig,
   type ConfigForm,
@@ -88,7 +88,7 @@ export function SettingsPage() {
   });
   const notificationsEnabled = watch("notifications_enabled");
   const notifyOperationComplete = watch("notify_operation_complete");
-  const autoCleanSchedule = watch("auto_clean");
+  const autoCleanPolicy = watch("auto_clean");
   const autoCleanLastRun = watch("auto_clean_last_run");
 
   useEffect(() => {
@@ -135,34 +135,34 @@ export function SettingsPage() {
       window.removeEventListener(AUTO_CLEAN_UPDATED_EVENT, updateLastRun);
   }, [setValue]);
 
-  const updateAutoCleanSchedule = (schedule: AutoCleanSchedule) => {
-    setValue("auto_clean", schedule, {
+  const updateAutoCleanPolicy = (policy: AutoCleanPolicy) => {
+    setValue("auto_clean", policy, {
       shouldDirty: true,
       shouldValidate: true,
     });
   };
 
   const setAutoCleanEnabled = (enabled: boolean) => {
-    updateAutoCleanSchedule(
-      enabled ? { kind: "every_hours", hours: 6 } : { kind: "disabled" },
+    updateAutoCleanPolicy(
+      enabled ? { kind: "monitor" } : { kind: "disabled" },
     );
   };
 
   const setAutoCleanMode = (
-    kind: Exclude<AutoCleanSchedule["kind"], "disabled">,
+    kind: Exclude<AutoCleanPolicy["kind"], "disabled">,
   ) => {
-    if (kind === "on_startup") {
-      updateAutoCleanSchedule({ kind });
+    if (kind === "monitor") {
+      updateAutoCleanPolicy({ kind });
     } else if (kind === "every_hours") {
-      updateAutoCleanSchedule({
+      updateAutoCleanPolicy({
         kind,
-        hours: autoCleanSchedule.kind === kind ? autoCleanSchedule.hours : 6,
+        hours: autoCleanPolicy.kind === kind ? autoCleanPolicy.hours : 6,
       });
     } else {
-      updateAutoCleanSchedule({
+      updateAutoCleanPolicy({
         kind,
-        hour: autoCleanSchedule.kind === kind ? autoCleanSchedule.hour : 8,
-        minute: autoCleanSchedule.kind === kind ? autoCleanSchedule.minute : 0,
+        hour: autoCleanPolicy.kind === kind ? autoCleanPolicy.hour : 8,
+        minute: autoCleanPolicy.kind === kind ? autoCleanPolicy.minute : 0,
       });
     }
   };
@@ -341,7 +341,8 @@ export function SettingsPage() {
               name: "app_mode",
               options: [
                 { label: t("appModeDashboard"), value: "dashboard" },
-                { label: t("appModeMinimal"), value: "minimal" },
+                { label: t("appModeGrid"), value: "grid" },
+                { label: t("appModeTray"), value: "tray" },
               ],
             }}
           />
@@ -398,30 +399,30 @@ export function SettingsPage() {
           <label className="flex items-center justify-between gap-4 py-3">
             <span className="text-sm">{t("autoCleanEnabled")}</span>
             <Switch
-              checked={autoCleanSchedule.kind !== "disabled"}
+              checked={autoCleanPolicy.kind !== "disabled"}
               disabled={loading || formState.isSubmitting}
               onCheckedChange={setAutoCleanEnabled}
             />
           </label>
 
-          {autoCleanSchedule.kind !== "disabled" ? (
+          {autoCleanPolicy.kind !== "disabled" ? (
             <>
               <label className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center">
-                <span className="text-sm">{t("autoCleanSchedule")}</span>
+                <span className="text-sm">{t("autoCleanMode")}</span>
                 <Select
                   onValueChange={(value) =>
                     setAutoCleanMode(
-                      value as Exclude<AutoCleanSchedule["kind"], "disabled">,
+                      value as Exclude<AutoCleanPolicy["kind"], "disabled">,
                     )
                   }
-                  value={autoCleanSchedule.kind}
+                  value={autoCleanPolicy.kind}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="on_startup">
-                      {t("autoCleanOnStartup")}
+                    <SelectItem value="monitor">
+                      {t("autoCleanMonitor")}
                     </SelectItem>
                     <SelectItem value="every_hours">
                       {t("autoCleanEveryHours")}
@@ -433,7 +434,7 @@ export function SettingsPage() {
                 </Select>
               </label>
 
-              {autoCleanSchedule.kind === "every_hours" ? (
+              {autoCleanPolicy.kind === "every_hours" ? (
                 <label className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center">
                   <span className="text-sm">{t("autoCleanInterval")}</span>
                   <Input
@@ -442,16 +443,16 @@ export function SettingsPage() {
                     onChange={(event) => {
                       const hours = event.currentTarget.valueAsNumber;
                       if (!Number.isNaN(hours)) {
-                        updateAutoCleanSchedule({ kind: "every_hours", hours });
+                        updateAutoCleanPolicy({ kind: "every_hours", hours });
                       }
                     }}
                     type="number"
-                    value={autoCleanSchedule.hours}
+                    value={autoCleanPolicy.hours}
                   />
                 </label>
               ) : null}
 
-              {autoCleanSchedule.kind === "daily_at" ? (
+              {autoCleanPolicy.kind === "daily_at" ? (
                 <label className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center">
                   <span className="text-sm">{t("autoCleanTime")}</span>
                   <Input
@@ -460,11 +461,11 @@ export function SettingsPage() {
                         .split(":")
                         .map(Number);
                       if (Number.isInteger(hour) && Number.isInteger(minute)) {
-                        updateAutoCleanSchedule({ kind: "daily_at", hour, minute });
+                        updateAutoCleanPolicy({ kind: "daily_at", hour, minute });
                       }
                     }}
                     type="time"
-                    value={`${String(autoCleanSchedule.hour).padStart(2, "0")}:${String(autoCleanSchedule.minute).padStart(2, "0")}`}
+                    value={`${String(autoCleanPolicy.hour).padStart(2, "0")}:${String(autoCleanPolicy.minute).padStart(2, "0")}`}
                   />
                 </label>
               ) : null}
@@ -516,18 +517,6 @@ export function SettingsPage() {
                 { label: t("system"), value: "system" },
                 { label: t("light"), value: "light" },
                 { label: t("dark"), value: "dark" },
-              ],
-            }}
-          />
-          <SelectControl
-            control={control}
-            field={{
-              label: t("sidebarStyle"),
-              name: "sidebar_variant",
-              options: [
-                { label: t("sidebar"), value: "sidebar" },
-                { label: t("inset"), value: "inset" },
-                { label: t("floating"), value: "floating" },
               ],
             }}
           />
@@ -644,6 +633,7 @@ export function SettingsPage() {
             </span>
             <Input
               className="w-28"
+              max={1_000_000}
               min={0}
               type="number"
               {...register("history_retention", { valueAsNumber: true })}

@@ -1,7 +1,8 @@
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use super::ensure_quick_access_write_allowed;
 use crate::{
+    app::scheduler::AutoCleanMonitor,
     db::{rules, rules::RuleError, DatabaseStateError, DbState},
     error::{CommandError, CommandResult, ErrorCode},
     privacy::PrivacyManager,
@@ -19,31 +20,38 @@ pub(crate) fn get_rules(database: State<'_, DbState>) -> CommandResult<Vec<Rule>
 
 #[tauri::command]
 pub(crate) fn add_rule(
+    app: AppHandle,
     database: State<'_, DbState>,
     privacy: State<'_, PrivacyManager>,
     rule: NewRule,
 ) -> CommandResult<Rule> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    database
+    let result = database
         .with_connection(|connection| rules::add(connection, rule))
-        .map_err(|error| database_error("add_rule", error))
+        .map_err(|error| database_error("add_rule", error))?;
+    trigger_monitor(&app);
+    Ok(result)
 }
 
 #[tauri::command]
 pub(crate) fn update_rule(
+    app: AppHandle,
     database: State<'_, DbState>,
     privacy: State<'_, PrivacyManager>,
     id: i64,
     rule: NewRule,
 ) -> CommandResult<Rule> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    database
+    let result = database
         .with_connection(|connection| rules::update(connection, id, rule))
-        .map_err(|error| database_error("update_rule", error))
+        .map_err(|error| database_error("update_rule", error))?;
+    trigger_monitor(&app);
+    Ok(result)
 }
 
 #[tauri::command]
 pub(crate) fn remove_rule(
+    app: AppHandle,
     database: State<'_, DbState>,
     privacy: State<'_, PrivacyManager>,
     id: i64,
@@ -52,20 +60,32 @@ pub(crate) fn remove_rule(
     database
         .with_connection(|connection| rules::remove(connection, id))
         .map_err(|error| database_error("remove_rule", error))?;
+    trigger_monitor(&app);
     Ok(ActionReceipt::new("remove_rule", id.to_string(), 1))
 }
 
 #[tauri::command]
 pub(crate) fn toggle_rule(
+    app: AppHandle,
     database: State<'_, DbState>,
     privacy: State<'_, PrivacyManager>,
     id: i64,
     enabled: bool,
 ) -> CommandResult<Rule> {
     ensure_quick_access_write_allowed(privacy.state())?;
-    database
+    let result = database
         .with_connection(|connection| rules::toggle(connection, id, enabled))
-        .map_err(|error| database_error("toggle_rule", error))
+        .map_err(|error| database_error("toggle_rule", error))?;
+    trigger_monitor(&app);
+    Ok(result)
+}
+
+fn trigger_monitor(app: &AppHandle) {
+    if let Some(monitor) = app.try_state::<AutoCleanMonitor>() {
+        if let Err(error) = monitor.trigger() {
+            log::warn!("failed to trigger monitored auto-clean after rule update: {error:#}");
+        }
+    }
 }
 
 fn database_error(operation: &str, error: anyhow::Error) -> CommandError {

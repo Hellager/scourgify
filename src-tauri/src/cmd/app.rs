@@ -64,34 +64,25 @@ pub(crate) fn set_app_mode(
 
 #[tauri::command]
 pub(crate) fn hide_about(app: tauri::AppHandle) -> CommandResult<ActionReceipt> {
-    if let Some(window_handle) = app.get_webview_window("main") {
+    if app.get_webview_window("main").is_some() {
         let mode = app
             .try_state::<Mutex<Config>>()
             .and_then(|config| config.lock().ok().map(|config| config.app_mode))
-            .unwrap_or(AppMode::Minimal);
-        if matches!(mode, AppMode::Dashboard) {
-            window_handle
-                .eval("window.location.hash = '#/'")
-                .map_err(|error| {
-                    CommandError::unexpected(
-                        "hide_about",
-                        ErrorCode::SystemOperationFailed,
-                        "The About view could not be closed.",
-                        true,
-                        error,
-                    )
-                })?;
-        } else {
-            window::hide_main_window(&app).map_err(|error| {
-                CommandError::unexpected(
-                    "hide_about",
-                    ErrorCode::SystemOperationFailed,
-                    "The About view could not be closed.",
-                    true,
-                    error,
-                )
-            })?;
-        }
+            .unwrap_or(AppMode::Tray);
+        let result = match mode {
+            AppMode::Dashboard => window::show_dashboard(&app),
+            AppMode::Grid => window::show_grid(&app),
+            AppMode::Tray => window::hide_main_window(&app),
+        };
+        result.map_err(|error| {
+            CommandError::unexpected(
+                "hide_about",
+                ErrorCode::SystemOperationFailed,
+                "The About view could not be closed.",
+                true,
+                error,
+            )
+        })?;
     }
     Ok(ActionReceipt::new("hide_about", "main", 1))
 }

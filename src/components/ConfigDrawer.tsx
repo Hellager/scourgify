@@ -159,28 +159,6 @@ export function ConfigDrawer({
               </SelectContent>
             </Select>
           </label>
-          <label className="flex items-center justify-between gap-4 border-t py-3">
-            <span className="text-sm">{t("sidebarStyle")}</span>
-            <Select
-              disabled={loading || saving}
-              onValueChange={(value) =>
-                updateDraft(
-                  "sidebar_variant",
-                  value as ConfigForm["sidebar_variant"],
-                )
-              }
-              value={draft.sidebar_variant}
-            >
-              <SelectTrigger className="w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="sidebar">{t("sidebar")}</SelectItem>
-                <SelectItem value="inset">{t("inset")}</SelectItem>
-                <SelectItem value="floating">{t("floating")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
           <SwitchRow
             checked={draft.show_recent_files}
             disabled={loading || saving || privacyActive}

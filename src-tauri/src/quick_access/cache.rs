@@ -7,12 +7,12 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use wincent::prelude::{
     QuickAccess, QuickAccessManager, QuickAccessMonitor, QuickAccessMonitorOptions,
 };
 
-use crate::error::report_background_error;
+use crate::{app::scheduler::AutoCleanMonitor, error::report_background_error};
 
 use super::{operations, QaCounts, QaItem};
 
@@ -214,10 +214,18 @@ fn start_monitor(
         QuickAccessManager::new().watch_quick_access(options, move |result| match result {
             Ok(event) => {
                 error_reported.store(false, Ordering::Relaxed);
+                let has_added_items = !event.added_items().is_empty();
                 if let Err(error) =
                     cache.update_from_paths(&app, qa_type, event.current_items().to_vec())
                 {
                     report_background_error("update_quick_access_cache", error);
+                }
+                if has_added_items {
+                    if let Some(monitor) = app.try_state::<AutoCleanMonitor>() {
+                        if let Err(error) = monitor.trigger() {
+                            report_background_error("trigger_monitored_auto_clean", error);
+                        }
+                    }
                 }
             }
             Err(error) if !error_reported.swap(true, Ordering::Relaxed) => {

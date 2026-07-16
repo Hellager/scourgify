@@ -1,6 +1,7 @@
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use crate::{
+    app::scheduler::AutoCleanMonitor,
     db::{DatabaseStatus, DbState},
     error::{CommandError, CommandResult, ErrorCode, ValidationError},
 };
@@ -13,8 +14,21 @@ pub(crate) fn get_database_status(database: State<'_, DbState>) -> CommandResult
 }
 
 #[tauri::command]
-pub(crate) fn retry_database(database: State<'_, DbState>) -> CommandResult<DatabaseStatus> {
-    Ok(database.retry())
+pub(crate) fn retry_database(
+    app: AppHandle,
+    database: State<'_, DbState>,
+) -> CommandResult<DatabaseStatus> {
+    let status = database.retry();
+    if status.available {
+        if let Some(monitor) = app.try_state::<AutoCleanMonitor>() {
+            if let Err(error) = monitor.trigger() {
+                log::warn!(
+                    "failed to trigger monitored auto-clean after database retry: {error:#}"
+                );
+            }
+        }
+    }
+    Ok(status)
 }
 
 #[tauri::command]

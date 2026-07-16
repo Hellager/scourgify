@@ -5,15 +5,18 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 const FALLBACK_LANGUAGE: &str = "en-US";
+const MAX_HISTORY_RETENTION: usize = 1_000_000;
 
 pub(crate) use store::{load, save};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AppMode {
-    Minimal,
     #[default]
     Dashboard,
+    Grid,
+    #[serde(alias = "minimal")]
+    Tray,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -33,21 +36,12 @@ pub enum ThemePreference {
     Dark,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum SidebarVariant {
-    #[default]
-    Sidebar,
-    Inset,
-    Floating,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AutoCleanSchedule {
+pub enum AutoCleanPolicy {
     #[default]
     Disabled,
-    OnStartup,
+    Monitor,
     EveryHours {
         hours: u32,
     },
@@ -57,7 +51,7 @@ pub enum AutoCleanSchedule {
     },
 }
 
-impl AutoCleanSchedule {
+impl AutoCleanPolicy {
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::EveryHours { hours } if !(1..=168).contains(hours) => {
@@ -90,8 +84,6 @@ pub struct Config {
     pub close_behavior: CloseBehavior,
     #[serde(default)]
     pub theme: ThemePreference,
-    #[serde(default)]
-    pub sidebar_variant: SidebarVariant,
     #[serde(default = "default_true")]
     pub show_recent_files: bool,
     #[serde(default = "default_true")]
@@ -113,7 +105,7 @@ pub struct Config {
     #[serde(default)]
     pub history_retention: usize,
     #[serde(default)]
-    pub auto_clean: AutoCleanSchedule,
+    pub auto_clean: AutoCleanPolicy,
     #[serde(default)]
     pub auto_clean_last_run: Option<DateTime<Utc>>,
 }
@@ -128,7 +120,6 @@ impl Config {
             privacy_mode_cleanup_links: true,
             close_behavior: CloseBehavior::Hide,
             theme: ThemePreference::System,
-            sidebar_variant: SidebarVariant::Sidebar,
             show_recent_files: true,
             show_frequent_folders: true,
             notifications_enabled: true,
@@ -139,12 +130,15 @@ impl Config {
             confirm_destructive_actions: true,
             smart_clean_confirm: true,
             history_retention: 0,
-            auto_clean: AutoCleanSchedule::Disabled,
+            auto_clean: AutoCleanPolicy::Disabled,
             auto_clean_last_run: None,
         }
     }
 
     pub fn validate(&self) -> Result<()> {
+        if self.history_retention > MAX_HISTORY_RETENTION {
+            anyhow::bail!("history retention must not exceed {MAX_HISTORY_RETENTION}")
+        }
         self.auto_clean.validate()
     }
 }
@@ -204,7 +198,6 @@ mod tests {
         assert!(config.privacy_mode_cleanup_links);
         assert_eq!(config.close_behavior, CloseBehavior::Hide);
         assert_eq!(config.theme, ThemePreference::System);
-        assert_eq!(config.sidebar_variant, SidebarVariant::Sidebar);
         assert!(config.show_recent_files);
         assert!(config.show_frequent_folders);
         assert!(config.notifications_enabled);
@@ -215,37 +208,33 @@ mod tests {
         assert!(config.confirm_destructive_actions);
         assert!(config.smart_clean_confirm);
         assert_eq!(config.history_retention, 0);
-        assert_eq!(config.auto_clean, AutoCleanSchedule::Disabled);
+        assert_eq!(config.auto_clean, AutoCleanPolicy::Disabled);
         assert_eq!(config.auto_clean_last_run, None);
     }
 
     #[test]
     fn validates_auto_clean_schedule_bounds() {
-        assert!(AutoCleanSchedule::EveryHours { hours: 1 }
+        assert!(AutoCleanPolicy::EveryHours { hours: 1 }.validate().is_ok());
+        assert!(AutoCleanPolicy::EveryHours { hours: 168 }
             .validate()
             .is_ok());
-        assert!(AutoCleanSchedule::EveryHours { hours: 168 }
-            .validate()
-            .is_ok());
-        assert!(AutoCleanSchedule::DailyAt {
+        assert!(AutoCleanPolicy::DailyAt {
             hour: 23,
             minute: 59,
         }
         .validate()
         .is_ok());
-        assert!(AutoCleanSchedule::EveryHours { hours: 0 }
+        assert!(AutoCleanPolicy::EveryHours { hours: 0 }.validate().is_err());
+        assert!(AutoCleanPolicy::EveryHours { hours: 169 }
             .validate()
             .is_err());
-        assert!(AutoCleanSchedule::EveryHours { hours: 169 }
-            .validate()
-            .is_err());
-        assert!(AutoCleanSchedule::DailyAt {
+        assert!(AutoCleanPolicy::DailyAt {
             hour: 24,
             minute: 0,
         }
         .validate()
         .is_err());
-        assert!(AutoCleanSchedule::DailyAt {
+        assert!(AutoCleanPolicy::DailyAt {
             hour: 0,
             minute: 60,
         }
@@ -254,9 +243,19 @@ mod tests {
     }
 
     #[test]
+    fn validates_history_retention_bounds() {
+        let mut config = Config::new("en-US".to_string());
+        assert!(config.validate().is_ok());
+        config.history_retention = 1_000_000;
+        assert!(config.validate().is_ok());
+        config.history_retention = 1_000_001;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
     fn serializes_auto_clean_schedule_and_last_run() {
         let mut config = Config::new("en-US".to_string());
-        config.auto_clean = AutoCleanSchedule::EveryHours { hours: 6 };
+        config.auto_clean = AutoCleanPolicy::EveryHours { hours: 6 };
         config.auto_clean_last_run = Some("2026-07-13T08:30:00Z".parse().unwrap());
 
         let value = serde_json::to_value(config).unwrap();
@@ -274,10 +273,8 @@ mod tests {
             serde_json::to_string(&AppMode::Dashboard).unwrap(),
             r#""dashboard""#
         );
-        assert_eq!(
-            serde_json::to_string(&AppMode::Minimal).unwrap(),
-            r#""minimal""#
-        );
+        assert_eq!(serde_json::to_string(&AppMode::Grid).unwrap(), r#""grid""#);
+        assert_eq!(serde_json::to_string(&AppMode::Tray).unwrap(), r#""tray""#);
     }
 
     #[test]
@@ -289,10 +286,6 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&ThemePreference::System).unwrap(),
             r#""system""#
-        );
-        assert_eq!(
-            serde_json::to_string(&SidebarVariant::Floating).unwrap(),
-            r#""floating""#
         );
     }
 

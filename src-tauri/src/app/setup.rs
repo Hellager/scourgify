@@ -2,7 +2,11 @@ use std::sync::Mutex;
 
 use tauri::Manager;
 
-use super::{alert, notifier, scheduler::AutoCleanScheduler, settings, theme, tray, window};
+use super::{
+    alert, notifier,
+    scheduler::{AutoCleanMonitor, AutoCleanScheduler},
+    settings, theme, tray, window,
+};
 use crate::{
     cleanup::AutoCleanState,
     config::{AppMode, Config},
@@ -24,6 +28,9 @@ pub(crate) fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     app.manage(privacy);
     app.manage(AutoCleanState::default());
     app.manage(AutoCleanScheduler::start(app.handle().clone())?);
+    let auto_clean_monitor = AutoCleanMonitor::start(app.handle().clone())?;
+    auto_clean_monitor.trigger()?;
+    app.manage(auto_clean_monitor);
     let quick_access_cache = QuickAccessCache::default();
     app.manage(quick_access_cache.clone());
     app.manage(QuickAccessWatchers::start(

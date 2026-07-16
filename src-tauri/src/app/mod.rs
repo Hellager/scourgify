@@ -34,13 +34,17 @@ pub fn run() {
             let mode = app
                 .try_state::<Mutex<Config>>()
                 .and_then(|config| config.lock().ok().map(|config| config.app_mode))
-                .unwrap_or(AppMode::Minimal);
-            if matches!(mode, AppMode::Dashboard) {
-                if let Err(error) = window::show_dashboard(app) {
-                    log::warn!("failed to focus dashboard for secondary instance: {error}");
+                .unwrap_or(AppMode::Tray);
+            let result = match mode {
+                AppMode::Dashboard => window::show_dashboard(app),
+                AppMode::Grid => window::show_grid(app),
+                AppMode::Tray => {
+                    alert::info(app, "Scourgify", "Scourgify is already running.");
+                    Ok(())
                 }
-            } else {
-                alert::info(app, "Scourgify", "Scourgify is already running.");
+            };
+            if let Err(error) = result {
+                log::warn!("failed to apply app mode for secondary instance: {error}");
             }
         }))
         .invoke_handler(crate::cmd::handler())

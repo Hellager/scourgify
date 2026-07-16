@@ -45,12 +45,7 @@ import {
   REFRESH_DASHBOARD_EVENT,
   REFRESH_HISTORY_EVENT,
 } from "@/lib/app-events";
-import {
-  configSchema,
-  defaultConfig,
-  type ConfigForm,
-  type SidebarVariant,
-} from "@/lib/config";
+import { configSchema, defaultConfig, type ConfigForm } from "@/lib/config";
 import { useI18n } from "@/lib/i18n";
 import { invokeCommand } from "@/lib/commands";
 
@@ -146,10 +141,7 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
   return (
     <AppShellContext.Provider value={context}>
       <SidebarProvider>
-        <Sidebar
-          collapsible="icon"
-          variant={config.sidebar_variant as SidebarVariant}
-        >
+        <Sidebar collapsible="icon" variant="sidebar">
           <SidebarHeader>
             <div className="px-2 py-1">
               <div className="text-sm font-semibold">Scourgify</div>

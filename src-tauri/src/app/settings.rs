@@ -4,7 +4,11 @@ use anyhow::{Context, Result};
 use tauri::{Emitter, Manager, Runtime};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
-use super::{i18n, scheduler::AutoCleanScheduler, window};
+use super::{
+    i18n,
+    scheduler::{AutoCleanMonitor, AutoCleanScheduler},
+    window,
+};
 use crate::{
     config::{self, AppMode, Config},
     db::{self, DbState},
@@ -54,6 +58,11 @@ pub(crate) fn update<R: Runtime>(
         if let Some(scheduler) = app.try_state::<AutoCleanScheduler>() {
             if let Err(error) = scheduler.reschedule() {
                 log::warn!("failed to reschedule auto-clean after config update: {error:#}");
+            }
+        }
+        if let Some(monitor) = app.try_state::<AutoCleanMonitor>() {
+            if let Err(error) = monitor.trigger() {
+                log::warn!("failed to trigger monitored auto-clean after config update: {error:#}");
             }
         }
     }

@@ -539,7 +539,9 @@ export function HistoryPage() {
               {t("history")}
             </h2>
             <span className="text-sm tabular-nums text-muted-foreground">
-              {t("historyCount", { count: total })}
+              {total === overallTotal
+                ? t("historyCount", { count: overallTotal })
+                : `${t("historyCount", { count: total })} / ${overallTotal}`}
             </span>
           </div>
           <div className="overflow-x-auto rounded-md border">

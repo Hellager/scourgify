@@ -6,13 +6,13 @@ use std::{
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
         Mutex,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::{
-    cleanup::{self, AutoCleanResult, AutoCleanState},
-    config::{self, AutoCleanSchedule, Config},
+    cleanup::{self, AutoCleanError, AutoCleanResult, AutoCleanState},
+    config::{self, AutoCleanPolicy, Config},
     db::DbState,
     error::report_background_error,
     privacy::PrivacyManager,
@@ -21,22 +21,22 @@ use crate::{
 
 pub const AUTO_CLEAN_FINISHED_EVENT: &str = "auto-clean-finished";
 
-const STARTUP_DELAY: Duration = Duration::from_secs(30);
 const ERROR_RETRY_DELAY: Duration = Duration::from_secs(60);
 
 pub struct AutoCleanScheduler {
     sender: Sender<SchedulerMessage>,
 }
 
+pub struct AutoCleanMonitor {
+    sender: Sender<()>,
+}
+
 impl AutoCleanScheduler {
     pub fn start<R: Runtime>(app: AppHandle<R>) -> Result<Self> {
-        let initial_schedule = config_snapshot(&app)?.auto_clean;
-        let startup_deadline = matches!(initial_schedule, AutoCleanSchedule::OnStartup)
-            .then(|| Instant::now() + STARTUP_DELAY);
         let (sender, receiver) = mpsc::channel();
         std::thread::Builder::new()
             .name("scourgify-auto-clean".to_string())
-            .spawn(move || run_worker(app, receiver, startup_deadline))
+            .spawn(move || run_worker(app, receiver))
             .context("failed to start auto-clean scheduler")?;
         Ok(Self { sender })
     }
@@ -45,6 +45,23 @@ impl AutoCleanScheduler {
         self.sender
             .send(SchedulerMessage::Reschedule)
             .context("auto-clean scheduler is unavailable")
+    }
+}
+
+impl AutoCleanMonitor {
+    pub fn start<R: Runtime>(app: AppHandle<R>) -> Result<Self> {
+        let (sender, receiver) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("scourgify-auto-clean-monitor".to_string())
+            .spawn(move || run_monitor_worker(app, receiver))
+            .context("failed to start auto-clean monitor")?;
+        Ok(Self { sender })
+    }
+
+    pub fn trigger(&self) -> Result<()> {
+        self.sender
+            .send(())
+            .context("auto-clean monitor is unavailable")
     }
 }
 
@@ -61,6 +78,12 @@ pub struct AutoCleanFinished {
 
 pub fn run_now<R: Runtime>(app: &AppHandle<R>) -> Result<AutoCleanResult> {
     let config = config_snapshot(app)?;
+    let result = execute(app, &config)?;
+    finish(app, &config, &result)?;
+    Ok(result)
+}
+
+fn execute<R: Runtime>(app: &AppHandle<R>, config: &Config) -> Result<AutoCleanResult> {
     let database = app.state::<DbState>();
     let privacy = app.state::<PrivacyManager>();
     let auto_clean = app.state::<AutoCleanState>();
@@ -73,16 +96,52 @@ pub fn run_now<R: Runtime>(app: &AppHandle<R>) -> Result<AutoCleanResult> {
     if let Some(cache) = app.try_state::<QuickAccessCache>() {
         cache.refresh_after_write(app, "all");
     }
-    super::notifier::notify_auto_clean(app, &config, &result);
-    record_completion(app, &result)?;
     Ok(result)
 }
 
-fn run_worker<R: Runtime>(
-    app: AppHandle<R>,
-    receiver: Receiver<SchedulerMessage>,
-    mut startup_deadline: Option<Instant>,
-) {
+fn finish<R: Runtime>(app: &AppHandle<R>, config: &Config, result: &AutoCleanResult) -> Result<()> {
+    super::notifier::notify_auto_clean(app, config, result);
+    record_completion(app, result)?;
+    Ok(())
+}
+
+fn run_monitor_worker<R: Runtime>(app: AppHandle<R>, receiver: Receiver<()>) {
+    while receiver.recv().is_ok() {
+        while receiver.try_recv().is_ok() {}
+        loop {
+            match run_monitor_once(&app) {
+                Ok(()) => break,
+                Err(error)
+                    if matches!(
+                        error.downcast_ref::<AutoCleanError>(),
+                        Some(AutoCleanError::AlreadyRunning)
+                    ) =>
+                {
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                Err(error) => {
+                    let incident_id = report_background_error("monitored_auto_clean", &error);
+                    log::warn!("monitored auto-clean skipped incident_id={incident_id}");
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn run_monitor_once<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
+    let config = config_snapshot(app)?;
+    if config.auto_clean != AutoCleanPolicy::Monitor {
+        return Ok(());
+    }
+    let result = execute(app, &config)?;
+    if result.total > 0 || result.has_issues() {
+        finish(app, &config, &result)?;
+    }
+    Ok(())
+}
+
+fn run_worker<R: Runtime>(app: AppHandle<R>, receiver: Receiver<SchedulerMessage>) {
     let mut last_interval_attempt = None;
 
     loop {
@@ -96,16 +155,11 @@ fn run_worker<R: Runtime>(
                 }
             }
         };
-        if !matches!(config.auto_clean, AutoCleanSchedule::OnStartup) {
-            startup_deadline = None;
-        }
         let delay = match next_delay(
             &config.auto_clean,
             config.auto_clean_last_run,
             last_interval_attempt,
-            startup_deadline,
             Utc::now(),
-            Instant::now(),
         ) {
             Ok(delay) => delay,
             Err(error) => {
@@ -134,9 +188,10 @@ fn run_worker<R: Runtime>(
             continue;
         }
         match config.auto_clean {
-            AutoCleanSchedule::OnStartup => startup_deadline = None,
-            AutoCleanSchedule::EveryHours { .. } => last_interval_attempt = Some(Utc::now()),
-            AutoCleanSchedule::Disabled | AutoCleanSchedule::DailyAt { .. } => {}
+            AutoCleanPolicy::EveryHours { .. } => last_interval_attempt = Some(Utc::now()),
+            AutoCleanPolicy::Disabled
+            | AutoCleanPolicy::Monitor
+            | AutoCleanPolicy::DailyAt { .. } => {}
         }
 
         if let Err(error) = run_now(&app) {
@@ -147,23 +202,18 @@ fn run_worker<R: Runtime>(
 }
 
 fn next_delay(
-    schedule: &AutoCleanSchedule,
+    schedule: &AutoCleanPolicy,
     last_run: Option<DateTime<Utc>>,
     last_interval_attempt: Option<DateTime<Utc>>,
-    startup_deadline: Option<Instant>,
     now_utc: DateTime<Utc>,
-    now_instant: Instant,
 ) -> Result<Option<Duration>> {
     match schedule {
-        AutoCleanSchedule::Disabled => Ok(None),
-        AutoCleanSchedule::OnStartup => {
-            Ok(startup_deadline.map(|deadline| deadline.saturating_duration_since(now_instant)))
-        }
-        AutoCleanSchedule::EveryHours { hours } => {
+        AutoCleanPolicy::Disabled | AutoCleanPolicy::Monitor => Ok(None),
+        AutoCleanPolicy::EveryHours { hours } => {
             let next = next_interval_run(now_utc, last_run, last_interval_attempt, *hours);
             Ok(Some(duration_until(now_utc, next)))
         }
-        AutoCleanSchedule::DailyAt { hour, minute } => {
+        AutoCleanPolicy::DailyAt { hour, minute } => {
             let local_now = now_utc.with_timezone(&Local);
             let next = next_daily_run(&local_now, *hour, *minute)?;
             Ok(Some(duration_until(now_utc, next)))
@@ -330,44 +380,15 @@ mod tests {
     }
 
     #[test]
-    fn disabled_and_startup_schedules_have_expected_waits() {
+    fn disabled_and_monitor_policies_do_not_schedule_runs() {
         let now_utc = Utc.with_ymd_and_hms(2026, 7, 13, 12, 0, 0).unwrap();
-        let now_instant = Instant::now();
 
         assert_eq!(
-            next_delay(
-                &AutoCleanSchedule::Disabled,
-                None,
-                None,
-                None,
-                now_utc,
-                now_instant,
-            )
-            .unwrap(),
+            next_delay(&AutoCleanPolicy::Disabled, None, None, now_utc).unwrap(),
             None
         );
         assert_eq!(
-            next_delay(
-                &AutoCleanSchedule::OnStartup,
-                None,
-                None,
-                Some(now_instant + STARTUP_DELAY),
-                now_utc,
-                now_instant,
-            )
-            .unwrap(),
-            Some(STARTUP_DELAY)
-        );
-        assert_eq!(
-            next_delay(
-                &AutoCleanSchedule::OnStartup,
-                None,
-                None,
-                None,
-                now_utc,
-                now_instant,
-            )
-            .unwrap(),
+            next_delay(&AutoCleanPolicy::Monitor, None, None, now_utc).unwrap(),
             None
         );
     }
