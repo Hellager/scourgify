@@ -2,6 +2,7 @@ mod app;
 mod cleanup;
 mod database;
 mod diagnostics;
+mod grid;
 mod history;
 mod privacy;
 mod quick_access;
@@ -51,6 +52,7 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         database::open_database_directory,
         diagnostics::get_log_directory_status,
         diagnostics::open_log_directory,
+        grid::get_grid_summary,
         rules::get_rules,
         rules::add_rule,
         rules::update_rule,

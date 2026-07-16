@@ -1,113 +1,185 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
-  Clock3,
+  Ban,
+  FileCheck2,
   FileClock,
+  FolderCheck,
   FolderClock,
-  Gauge,
-  ListChecks,
-  PanelTopClose,
-  Play,
-  Settings,
-  Shield,
+  History,
+  Layers3,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { invokeCommand } from "@/lib/commands";
 import { useI18n } from "@/lib/i18n";
 
-type PrivacyState =
-  | "Inactive"
-  | "ActiveFull"
-  | { ActivePartial: { recent: boolean; frequent: boolean } };
+const QUICK_ACCESS_CHANGED_EVENT = "quick-access-changed";
+const AUTO_CLEAN_FINISHED_EVENT = "auto-clean-finished";
+
+interface GridSummary {
+  recent_files: number;
+  quick_access: number;
+  frequent_folders: number;
+  blacklist_rules: number | null;
+  to_clean: number | null;
+  to_clean_recent: number | null;
+  to_clean_frequent: number | null;
+  whitelist_rules: number | null;
+  protected_items: number | null;
+  cleaned_files: number | null;
+  cleaned_total: number | null;
+  cleaned_folders: number | null;
+}
 
 export function GridMode() {
   const { t } = useI18n();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [privacyActive, setPrivacyActive] = useState(false);
+  const [summary, setSummary] = useState<GridSummary | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
 
-  useEffect(() => {
-    void invokeCommand<PrivacyState>("privacy_state")
-      .then((state) => setPrivacyActive(state !== "Inactive"))
-      .catch(() => setPrivacyActive(false));
+  const loadSummary = useCallback(async () => {
+    try {
+      setSummary(await invokeCommand<GridSummary>("get_grid_summary"));
+      setUnavailable(false);
+    } catch {
+      setUnavailable(true);
+    }
   }, []);
 
-  const openDashboard = async (path = "/") => {
-    await invokeCommand("set_app_mode", { mode: "dashboard" });
-    window.location.hash = `#${path}`;
-  };
+  useEffect(() => {
+    void loadSummary();
+    const listeners = [QUICK_ACCESS_CHANGED_EVENT, AUTO_CLEAN_FINISHED_EVENT].map(
+      (event) => listen(event, () => void loadSummary()),
+    );
+    return () => {
+      listeners.forEach((listener) => void listener.then((unlisten) => unlisten()));
+    };
+  }, [loadSummary]);
 
-  const run = async (key: string, action: () => Promise<unknown>) => {
-    setBusy(key);
-    try {
-      await action();
-      toast.success(t("complete"));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const togglePrivacy = async () => {
-    await invokeCommand(privacyActive ? "privacy_exit" : "privacy_enter");
-    setPrivacyActive(!privacyActive);
-  };
-
-  const actions = [
-    { key: "dashboard", icon: Gauge, label: t("dashboard"), action: () => openDashboard() },
-    {
-      key: "recent",
-      icon: FileClock,
-      label: `${t("actionSmartClean")} · ${t("recent")}`,
-      action: () => invokeCommand("smart_clean", { qaType: "recent" }),
-    },
-    {
-      key: "frequent",
-      icon: FolderClock,
-      label: `${t("actionSmartClean")} · ${t("frequent")}`,
-      action: () => invokeCommand("smart_clean", { qaType: "frequent" }),
-    },
-    {
-      key: "auto",
-      icon: Play,
-      label: t("autoCleanRunNow"),
-      action: () => invokeCommand("run_auto_clean_now"),
-    },
-    {
-      key: "privacy",
-      icon: privacyActive ? ShieldCheck : Shield,
-      label: t("privacy"),
-      action: togglePrivacy,
-    },
-    { key: "rules", icon: ListChecks, label: t("rules"), action: () => openDashboard("/rules") },
-    { key: "history", icon: Clock3, label: t("history"), action: () => openDashboard("/history") },
-    { key: "settings", icon: Settings, label: t("settings"), action: () => openDashboard("/settings") },
-    {
-      key: "tray",
-      icon: PanelTopClose,
-      label: t("appModeTray"),
-      action: () => invokeCommand("set_app_mode", { mode: "tray" }),
-    },
-  ];
+  const tiles = useMemo(
+    () => [
+      {
+        key: "recentFiles",
+        icon: FileClock,
+        label: t("recentFiles"),
+        value: summary?.recent_files,
+        detail: unavailable ? t("dataUnavailable") : t("currentItems"),
+      },
+      {
+        key: "quickAccess",
+        icon: Layers3,
+        label: t("quickAccess"),
+        value: summary?.quick_access,
+        detail: unavailable ? t("dataUnavailable") : t("currentTotal"),
+      },
+      {
+        key: "frequentFolders",
+        icon: FolderClock,
+        label: t("frequentFolders"),
+        value: summary?.frequent_folders,
+        detail: unavailable ? t("dataUnavailable") : t("currentItems"),
+      },
+      {
+        key: "blacklistRules",
+        icon: Ban,
+        label: t("blacklistRules"),
+        value: summary?.blacklist_rules,
+        detail:
+          unavailable || summary?.blacklist_rules == null
+            ? t("dataUnavailable")
+            : t("enabledRules"),
+      },
+      {
+        key: "toClean",
+        icon: Trash2,
+        label: t("toClean"),
+        value: summary?.to_clean,
+        detail:
+          unavailable ||
+          summary?.to_clean_recent == null ||
+          summary.to_clean_frequent == null
+            ? t("dataUnavailable")
+            : t("itemTypeSplit", {
+                files: summary.to_clean_recent,
+                folders: summary.to_clean_frequent,
+              }),
+      },
+      {
+        key: "whitelistRules",
+        icon: ShieldCheck,
+        label: t("whitelistRules"),
+        value: summary?.whitelist_rules,
+        detail:
+          unavailable || summary?.protected_items == null
+            ? t("dataUnavailable")
+            : t("protectedItems", { count: summary.protected_items }),
+      },
+      {
+        key: "cleanedFiles",
+        icon: FileCheck2,
+        label: t("cleanedFiles"),
+        value: summary?.cleaned_files,
+        detail:
+          unavailable || summary?.cleaned_files == null
+            ? t("dataUnavailable")
+            : t("retainedHistory"),
+      },
+      {
+        key: "cleanedTotal",
+        icon: History,
+        label: t("totalCleaned"),
+        value: summary?.cleaned_total,
+        detail:
+          unavailable || summary?.cleaned_total == null
+            ? t("dataUnavailable")
+            : t("retainedHistory"),
+      },
+      {
+        key: "cleanedFolders",
+        icon: FolderCheck,
+        label: t("cleanedFolders"),
+        value: summary?.cleaned_folders,
+        detail:
+          unavailable || summary?.cleaned_folders == null
+            ? t("dataUnavailable")
+            : t("retainedHistory"),
+      },
+    ],
+    [summary, t, unavailable],
+  );
 
   return (
     <main className="grid min-h-screen place-items-center bg-background p-5 text-foreground">
-      <div className="grid w-full max-w-lg grid-cols-3 gap-3">
-        {actions.map(({ action, icon: Icon, key, label }) => (
-          <Button
-            className="h-36 min-w-0 flex-col gap-3 whitespace-normal rounded-md px-3 text-center"
-            disabled={busy !== null}
+      <div
+        aria-busy={summary === null && !unavailable}
+        className="grid w-full max-w-lg grid-cols-3 gap-3"
+      >
+        {tiles.map(({ detail, icon: Icon, key, label, value }) => (
+          <section
+            className="flex h-36 min-w-0 flex-col items-center justify-center gap-2 rounded-md border bg-card px-3 text-center text-card-foreground"
             key={key}
-            onClick={() => void run(key, action)}
-            type="button"
-            variant="outline"
           >
-            <Icon className="size-6 shrink-0" />
-            <span className="line-clamp-2 text-sm">{label}</span>
-          </Button>
+            <Icon className="size-5 shrink-0 text-muted-foreground" />
+            <strong className="text-3xl font-semibold tabular-nums">
+              {value ?? "--"}
+            </strong>
+            <div className="min-w-0">
+              <h2 className="line-clamp-2 text-sm font-medium" title={label}>
+                {label}
+              </h2>
+              <p
+                className="mt-0.5 line-clamp-2 break-words text-xs text-muted-foreground"
+                title={detail}
+              >
+                {detail}
+              </p>
+            </div>
+          </section>
         ))}
       </div>
+      <p aria-live="polite" className="sr-only">
+        {unavailable ? t("gridSummaryUnavailable") : ""}
+      </p>
     </main>
   );
 }

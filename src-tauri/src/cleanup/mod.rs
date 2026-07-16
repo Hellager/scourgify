@@ -56,6 +56,25 @@ struct PreparedCleanup {
     skipped_protected: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ClassificationCounts {
+    pub targeted: usize,
+    pub protected: usize,
+}
+
+pub(crate) fn count_classifications(items: &[QaItem], rules: &[Rule]) -> ClassificationCounts {
+    items
+        .iter()
+        .fold(ClassificationCounts::default(), |mut counts, item| {
+            match classify(&item.path, rules) {
+                MatchResult::Targeted { .. } => counts.targeted += 1,
+                MatchResult::Protected { .. } => counts.protected += 1,
+                MatchResult::Neutral => {}
+            }
+            counts
+        })
+}
+
 pub fn list_classified(
     database: &DbState,
     qa_type: &str,
@@ -314,6 +333,27 @@ mod tests {
     }
 
     #[test]
+    fn counts_targeted_and_protected_items() {
+        let rules = [
+            rule(1, "Projects", RuleType::Whitelist),
+            rule(2, "Temp", RuleType::Blacklist),
+        ];
+        let items = [
+            item(r"C:\Projects\report.txt"),
+            item(r"C:\Temp\cache.bin"),
+            item(r"C:\Downloads\notes.txt"),
+        ];
+
+        assert_eq!(
+            count_classifications(&items, &rules),
+            ClassificationCounts {
+                targeted: 1,
+                protected: 1,
+            }
+        );
+    }
+
+    #[test]
     fn cleanup_deduplicates_paths_case_insensitively() {
         let prepared = prepare_cleanup(
             vec![r"C:\Temp\A.txt".to_string(), r"c:\temp\a.TXT".to_string()],
@@ -363,6 +403,15 @@ mod tests {
             rule_type,
             enabled: true,
             created_at: "2026-07-13 00:00:00".to_string(),
+        }
+    }
+
+    fn item(path: &str) -> QaItem {
+        QaItem {
+            path: path.to_string(),
+            name: path.to_string(),
+            last_interaction_at: None,
+            pinned: None,
         }
     }
 }

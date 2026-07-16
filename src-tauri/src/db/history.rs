@@ -192,6 +192,13 @@ pub struct Stats {
     pub rule_hits: Vec<RuleHitStat>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct HistoryTotals {
+    pub total: u64,
+    pub recent_files: u64,
+    pub frequent_folders: u64,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 pub enum StatsRange {
     #[serde(rename = "7d")]
@@ -392,6 +399,10 @@ pub fn clear(connection: &Connection) -> Result<u64> {
 
 pub fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
     super::stats::stats(connection, range)
+}
+
+pub fn totals(connection: &Connection) -> Result<HistoryTotals> {
+    super::stats::totals(connection)
 }
 
 pub fn trim_to(connection: &Connection, retention: usize) -> Result<()> {

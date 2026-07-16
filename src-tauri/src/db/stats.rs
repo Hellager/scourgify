@@ -1,9 +1,30 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 
-use super::history::{RuleHitStat, Stats, StatsRange, StatsTrendPoint};
+use super::history::{HistoryTotals, RuleHitStat, Stats, StatsRange, StatsTrendPoint};
 
 pub(super) fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
+    let totals = totals(connection)?;
+    let (daily_trend, weekly_trend) = if totals.total == 0 {
+        (Vec::new(), Vec::new())
+    } else {
+        (
+            trend(connection, range, false, "daily cleanup trend")?,
+            trend(connection, range, true, "weekly cleanup trend")?,
+        )
+    };
+
+    Ok(Stats {
+        total: totals.total,
+        recent_files: totals.recent_files,
+        frequent_folders: totals.frequent_folders,
+        daily_trend,
+        weekly_trend,
+        rule_hits: rule_hits(connection)?,
+    })
+}
+
+pub(super) fn totals(connection: &Connection) -> Result<HistoryTotals> {
     let (total, recent_files, frequent_folders) = connection
         .query_row(
             "SELECT COUNT(*),
@@ -21,24 +42,11 @@ pub(super) fn stats(connection: &Connection, range: StatsRange) -> Result<Stats>
         )
         .context("failed to count cleanup statistics")?;
 
-    let total = u64::try_from(total).context("cleanup total is negative")?;
-    let (daily_trend, weekly_trend) = if total == 0 {
-        (Vec::new(), Vec::new())
-    } else {
-        (
-            trend(connection, range, false, "daily cleanup trend")?,
-            trend(connection, range, true, "weekly cleanup trend")?,
-        )
-    };
-
-    Ok(Stats {
-        total,
+    Ok(HistoryTotals {
+        total: u64::try_from(total).context("cleanup total is negative")?,
         recent_files: u64::try_from(recent_files).context("recent file total is negative")?,
         frequent_folders: u64::try_from(frequent_folders)
             .context("frequent folder total is negative")?,
-        daily_trend,
-        weekly_trend,
-        rule_hits: rule_hits(connection)?,
     })
 }
 
