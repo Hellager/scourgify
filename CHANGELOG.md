@@ -1,6 +1,23 @@
 # Changelog
 
-## 0.5.0 - Unreleased
+## 0.6.0 - 2026-07-16
+
+- Reorganized the Rust backend by application, command, cleanup, configuration, database, and Quick Access responsibilities.
+- Standardized all Tauri commands on structured success results and correlated `CommandError` responses, with stable error codes, incident IDs, complete local error chains, and detailed Wincent error mapping.
+- Expanded Quick Access operations to add Recent Files or Frequent Folders by type, expose pin state and rich destination-list metadata, report post-mutation warnings correctly, improve restore reports, and enable deep `.lnk` cleanup by default.
+- Added a three-second Quick Access watcher and shared cache that refreshes only after detected changes and notifies the frontend, while retaining explicit fresh reads.
+- Redesigned configuration around Dashboard, Grid, and Tray modes; removed `sidebar_variant`; made unlimited history retention the default; and separated monitor-based from scheduled automatic cleanup.
+- Added the read-only Grid summary command and nine-metric information view.
+- Migrated SQLite to schema v3 with cleanup-run history, entry-to-run correlation, permanent lifetime totals, startup interruption recovery, filtered pagination, and streaming CSV/JSON exports through read-only connections and temporary files.
+- Added Debug-only real/mock backend switching with isolated temporary SQLite storage, controllable Quick Access events, fixed-size randomized fixtures from `fake-rs`, and a frontend Mock Lab; release builds exclude Mock commands and UI.
+
+### Breaking changes
+
+- Tauri command error and success contracts are now structured and may require callers to update their response handling.
+- Configuration no longer accepts `sidebar_variant`; legacy app modes and startup-only auto-clean values are migrated to supported values.
+- `history_retention = 0` now explicitly means unlimited retention, while positive values retain only the latest records and runs.
+
+## 0.5.0 - 2026-07-14
 
 - Added automatic cleanup schedules for startup, recurring hourly intervals, and daily fixed times, with runtime rescheduling and last-run tracking.
 - Added a shared automatic cleanup service with privacy-mode, database-availability, and concurrency guards, plus aggregated history and notification results.

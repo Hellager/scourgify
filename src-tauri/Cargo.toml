@@ -1,6 +1,6 @@
 [package]
 name = "Scourgify"
-version = "0.4.5"
+version = "0.6.0"
 description = "Rule-driven Windows Quick Access cleaner"
 authors = ["Stein Gu"]
 edition = "2021"
