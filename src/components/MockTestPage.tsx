@@ -40,11 +40,24 @@ interface QaItem {
   pinned: boolean | null;
 }
 
+interface QaItemMetadata {
+  path: string;
+  access_count: number;
+  score: number | null;
+  recent_rank: number;
+  mru_position: number;
+  pinned: boolean;
+  pin_order: number | null;
+  warning_count: number;
+}
+
 interface MockSnapshot {
   scenario: MockScenario;
   revision: number;
   recent: QaItem[];
   frequent: QaItem[];
+  recent_metadata: QaItemMetadata[];
+  frequent_metadata: QaItemMetadata[];
   visibility: {
     recent: boolean;
     frequent: boolean;
@@ -119,9 +132,23 @@ export function MockTestPage() {
 
   const enabled = state?.enabled ?? false;
   const snapshot = state?.snapshot;
+  const metadata = new Map(
+    [
+      ...(snapshot?.recent_metadata ?? []),
+      ...(snapshot?.frequent_metadata ?? []),
+    ].map((item) => [item.path, item]),
+  );
   const items = [
-    ...(snapshot?.recent.map((item) => ({ ...item, type: "Recent" })) ?? []),
-    ...(snapshot?.frequent.map((item) => ({ ...item, type: "Frequent" })) ?? []),
+    ...(snapshot?.recent.map((item) => ({
+      ...item,
+      metadata: metadata.get(item.path),
+      type: "Recent",
+    })) ?? []),
+    ...(snapshot?.frequent.map((item) => ({
+      ...item,
+      metadata: metadata.get(item.path),
+      type: "Frequent",
+    })) ?? []),
   ];
 
   return (
@@ -262,7 +289,11 @@ export function MockTestPage() {
                   <TableHead>Type</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Path</TableHead>
+                  <TableHead>Last used</TableHead>
+                  <TableHead>Access</TableHead>
+                  <TableHead>Score</TableHead>
                   <TableHead>Pinned</TableHead>
+                  <TableHead>Warnings</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -274,12 +305,20 @@ export function MockTestPage() {
                       <TableCell className="max-w-72 truncate" title={item.path}>
                         {item.path}
                       </TableCell>
+                      <TableCell>{formatTimestamp(item.last_interaction_at)}</TableCell>
+                      <TableCell>{item.metadata?.access_count ?? "-"}</TableCell>
+                      <TableCell>
+                        {item.metadata?.score == null
+                          ? "-"
+                          : item.metadata.score.toFixed(2)}
+                      </TableCell>
                       <TableCell>{item.pinned == null ? "-" : item.pinned ? "Yes" : "No"}</TableCell>
+                      <TableCell>{item.metadata?.warning_count ?? "-"}</TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell className="h-24 text-center text-muted-foreground" colSpan={4}>
+                    <TableCell className="h-24 text-center text-muted-foreground" colSpan={8}>
                       No mock items.
                     </TableCell>
                   </TableRow>
@@ -322,6 +361,10 @@ export function MockTestPage() {
       </section>
     </main>
   );
+}
+
+function formatTimestamp(value: number | null) {
+  return value == null ? "-" : new Date(value).toLocaleString();
 }
 
 function EventButton({

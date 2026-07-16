@@ -1,4 +1,8 @@
 use anyhow::{anyhow, Result};
+use fake::{
+    faker::filesystem::en::{DirPath, FileName},
+    Fake, Faker,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
@@ -11,6 +15,9 @@ use crate::{
         QuickAccessError,
     },
 };
+
+const RECENT_FILE_COUNT: usize = 20;
+const FREQUENT_FOLDER_COUNT: usize = 8;
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -77,7 +84,10 @@ impl MockQuickAccessBackend {
             .data
             .write()
             .map_err(|error| anyhow!("mock Quick Access state is unavailable: {error}"))?;
-        data.revision = data.revision.wrapping_add(1);
+        let scenario = data.scenario;
+        let revision = data.revision.wrapping_add(1);
+        *data = seed(scenario);
+        data.revision = revision;
         Ok(snapshot(&data))
     }
 
@@ -86,15 +96,21 @@ impl MockQuickAccessBackend {
             .data
             .write()
             .map_err(|error| anyhow!("mock Quick Access state is unavailable: {error}"))?;
-        let (items, path, pinned) = match qa_type {
-            "recent" => (&mut data.recent, r"C:\Mock\Recent\event.txt", false),
-            "frequent" => (&mut data.frequent, r"C:\Mock\Folders\Event", true),
+        let revision = data.revision as usize;
+        let (items, change_index) = match qa_type {
+            "recent" => (&mut data.recent, RECENT_FILE_COUNT + revision),
+            "frequent" => (&mut data.frequent, FREQUENT_FOLDER_COUNT + revision),
             _ => return Err(QuickAccessError::UnsupportedWriteType(qa_type.to_string()).into()),
         };
-        if items.iter().any(|item| item.path == path) {
-            items.retain(|item| item.path != path);
+        let changed = if qa_type == "recent" {
+            random_file(change_index)
         } else {
-            items.push(item(path, pinned));
+            random_folder(change_index)
+        };
+        if let Some(first) = items.first_mut() {
+            *first = changed;
+        } else {
+            items.push(changed);
         }
         sync_metadata(&mut data);
         data.revision = data.revision.wrapping_add(1);
@@ -310,27 +326,21 @@ fn snapshot(data: &MockData) -> MockSnapshot {
 }
 
 fn seed(scenario: MockScenario) -> MockData {
-    let recent = if scenario == MockScenario::Empty {
-        Vec::new()
+    let recent = if scenario != MockScenario::Empty {
+        (0..RECENT_FILE_COUNT).map(random_file).collect()
     } else {
-        vec![
-            item(r"C:\Mock\Recent\report.docx", false),
-            item(r"C:\Mock\Recent\notes.txt", false),
-        ]
-    };
-    let frequent = if scenario == MockScenario::Empty {
         Vec::new()
-    } else {
-        vec![
-            item(r"C:\Mock\Folders\Projects", true),
-            item(r"C:\Mock\Folders\Archive", false),
-        ]
     };
-    MockData {
+    let frequent = if scenario != MockScenario::Empty {
+        (0..FREQUENT_FOLDER_COUNT).map(random_folder).collect()
+    } else {
+        Vec::new()
+    };
+    let mut data = MockData {
         scenario,
         revision: 1,
-        recent_metadata: recent.iter().map(metadata).collect(),
-        frequent_metadata: frequent.iter().map(metadata).collect(),
+        recent_metadata: Vec::new(),
+        frequent_metadata: Vec::new(),
         recent,
         frequent,
         visibility: QaVisibility {
@@ -338,36 +348,91 @@ fn seed(scenario: MockScenario) -> MockData {
             frequent: true,
             start_recommended: true,
         },
-    }
+    };
+    sync_metadata(&mut data);
+    data
 }
 
 fn item(path: &str, pinned: bool) -> QaItem {
     QaItem {
         path: path.to_string(),
         name: path.rsplit('\\').next().unwrap_or(path).to_string(),
-        last_interaction_at: Some(1_735_689_600_000),
+        last_interaction_at: Some(random_timestamp()),
         pinned: path.contains("Folders").then_some(pinned),
     }
 }
 
-fn metadata(item: &QaItem) -> QaItemMetadata {
+fn metadata(item: &QaItem, index: usize) -> QaItemMetadata {
     QaItemMetadata {
         path: item.path.clone(),
         name: item.name.clone(),
         last_interaction_at: item.last_interaction_at,
-        access_count: 4,
-        score: Some(0.75),
-        recent_rank: 1,
-        mru_position: 1,
+        access_count: (1..=100).fake(),
+        score: Some((0.0..=1.0).fake()),
+        recent_rank: i32::try_from(index + 1).unwrap_or(i32::MAX),
+        mru_position: u64::try_from(index + 1).unwrap_or(u64::MAX),
         pinned: item.pinned.unwrap_or(false),
-        pin_order: item.pinned.filter(|pinned| *pinned).map(|_| 1),
-        warning_count: 0,
+        pin_order: item
+            .pinned
+            .filter(|pinned| *pinned)
+            .map(|_| (1..=20).fake()),
+        warning_count: (0..=2).fake(),
     }
 }
 
+fn random_timestamp() -> u64 {
+    let now = u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or_default();
+    let earliest = now.saturating_sub(90 * 24 * 60 * 60 * 1_000);
+    (earliest..=now).fake()
+}
+
+fn random_file(index: usize) -> QaItem {
+    let generated: String = FileName().fake();
+    let name = unique_component(index, &generated, "item.txt");
+    item(&format!(r"C:\Mock\Recent\{name}"), false)
+}
+
+fn random_folder(index: usize) -> QaItem {
+    let generated: String = DirPath().fake();
+    let generated = generated
+        .split(['/', '\\'])
+        .rfind(|part| !part.is_empty())
+        .unwrap_or("Folder");
+    let name = unique_component(index, generated, "Folder");
+    let pinned: bool = Faker.fake();
+    item(&format!(r"C:\Mock\Folders\{name}"), pinned)
+}
+
+fn unique_component(index: usize, generated: &str, fallback: &str) -> String {
+    let sanitized = generated
+        .chars()
+        .map(|character| match character {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '-',
+            _ => character,
+        })
+        .collect::<String>();
+    let sanitized = sanitized.trim_matches([' ', '.']);
+    let value = if sanitized.is_empty() {
+        fallback
+    } else {
+        sanitized
+    };
+    format!("{:02}-{value}", index + 1)
+}
+
 fn sync_metadata(data: &mut MockData) {
-    data.recent_metadata = data.recent.iter().map(metadata).collect();
-    data.frequent_metadata = data.frequent.iter().map(metadata).collect();
+    data.recent_metadata = data
+        .recent
+        .iter()
+        .enumerate()
+        .map(|(index, item)| metadata(item, index))
+        .collect();
+    data.frequent_metadata = data
+        .frequent
+        .iter()
+        .enumerate()
+        .map(|(index, item)| metadata(item, index))
+        .collect();
 }
 
 fn failure(path: &str, code: ErrorCode) -> QaBatchFailure {
@@ -400,9 +465,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scenario_data_and_mutations_are_deterministic() {
+    fn scenarios_keep_fixed_counts_and_apply_partial_failures() {
         let backend = MockQuickAccessBackend::new();
-        assert_eq!(backend.list_items("recent").unwrap().len(), 2);
+        let snapshot = backend.snapshot().unwrap();
+        assert_eq!(snapshot.recent.len(), RECENT_FILE_COUNT);
+        assert_eq!(snapshot.frequent.len(), FREQUENT_FOLDER_COUNT);
+        assert_eq!(snapshot.recent_metadata.len(), RECENT_FILE_COUNT);
+        assert_eq!(snapshot.frequent_metadata.len(), FREQUENT_FOLDER_COUNT);
+        assert!(snapshot
+            .recent_metadata
+            .iter()
+            .all(|item| item.access_count >= 1
+                && item.access_count <= 100
+                && item.score.is_some_and(|score| (0.0..=1.0).contains(&score))
+                && item.warning_count <= 2));
 
         backend.set_scenario(MockScenario::PartialFailure).unwrap();
         let paths = backend
@@ -413,9 +489,12 @@ mod tests {
             .collect();
         let result = backend.remove_items("recent", paths).unwrap();
 
-        assert_eq!(result.succeeded.len(), 1);
-        assert_eq!(result.failed.len(), 1);
-        assert_eq!(backend.list_items("recent").unwrap().len(), 1);
+        assert_eq!(result.succeeded.len(), RECENT_FILE_COUNT / 2);
+        assert_eq!(result.failed.len(), RECENT_FILE_COUNT / 2);
+        assert_eq!(
+            backend.list_items("recent").unwrap().len(),
+            RECENT_FILE_COUNT / 2
+        );
     }
 
     #[test]
@@ -425,7 +504,8 @@ mod tests {
 
         let changed = backend.trigger_change("frequent").unwrap();
 
-        assert_eq!(changed.frequent.len(), before.frequent.len() + 1);
+        assert_eq!(changed.frequent.len(), before.frequent.len());
+        assert_ne!(changed.frequent[0].path, before.frequent[0].path);
         assert_eq!(changed.revision, before.revision + 1);
         assert_eq!(changed.frequent_metadata.len(), changed.frequent.len());
     }

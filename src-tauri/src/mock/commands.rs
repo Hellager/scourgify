@@ -139,36 +139,24 @@ pub(crate) fn trigger_mock_event(
     ensure_enabled(backend.inner())?;
     match event {
         MockEventKind::QuickAccessRecent => {
-            let changed = backend
+            backend
                 .mock()
                 .trigger_change("recent")
                 .map_err(|error| mock_error("trigger_mock_event", error))?;
             cache
                 .items(&app, backend.inner(), "recent", true)
                 .map_err(|error| mock_error("trigger_mock_event", error))?;
-            if changed
-                .recent
-                .iter()
-                .any(|item| item.path.ends_with("event.txt"))
-            {
-                trigger_monitor(&app)?;
-            }
+            trigger_monitor(&app)?;
         }
         MockEventKind::QuickAccessFrequent => {
-            let changed = backend
+            backend
                 .mock()
                 .trigger_change("frequent")
                 .map_err(|error| mock_error("trigger_mock_event", error))?;
             cache
                 .items(&app, backend.inner(), "frequent", true)
                 .map_err(|error| mock_error("trigger_mock_event", error))?;
-            if changed
-                .frequent
-                .iter()
-                .any(|item| item.path.ends_with("\\Event"))
-            {
-                trigger_monitor(&app)?;
-            }
+            trigger_monitor(&app)?;
         }
         MockEventKind::AutoCleanFinished => {
             app.emit(

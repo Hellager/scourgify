@@ -157,7 +157,7 @@ mod tests {
         assert_eq!(state.mode(), BackendMode::Mock);
         assert_eq!(
             state.backend().unwrap().list_items("recent").unwrap().len(),
-            2
+            20
         );
     }
 }
