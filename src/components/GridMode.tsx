@@ -103,9 +103,10 @@ export function GridMode() {
     <main className="flex h-screen flex-col bg-border text-foreground">
       <TitleBar
         closeLabel={t("closeWindow")}
-        dashboardLabel={t("dashboard")}
         maximizeLabel={t("maximizeWindow")}
         minimizeLabel={t("minimizeWindow")}
+        mode="grid"
+        switchModeLabel={t("dashboard")}
       />
       <div
         aria-busy={loading}

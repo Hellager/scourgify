@@ -148,9 +148,10 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
       <div className="flex h-svh flex-col">
         <TitleBar
           closeLabel={t("closeWindow")}
-          dashboardLabel={t("dashboard")}
           maximizeLabel={t("maximizeWindow")}
           minimizeLabel={t("minimizeWindow")}
+          mode="dashboard"
+          switchModeLabel={t("appModeGrid")}
         />
         <SidebarProvider className="min-h-0 flex-1">
           <Sidebar
