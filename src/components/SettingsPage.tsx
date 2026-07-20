@@ -2,10 +2,10 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Controller, type Control, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LoaderCircle, Play, Save } from "lucide-react";
+import { LoaderCircle, Play } from "lucide-react";
 import { toast } from "sonner";
 import packageJson from "../../package.json";
-import { PageHeader, useAppShell } from "@/components/AppShell";
+import { useAppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -73,10 +73,16 @@ export function SettingsPage() {
   const [startRecommendedVisible, setStartRecommendedVisible] = useState(true);
   const [updatingVisibility, setUpdatingVisibility] =
     useState<VisibilityQaType | null>(null);
+  const autoSaveReady = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveRef = useRef<() => void>(() => undefined);
+  const saveQueue = useRef(Promise.resolve());
+  const lastSavedConfig = useRef<ConfigForm | null>(null);
   const originalVisibility = useRef<QaVisibility | null>(null);
   const {
     control,
     formState,
+    getValues,
     handleSubmit,
     register,
     reset,
@@ -104,13 +110,14 @@ export function SettingsPage() {
           originalVisibility.current = visibility;
           setPrivacyActive(privacyState !== "Inactive");
           setStartRecommendedVisible(visibility.start_recommended);
-          reset(
-            configSchema.parse({
-              ...config,
-              show_recent_files: visibility.recent,
-              show_frequent_folders: visibility.frequent,
-            }),
-          );
+          const parsed = configSchema.parse({
+            ...config,
+            show_recent_files: visibility.recent,
+            show_frequent_folders: visibility.frequent,
+          });
+          lastSavedConfig.current = parsed;
+          reset(parsed);
+          autoSaveReady.current = true;
         }
       })
       .catch((error) => toast.error(errorMessage(error)))
@@ -257,8 +264,9 @@ export function SettingsPage() {
     }
   };
 
-  const save = handleSubmit(async (values) => {
+  const persist = async (values: ConfigForm) => {
     try {
+      const previousConfig = lastSavedConfig.current;
       const visibilityChanged =
         originalVisibility.current &&
         (originalVisibility.current.recent !== values.show_recent_files ||
@@ -283,7 +291,14 @@ export function SettingsPage() {
         nextConfig: values,
       });
       const parsed = configSchema.parse(saved);
-      reset(parsed);
+      lastSavedConfig.current = parsed;
+      if (JSON.stringify(getValues()) === JSON.stringify(values)) {
+        reset(parsed);
+      } else {
+        setValue("auto_clean_last_run", parsed.auto_clean_last_run, {
+          shouldDirty: false,
+        });
+      }
       setShellConfig(parsed);
       originalVisibility.current = {
         recent: values.show_recent_files,
@@ -297,42 +312,47 @@ export function SettingsPage() {
       }
       if (
         values.notifications_enabled &&
+        !previousConfig?.notifications_enabled &&
         !(await requestNotificationPermission())
       ) {
         toast.warning(t("notificationPermissionDenied"));
       }
-      toast.success(t("settingsSaved"));
     } catch (error) {
       toast.error(errorMessage(error));
     }
+  };
+
+  const save = handleSubmit((values) => {
+    saveQueue.current = saveQueue.current.then(() => persist(values));
+    return saveQueue.current;
   });
+  saveRef.current = () => void save();
+
+  useEffect(() => {
+    const subscription = watch((_values, { name }) => {
+      if (
+        !autoSaveReady.current ||
+        !name ||
+        name === "auto_clean_last_run"
+      ) {
+        return;
+      }
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+      }
+      saveTimer.current = setTimeout(() => saveRef.current(), 300);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+      }
+    };
+  }, [watch]);
 
   return (
-    <>
-      <PageHeader
-        actions={
-          <Button
-            disabled={
-              loading ||
-              formState.isSubmitting ||
-              updatingVisibility !== null
-            }
-            form="settings-form"
-            type="submit"
-          >
-            <Save />
-            {t("save")}
-          </Button>
-        }
-        subtitle={t("settingsSubtitle")}
-        title={t("settings")}
-      />
-
-      <form
-        className="mx-auto grid max-w-5xl gap-4 p-6"
-        id="settings-form"
-        onSubmit={(event) => void save(event)}
-      >
+    <div className="mx-auto grid max-w-5xl gap-4 p-6">
         <Section title={t("general")}>
           <SelectControl
             control={control}
@@ -349,7 +369,7 @@ export function SettingsPage() {
           <SelectControl
             control={control}
             field={{
-              label: t("language"),
+              label: t("displayLanguage"),
               name: "language",
               options: [
                 { label: "English", value: "en-US" },
@@ -368,6 +388,18 @@ export function SettingsPage() {
               options: [
                 { label: t("hideToTray"), value: "hide" },
                 { label: t("quitApp"), value: "quit" },
+              ],
+            }}
+          />
+          <SelectControl
+            control={control}
+            field={{
+              label: t("theme"),
+              name: "theme",
+              options: [
+                { label: t("system"), value: "system" },
+                { label: t("light"), value: "light" },
+                { label: t("dark"), value: "dark" },
               ],
             }}
           />
@@ -505,21 +537,6 @@ export function SettingsPage() {
               {t(runningAutoClean ? "autoCleanRunning" : "autoCleanRunNow")}
             </Button>
           </div>
-        </Section>
-
-        <Section title={t("appearance")}>
-          <SelectControl
-            control={control}
-            field={{
-              label: t("theme"),
-              name: "theme",
-              options: [
-                { label: t("system"), value: "system" },
-                { label: t("light"), value: "light" },
-                { label: t("dark"), value: "dark" },
-              ],
-            }}
-          />
         </Section>
 
         <Section title={t("visibility")}>
@@ -674,8 +691,7 @@ export function SettingsPage() {
             </Button>
           </div>
         </Section>
-      </form>
-    </>
+    </div>
   );
 }
 

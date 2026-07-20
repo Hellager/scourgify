@@ -133,7 +133,7 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
     { icon: Gauge, label: t("dataCenter"), path: "/" },
     { icon: ShieldCheck, label: t("rules"), path: "/rules" },
     { icon: History, label: t("history"), path: "/history" },
-    { icon: Settings, label: t("settings"), path: "/settings" },
+    { icon: Settings, label: t("preferences"), path: "/settings" },
     ...(import.meta.env.DEV
       ? [{ icon: FlaskConical, label: "Mock Lab", path: "/mock" }]
       : []),

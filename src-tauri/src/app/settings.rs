@@ -24,11 +24,12 @@ pub(crate) fn update<R: Runtime>(
 ) -> Result<Config> {
     next.language = config::normalize_language(&next.language);
     next.validate().context("invalid application settings")?;
-    let (auto_start, language, history_retention, auto_clean) = {
+    let (app_mode, auto_start, language, history_retention, auto_clean) = {
         let current = state
             .lock()
             .map_err(|error| anyhow::anyhow!("config state lock poisoned: {error}"))?;
         (
+            current.app_mode,
             current.auto_start,
             current.language.clone(),
             current.history_retention,
@@ -67,7 +68,9 @@ pub(crate) fn update<R: Runtime>(
             }
         }
     }
-    window::apply_strategy(app, next.app_mode).context("failed to apply window strategy")?;
+    if app_mode != next.app_mode {
+        window::apply_strategy(app, next.app_mode).context("failed to apply window strategy")?;
+    }
     if language != next.language {
         emit_language_changed(app, &next.language);
     }
