@@ -38,7 +38,10 @@ export function TitleBar({
       >
         Scourgify
       </h1>
-      <div className="pointer-events-none flex h-full items-center justify-end opacity-0 transition-opacity duration-300 ease-in-out group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100">
+      <div
+        className="pointer-events-none flex h-full items-center justify-end opacity-0 transition-opacity duration-300 ease-in-out group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
+        data-tauri-drag-region
+      >
         <Button
           aria-label={dashboardLabel}
           className="h-8 w-10 rounded-none border-0 bg-clip-border hover:bg-foreground/10"
