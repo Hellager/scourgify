@@ -8,7 +8,6 @@ import {
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { Link } from "react-router-dom";
 import {
   type Column,
   type ColumnDef,
@@ -45,13 +44,10 @@ import {
   Pin,
   PinOff,
   Plus,
-  RefreshCw,
   RotateCcw,
   Search,
-  Settings,
   ShieldCheck,
   Sparkles,
-  SlidersHorizontal,
   Target,
   Trash2,
 } from "lucide-react";
@@ -97,12 +93,7 @@ import {
   notifyOperationComplete,
   notifyPartialFailure,
 } from "@/lib/notifications";
-import {
-  dispatchAppEvent,
-  OPEN_CONFIG_DRAWER_EVENT,
-  QUICK_ACCESS_CHANGED_EVENT,
-  REFRESH_DASHBOARD_EVENT,
-} from "@/lib/app-events";
+import { QUICK_ACCESS_CHANGED_EVENT, REFRESH_DASHBOARD_EVENT } from "@/lib/app-events";
 import { type I18nKey, useI18n } from "@/lib/i18n";
 import {
   commandIssueMessage,
@@ -110,7 +101,7 @@ import {
   type CommandWarningPayload,
   invokeCommand,
 } from "@/lib/commands";
-import { PageHeader, useAppShell } from "@/components/AppShell";
+import { useAppShell } from "@/components/AppShell";
 import {
   DatabaseRecoveryPanel,
   type DatabaseStatus,
@@ -266,7 +257,6 @@ export function Dashboard() {
     pageSize: 20,
   });
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
-  const refreshTriggerRef = useRef<HTMLButtonElement | null>(null);
   const actionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const databaseAvailable = database?.available ?? true;
 
@@ -826,50 +816,6 @@ export function Dashboard() {
 
   return (
     <>
-      <PageHeader
-        actions={
-          <>
-          <Button
-            aria-label={t("openAppearanceDrawer")}
-            onClick={() => dispatchAppEvent(OPEN_CONFIG_DRAWER_EVENT)}
-            size="icon-sm"
-            type="button"
-            variant="outline"
-          >
-            <SlidersHorizontal />
-          </Button>
-          <Button
-            aria-label={t("refreshQuickAccess")}
-            disabled={loading}
-            onClick={() => void refreshAll(true)}
-            ref={refreshTriggerRef}
-            size="icon-sm"
-            type="button"
-            variant="outline"
-          >
-            <RefreshCw className={loading ? "animate-spin" : ""} />
-          </Button>
-          <Button
-            aria-label={t("openSettings")}
-            render={<Link to="/settings" />}
-            size="icon-sm"
-            type="button"
-            variant="outline"
-          >
-            <Settings />
-          </Button>
-          <Link
-            className="text-sm text-muted-foreground hover:text-foreground"
-            to="/about"
-          >
-            {t("about")}
-          </Link>
-          </>
-        }
-        subtitle={t("dashboard")}
-        title="Scourgify"
-      />
-
       <section className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
         <CountCard label={t("recentFiles")} value={counts.recent} />
         <CountCard label={t("frequentFolders")} value={counts.frequent} />
@@ -1182,7 +1128,7 @@ export function Dashboard() {
         finalFocus={() =>
           actionTriggerRef.current && !actionTriggerRef.current.disabled
             ? actionTriggerRef.current
-            : refreshTriggerRef.current
+            : null
         }
         isFrequent={activeTab === "frequent"}
         onClose={() => setPendingAction(null)}

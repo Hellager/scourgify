@@ -14,9 +14,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import {
   Gauge,
   History,
-  Info,
   FlaskConical,
-  Paintbrush,
   Settings,
   ShieldCheck,
 } from "lucide-react";
@@ -30,13 +28,11 @@ import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
-  SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-  SidebarSeparator,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import {
@@ -134,7 +130,7 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
     [config, updateDashboardSummary],
   );
   const navigation = [
-    { icon: Gauge, label: t("dashboard"), path: "/" },
+    { icon: Gauge, label: t("dataCenter"), path: "/" },
     { icon: ShieldCheck, label: t("rules"), path: "/rules" },
     { icon: History, label: t("history"), path: "/history" },
     { icon: Settings, label: t("settings"), path: "/settings" },
@@ -159,15 +155,6 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
             collapsible="icon"
             variant="sidebar"
           >
-            <SidebarHeader>
-              <div className="px-2 py-1">
-                <div className="text-sm font-semibold">Scourgify</div>
-                <div className="text-xs text-muted-foreground">
-                  {t("quickAccess")}
-                </div>
-              </div>
-            </SidebarHeader>
-            <SidebarSeparator />
             <SidebarContent>
               <SidebarGroup>
                 <SidebarGroupLabel>{t("commandNavigation")}</SidebarGroupLabel>
@@ -185,27 +172,6 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
                         </SidebarMenuButton>
                       </SidebarMenuItem>
                     ))}
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        render={<Link to="/about" />}
-                        tooltip={t("about")}
-                      >
-                        <Info />
-                        <span>{t("about")}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        onClick={() =>
-                          dispatchAppEvent(OPEN_CONFIG_DRAWER_EVENT)
-                        }
-                        tooltip={t("appearance")}
-                        type="button"
-                      >
-                        <Paintbrush />
-                        <span>{t("appearance")}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
                   </SidebarMenu>
                 </SidebarGroupContent>
               </SidebarGroup>
@@ -225,6 +191,9 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
                   </div>
                 </SidebarGroupContent>
               </SidebarGroup>
+              <div className="mt-auto px-2 pb-2">
+                <SidebarTrigger className="w-full justify-start" />
+              </div>
             </SidebarContent>
           </Sidebar>
           <SidebarInset className="min-h-0 overflow-auto bg-background text-foreground">
@@ -259,7 +228,6 @@ export function PageHeader({
   return (
     <header className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b px-6 py-2">
       <div className="flex min-w-0 items-center gap-3">
-        <SidebarTrigger />
         <div className="min-w-0">
           <h1 className="truncate text-base font-semibold">{title}</h1>
           {subtitle ? (
