@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useTheme } from "next-themes";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
   Gauge,
@@ -70,6 +71,7 @@ const AppShellContext = createContext<AppShellContextValue | null>(null);
 
 export function AppShell({ dashboard }: { dashboard: ReactNode }) {
   const { t } = useI18n();
+  const { setTheme } = useTheme();
   const location = useLocation();
   const [config, setConfig] = useState<ConfigForm>(defaultConfig);
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
@@ -88,6 +90,10 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
         toast.error(error instanceof Error ? error.message : String(error)),
       );
   }, []);
+
+  useEffect(() => {
+    setTheme(config.theme);
+  }, [config.theme, setTheme]);
 
   useEffect(() => {
     const unlisten = listen<AutoCleanFinished>(

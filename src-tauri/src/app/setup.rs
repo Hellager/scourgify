@@ -47,6 +47,7 @@ pub(crate) fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
         .lock()
         .map(|config| config.app_mode)
         .unwrap_or(AppMode::Dashboard);
+    window::install_close_handler(app.handle());
     window::apply_strategy(app.handle(), mode)?;
     tray::build(app.handle())?;
     theme::update_current_window_icon(app.handle());

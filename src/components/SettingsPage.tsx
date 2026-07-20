@@ -360,9 +360,9 @@ export function SettingsPage() {
               label: t("appMode"),
               name: "app_mode",
               options: [
-                { label: t("appModeDashboard"), value: "dashboard" },
-                { label: t("appModeGrid"), value: "grid" },
-                { label: t("appModeTray"), value: "tray" },
+                { label: t("appModeStandard"), value: "dashboard" },
+                { label: t("appModeCompact"), value: "grid" },
+                { label: t("appModeMinimal"), value: "tray" },
               ],
             }}
           />
@@ -394,7 +394,7 @@ export function SettingsPage() {
           <SelectControl
             control={control}
             field={{
-              label: t("theme"),
+              label: t("appearanceDisplay"),
               name: "theme",
               options: [
                 { label: t("system"), value: "system" },
@@ -729,7 +729,11 @@ function SelectControl({
             value={String(formField.value)}
           >
             <SelectTrigger className="w-48">
-              <SelectValue />
+              <SelectValue>
+                {field.options.find(
+                  (option) => option.value === String(formField.value),
+                )?.label ?? String(formField.value)}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {field.options.map((option) => (

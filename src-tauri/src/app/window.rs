@@ -1,6 +1,39 @@
-use tauri::{LogicalSize, Manager, Runtime};
+use std::sync::Mutex;
 
-use crate::config::AppMode;
+use tauri::{LogicalSize, Manager, Runtime, WindowEvent};
+
+use crate::config::{AppMode, CloseBehavior, Config};
+
+pub(crate) fn install_close_handler<R: Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let app_handle = app.clone();
+
+    window.on_window_event(move |event| {
+        if !matches!(event, WindowEvent::CloseRequested { .. }) {
+            return;
+        }
+
+        let behavior = app_handle
+            .try_state::<Mutex<Config>>()
+            .and_then(|config| config.lock().ok().map(|config| config.close_behavior))
+            .unwrap_or(CloseBehavior::Hide);
+        if behavior != CloseBehavior::Hide {
+            return;
+        }
+
+        let WindowEvent::CloseRequested { api, .. } = event else {
+            return;
+        };
+        api.prevent_close();
+        if let Some(window) = app_handle.get_webview_window("main") {
+            if let Err(error) = window.hide() {
+                log::warn!("failed to hide main window on close: {error}");
+            }
+        }
+    });
+}
 
 pub(crate) fn show_dashboard<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {
     show_window(app, "#/", LogicalSize::new(1040.0, 720.0), true)
