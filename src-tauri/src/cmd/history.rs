@@ -62,9 +62,15 @@ pub(crate) fn export_cleanup_runs(
 pub(crate) fn clear_clean_records(
     database: State<'_, DbState>,
 ) -> CommandResult<history::HistoryClearResult> {
-    database
+    let result = database
         .with_connection(history::clear)
-        .map_err(|error| history_error("clear_clean_records", error))
+        .map_err(|error| history_error("clear_clean_records", error))?;
+    log::info!(
+        "cleanup history cleared records={} runs={}",
+        result.clean_records,
+        result.cleanup_runs
+    );
+    Ok(result)
 }
 
 #[tauri::command]

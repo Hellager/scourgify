@@ -435,10 +435,6 @@ fn trim(connection: &Connection, retention: usize) -> Result<()> {
     Ok(())
 }
 
-pub fn trim_to(connection: &Connection, retention: usize) -> Result<()> {
-    trim(connection, retention)
-}
-
 fn read_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanupRun> {
     let status = row.get::<_, String>(4)?;
     Ok(CleanupRun {

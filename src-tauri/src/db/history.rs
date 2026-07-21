@@ -479,7 +479,8 @@ pub fn totals(connection: &Connection) -> Result<HistoryTotals> {
     })
 }
 
-pub fn trim_to(connection: &Connection, retention: usize) -> Result<()> {
+#[cfg(test)]
+fn trim_to(connection: &Connection, retention: usize) -> Result<()> {
     trim(connection, retention)
 }
 

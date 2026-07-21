@@ -19,6 +19,13 @@ pub(crate) fn load<R: Runtime>(app: &AppHandle<R>) -> Result<Config> {
     };
 
     config.language = normalize_language(&config.language);
+    if !config.privacy_mode_cleanup_links {
+        log::info!("enabled fixed privacy-mode .lnk cleanup policy");
+    }
+    if config.history_retention != 0 {
+        log::info!("migrated cleanup history retention to unlimited");
+    }
+    config.enforce_fixed_cleanup_policies();
     config.validate()?;
     save(app, &config)?;
     Ok(config)

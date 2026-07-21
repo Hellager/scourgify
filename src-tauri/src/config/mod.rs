@@ -141,6 +141,11 @@ impl Config {
         }
         self.auto_clean.validate()
     }
+
+    pub(crate) fn enforce_fixed_cleanup_policies(&mut self) {
+        self.privacy_mode_cleanup_links = true;
+        self.history_retention = 0;
+    }
 }
 
 pub fn normalize_language(language: &str) -> String {
@@ -250,6 +255,18 @@ mod tests {
         assert!(config.validate().is_ok());
         config.history_retention = 1_000_001;
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn enforces_fixed_cleanup_policies() {
+        let mut config = Config::new("en-US".to_string());
+        config.privacy_mode_cleanup_links = false;
+        config.history_retention = 100;
+
+        config.enforce_fixed_cleanup_policies();
+
+        assert!(config.privacy_mode_cleanup_links);
+        assert_eq!(config.history_retention, 0);
     }
 
     #[test]

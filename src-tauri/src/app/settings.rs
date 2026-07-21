@@ -11,20 +11,21 @@ use super::{
 };
 use crate::{
     config::{self, AppMode, Config},
-    db::{self, history_runs, DbState},
+    db::DbState,
 };
 
 const LANGUAGE_CHANGED_EVENT: &str = "language-changed";
 
 pub(crate) fn update<R: Runtime>(
     app: &tauri::AppHandle<R>,
-    database: &DbState,
+    _database: &DbState,
     state: &Mutex<Config>,
     mut next: Config,
 ) -> Result<Config> {
     next.language = config::normalize_language(&next.language);
+    next.enforce_fixed_cleanup_policies();
     next.validate().context("invalid application settings")?;
-    let (app_mode, auto_start, language, history_retention, auto_clean) = {
+    let (app_mode, auto_start, language, auto_clean) = {
         let current = state
             .lock()
             .map_err(|error| anyhow::anyhow!("config state lock poisoned: {error}"))?;
@@ -32,19 +33,10 @@ pub(crate) fn update<R: Runtime>(
             current.app_mode,
             current.auto_start,
             current.language.clone(),
-            current.history_retention,
             current.auto_clean.clone(),
         )
     };
 
-    if next.history_retention > 0
-        && (history_retention == 0 || next.history_retention < history_retention)
-    {
-        database.with_connection(|connection| {
-            db::history::trim_to(connection, next.history_retention)?;
-            history_runs::trim_to(connection, next.history_retention)
-        })?;
-    }
     if auto_start != next.auto_start {
         set_auto_start_preference(app, next.auto_start)?;
     }

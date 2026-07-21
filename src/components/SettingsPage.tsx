@@ -2,12 +2,21 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Controller, type Control, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LoaderCircle, Play } from "lucide-react";
+import { LoaderCircle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import packageJson from "../../package.json";
 import { useAppShell } from "@/components/AppShell";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -17,15 +26,11 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
-  type AutoCleanPolicy,
-  configSchema,
-  defaultConfig,
-  type ConfigForm,
-} from "@/lib/config";
-import {
-  type AutoCleanFinished,
-  AUTO_CLEAN_UPDATED_EVENT,
+  dispatchAppEvent,
+  REFRESH_DASHBOARD_EVENT,
+  REFRESH_HISTORY_EVENT,
 } from "@/lib/app-events";
+import { configSchema, defaultConfig, type ConfigForm } from "@/lib/config";
 import { useI18n } from "@/lib/i18n";
 import { requestNotificationPermission } from "@/lib/notifications";
 import { invokeCommand } from "@/lib/commands";
@@ -55,21 +60,15 @@ type PrivacyState =
   | "ActiveFull"
   | { ActivePartial: { recent: boolean; frequent: boolean } };
 
-interface AutoCleanResult {
-  total: number;
-  succeeded: number;
-  failed: number;
-  warnings: number;
-  section_errors: number;
-  history_errors: number;
-}
+type ClearTarget = "logs" | "history";
 
 export function SettingsPage() {
-  const { language, t } = useI18n();
+  const { t } = useI18n();
   const { setConfig: setShellConfig } = useAppShell();
   const [loading, setLoading] = useState(true);
   const [privacyActive, setPrivacyActive] = useState(false);
-  const [runningAutoClean, setRunningAutoClean] = useState(false);
+  const [clearTarget, setClearTarget] = useState<ClearTarget | null>(null);
+  const [clearing, setClearing] = useState(false);
   const [startRecommendedVisible, setStartRecommendedVisible] = useState(true);
   const [updatingVisibility, setUpdatingVisibility] =
     useState<VisibilityQaType | null>(null);
@@ -81,10 +80,8 @@ export function SettingsPage() {
   const originalVisibility = useRef<QaVisibility | null>(null);
   const {
     control,
-    formState,
     getValues,
     handleSubmit,
-    register,
     reset,
     setValue,
     watch,
@@ -94,8 +91,6 @@ export function SettingsPage() {
   });
   const notificationsEnabled = watch("notifications_enabled");
   const notifyOperationComplete = watch("notify_operation_complete");
-  const autoCleanPolicy = watch("auto_clean");
-  const autoCleanLastRun = watch("auto_clean_last_run");
 
   useEffect(() => {
     let active = true;
@@ -131,77 +126,6 @@ export function SettingsPage() {
       active = false;
     };
   }, [reset]);
-
-  useEffect(() => {
-    const updateLastRun = (event: Event) => {
-      const { completed_at } = (event as CustomEvent<AutoCleanFinished>).detail;
-      setValue("auto_clean_last_run", completed_at, { shouldDirty: false });
-    };
-    window.addEventListener(AUTO_CLEAN_UPDATED_EVENT, updateLastRun);
-    return () =>
-      window.removeEventListener(AUTO_CLEAN_UPDATED_EVENT, updateLastRun);
-  }, [setValue]);
-
-  const updateAutoCleanPolicy = (policy: AutoCleanPolicy) => {
-    setValue("auto_clean", policy, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
-  };
-
-  const setAutoCleanEnabled = (enabled: boolean) => {
-    updateAutoCleanPolicy(
-      enabled ? { kind: "monitor" } : { kind: "disabled" },
-    );
-  };
-
-  const setAutoCleanMode = (
-    kind: Exclude<AutoCleanPolicy["kind"], "disabled">,
-  ) => {
-    if (kind === "monitor") {
-      updateAutoCleanPolicy({ kind });
-    } else if (kind === "every_hours") {
-      updateAutoCleanPolicy({
-        kind,
-        hours: autoCleanPolicy.kind === kind ? autoCleanPolicy.hours : 6,
-      });
-    } else {
-      updateAutoCleanPolicy({
-        kind,
-        hour: autoCleanPolicy.kind === kind ? autoCleanPolicy.hour : 8,
-        minute: autoCleanPolicy.kind === kind ? autoCleanPolicy.minute : 0,
-      });
-    }
-  };
-
-  const runAutoClean = async () => {
-    setRunningAutoClean(true);
-    try {
-      const result = await invokeCommand<AutoCleanResult>("run_auto_clean_now");
-      if (result.failed || result.warnings || result.section_errors || result.history_errors) {
-        toast.warning(
-          t("autoCleanCompletedWithIssues", {
-            succeeded: result.succeeded,
-            failed: result.failed,
-            warnings: result.warnings,
-            sectionErrors: result.section_errors,
-            historyErrors: result.history_errors,
-          }),
-        );
-      } else {
-        toast.success(
-          t("autoCleanCompleted", {
-            succeeded: result.succeeded,
-            total: result.total,
-          }),
-        );
-      }
-    } catch (error) {
-      toast.error(errorMessage(error));
-    } finally {
-      setRunningAutoClean(false);
-    }
-  };
 
   const updateVisibility = async (qaType: VisibilityQaType, visible: boolean) => {
     const fieldName =
@@ -261,6 +185,30 @@ export function SettingsPage() {
         shouldValidate: true,
       });
       setStartRecommendedVisible(actual.start_recommended);
+    }
+  };
+
+  const clearSelectedData = async () => {
+    if (!clearTarget) {
+      return;
+    }
+
+    setClearing(true);
+    try {
+      if (clearTarget === "logs") {
+        await invokeCommand("clear_program_logs");
+        toast.success(t("programLogsCleared"));
+      } else {
+        await invokeCommand("clear_clean_records");
+        dispatchAppEvent(REFRESH_HISTORY_EVENT);
+        dispatchAppEvent(REFRESH_DASHBOARD_EVENT, { fresh: false });
+        toast.success(t("historyCleared"));
+      }
+      setClearTarget(null);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -418,125 +366,6 @@ export function SettingsPage() {
               description: t("restorePrivacyDescription"),
             }}
           />
-          <SwitchControl
-            control={control}
-            field={{
-              label: t("cleanLinks"),
-              name: "privacy_mode_cleanup_links",
-            }}
-          />
-        </Section>
-
-        <Section title={t("autoClean")}>
-          <label className="flex items-center justify-between gap-4 py-3">
-            <span className="text-sm">{t("autoCleanEnabled")}</span>
-            <Switch
-              checked={autoCleanPolicy.kind !== "disabled"}
-              disabled={loading || formState.isSubmitting}
-              onCheckedChange={setAutoCleanEnabled}
-            />
-          </label>
-
-          {autoCleanPolicy.kind !== "disabled" ? (
-            <>
-              <label className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center">
-                <span className="text-sm">{t("autoCleanMode")}</span>
-                <Select
-                  onValueChange={(value) =>
-                    setAutoCleanMode(
-                      value as Exclude<AutoCleanPolicy["kind"], "disabled">,
-                    )
-                  }
-                  value={autoCleanPolicy.kind}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="monitor">
-                      {t("autoCleanMonitor")}
-                    </SelectItem>
-                    <SelectItem value="every_hours">
-                      {t("autoCleanEveryHours")}
-                    </SelectItem>
-                    <SelectItem value="daily_at">
-                      {t("autoCleanDailyAt")}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </label>
-
-              {autoCleanPolicy.kind === "every_hours" ? (
-                <label className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center">
-                  <span className="text-sm">{t("autoCleanInterval")}</span>
-                  <Input
-                    max={168}
-                    min={1}
-                    onChange={(event) => {
-                      const hours = event.currentTarget.valueAsNumber;
-                      if (!Number.isNaN(hours)) {
-                        updateAutoCleanPolicy({ kind: "every_hours", hours });
-                      }
-                    }}
-                    type="number"
-                    value={autoCleanPolicy.hours}
-                  />
-                </label>
-              ) : null}
-
-              {autoCleanPolicy.kind === "daily_at" ? (
-                <label className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center">
-                  <span className="text-sm">{t("autoCleanTime")}</span>
-                  <Input
-                    onChange={(event) => {
-                      const [hour, minute] = event.currentTarget.value
-                        .split(":")
-                        .map(Number);
-                      if (Number.isInteger(hour) && Number.isInteger(minute)) {
-                        updateAutoCleanPolicy({ kind: "daily_at", hour, minute });
-                      }
-                    }}
-                    type="time"
-                    value={`${String(autoCleanPolicy.hour).padStart(2, "0")}:${String(autoCleanPolicy.minute).padStart(2, "0")}`}
-                  />
-                </label>
-              ) : null}
-            </>
-          ) : null}
-
-          {formState.errors.auto_clean ? (
-            <p className="py-2 text-sm text-destructive">
-              {t("autoCleanInvalidSchedule")}
-            </p>
-          ) : null}
-
-          <div className="flex flex-wrap items-center justify-between gap-3 py-3">
-            <span>
-              <span className="block text-sm">{t("autoCleanLastRun")}</span>
-              <span className="block text-xs text-muted-foreground">
-                {formatLastRun(
-                  autoCleanLastRun,
-                  language,
-                  t("autoCleanNever"),
-                )}
-              </span>
-            </span>
-            <Button
-              className="min-w-36"
-              disabled={loading || runningAutoClean || privacyActive}
-              onClick={() => void runAutoClean()}
-              title={privacyActive ? t("privacyWriteDisabled") : undefined}
-              type="button"
-              variant="outline"
-            >
-              {runningAutoClean ? (
-                <LoaderCircle className="animate-spin" />
-              ) : (
-                <Play />
-              )}
-              {t(runningAutoClean ? "autoCleanRunning" : "autoCleanRunNow")}
-            </Button>
-          </div>
         </Section>
 
         <Section title={t("visibility")}>
@@ -640,22 +469,35 @@ export function SettingsPage() {
           />
         </Section>
 
-        <Section title={t("history")}>
-          <label className="flex items-center justify-between gap-4 py-3">
-            <span>
-              <span className="block text-sm">{t("historyRetention")}</span>
-              <span className="block text-xs text-muted-foreground">
-                {t("historyRetentionDescription")}
-              </span>
-            </span>
-            <Input
-              className="w-28"
-              max={1_000_000}
-              min={0}
-              type="number"
-              {...register("history_retention", { valueAsNumber: true })}
-            />
-          </label>
+        <Section title={t("cleanup")}>
+          <div className="flex flex-wrap items-center justify-between gap-4 py-3">
+            <span className="text-sm">{t("programLogs")}</span>
+            <Button
+              className="shrink-0"
+              disabled={clearing}
+              onClick={() => setClearTarget("logs")}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Trash2 />
+              {t("actionClear")}
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-4 py-3">
+            <span className="text-sm">{t("recordedCleanupHistory")}</span>
+            <Button
+              className="shrink-0"
+              disabled={clearing}
+              onClick={() => setClearTarget("history")}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Trash2 />
+              {t("actionClear")}
+            </Button>
+          </div>
         </Section>
 
         <Section title={t("about")}>
@@ -670,7 +512,7 @@ export function SettingsPage() {
               type="button"
               variant="outline"
             >
-              {t("open")}
+              {t("visit")}
             </Button>
           </div>
           <div className="flex items-center justify-between gap-4 py-2">
@@ -691,6 +533,51 @@ export function SettingsPage() {
             </Button>
           </div>
         </Section>
+        <AlertDialog
+          open={clearTarget !== null}
+          onOpenChange={(open) => {
+            if (!open && !clearing) {
+              setClearTarget(null);
+            }
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t(
+                  clearTarget === "logs"
+                    ? "clearProgramLogsQuestion"
+                    : "clearRecordedHistoryQuestion",
+                )}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t(
+                  clearTarget === "logs"
+                    ? "clearProgramLogsDescription"
+                    : "clearRecordedHistoryDescription",
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={clearing}>
+                {t("cancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={clearing}
+                onClick={() => void clearSelectedData()}
+                type="button"
+                variant="destructive"
+              >
+                {clearing ? (
+                  <LoaderCircle className="animate-spin" />
+                ) : (
+                  <Trash2 />
+                )}
+                {t("actionClear")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
     </div>
   );
 }
@@ -802,17 +689,4 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function formatLastRun(value: string | null, language: string, fallback: string) {
-  if (!value) {
-    return fallback;
-  }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? fallback
-    : new Intl.DateTimeFormat(language, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(date);
 }
