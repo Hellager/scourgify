@@ -41,6 +41,14 @@ impl AutoCleanState {
             Err(TryLockError::Poisoned(_)) => Err(AutoCleanError::StateUnavailable),
         }
     }
+
+    pub(crate) fn is_running(&self) -> Result<bool, AutoCleanError> {
+        match self.running.try_lock() {
+            Ok(_) => Ok(false),
+            Err(TryLockError::WouldBlock) => Ok(true),
+            Err(TryLockError::Poisoned(_)) => Err(AutoCleanError::StateUnavailable),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

@@ -7,6 +7,7 @@ mod history;
 mod privacy;
 mod quick_access;
 mod rules;
+mod status;
 
 use std::sync::Mutex;
 
@@ -48,6 +49,7 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         privacy::privacy_enter,
         privacy::privacy_exit,
         privacy::privacy_state,
+        status::get_runtime_status,
         database::get_database_status,
         database::retry_database,
         database::open_database_directory,
@@ -94,6 +96,7 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         privacy::privacy_enter,
         privacy::privacy_exit,
         privacy::privacy_state,
+        status::get_runtime_status,
         database::get_database_status,
         database::retry_database,
         database::open_database_directory,

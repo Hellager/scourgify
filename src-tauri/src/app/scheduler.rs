@@ -3,8 +3,9 @@ use chrono::{DateTime, Duration as ChronoDuration, Local, LocalResult, NaiveTime
 use serde::Serialize;
 use std::{
     sync::{
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
-        Mutex,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -26,20 +27,35 @@ const ERROR_RETRY_DELAY: Duration = Duration::from_secs(60);
 
 pub struct AutoCleanScheduler {
     sender: Sender<SchedulerMessage>,
+    alive: Arc<AtomicBool>,
 }
 
 pub struct AutoCleanMonitor {
     sender: Sender<()>,
+    alive: Arc<AtomicBool>,
+}
+
+struct WorkerAliveGuard(Arc<AtomicBool>);
+
+impl Drop for WorkerAliveGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Relaxed);
+    }
 }
 
 impl AutoCleanScheduler {
     pub fn start<R: Runtime>(app: AppHandle<R>) -> Result<Self> {
         let (sender, receiver) = mpsc::channel();
+        let alive = Arc::new(AtomicBool::new(true));
+        let worker_alive = alive.clone();
         std::thread::Builder::new()
             .name("scourgify-auto-clean".to_string())
-            .spawn(move || run_worker(app, receiver))
+            .spawn(move || {
+                let _alive_guard = WorkerAliveGuard(worker_alive);
+                run_worker(app, receiver);
+            })
             .context("failed to start auto-clean scheduler")?;
-        Ok(Self { sender })
+        Ok(Self { sender, alive })
     }
 
     pub fn reschedule(&self) -> Result<()> {
@@ -47,22 +63,35 @@ impl AutoCleanScheduler {
             .send(SchedulerMessage::Reschedule)
             .context("auto-clean scheduler is unavailable")
     }
+
+    pub(crate) fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Relaxed)
+    }
 }
 
 impl AutoCleanMonitor {
     pub fn start<R: Runtime>(app: AppHandle<R>) -> Result<Self> {
         let (sender, receiver) = mpsc::channel();
+        let alive = Arc::new(AtomicBool::new(true));
+        let worker_alive = alive.clone();
         std::thread::Builder::new()
             .name("scourgify-auto-clean-monitor".to_string())
-            .spawn(move || run_monitor_worker(app, receiver))
+            .spawn(move || {
+                let _alive_guard = WorkerAliveGuard(worker_alive);
+                run_monitor_worker(app, receiver);
+            })
             .context("failed to start auto-clean monitor")?;
-        Ok(Self { sender })
+        Ok(Self { sender, alive })
     }
 
     pub fn trigger(&self) -> Result<()> {
         self.sender
             .send(())
             .context("auto-clean monitor is unavailable")
+    }
+
+    pub(crate) fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Relaxed)
     }
 }
 

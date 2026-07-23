@@ -21,6 +21,7 @@ use super::{operations, QaCounts, QaItem};
 
 pub(crate) const QUICK_ACCESS_CHANGED_EVENT: &str = "quick-access-changed";
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
+const EXPECTED_MONITORS: usize = 2;
 
 #[derive(Clone, Default)]
 pub(crate) struct QuickAccessCache {
@@ -208,7 +209,19 @@ impl QuickAccessCache {
 }
 
 pub(crate) struct QuickAccessWatchers {
-    _monitors: Mutex<Vec<QuickAccessMonitor>>,
+    monitors: Mutex<Vec<ActiveMonitor>>,
+}
+
+struct ActiveMonitor {
+    _monitor: QuickAccessMonitor,
+    error_reported: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct QuickAccessWatcherStatus {
+    pub active: usize,
+    pub expected: usize,
+    pub failing: usize,
 }
 
 impl QuickAccessWatchers {
@@ -218,13 +231,27 @@ impl QuickAccessWatchers {
         backend: QuickAccessBackendState,
     ) -> Self {
         Self {
-            _monitors: Mutex::new(start_real_monitors(app, cache, backend)),
+            monitors: Mutex::new(start_real_monitors(app, cache, backend)),
         }
+    }
+
+    pub(crate) fn status(&self) -> Result<QuickAccessWatcherStatus> {
+        let monitors = self.monitors.lock().map_err(|error| {
+            anyhow::anyhow!("Quick Access watcher state is unavailable: {error}")
+        })?;
+        Ok(QuickAccessWatcherStatus {
+            active: monitors.len(),
+            expected: EXPECTED_MONITORS,
+            failing: monitors
+                .iter()
+                .filter(|monitor| monitor.error_reported.load(Ordering::Relaxed))
+                .count(),
+        })
     }
 
     #[cfg(debug_assertions)]
     pub(crate) fn pause(&self) -> Result<()> {
-        self._monitors
+        self.monitors
             .lock()
             .map_err(|error| anyhow::anyhow!("Quick Access watcher state is unavailable: {error}"))?
             .clear();
@@ -239,7 +266,7 @@ impl QuickAccessWatchers {
         backend: QuickAccessBackendState,
     ) -> Result<()> {
         let monitors = start_real_monitors(app, cache, backend);
-        *self._monitors.lock().map_err(|error| {
+        *self.monitors.lock().map_err(|error| {
             anyhow::anyhow!("Quick Access watcher state is unavailable: {error}")
         })? = monitors;
         Ok(())
@@ -250,8 +277,8 @@ fn start_real_monitors(
     app: AppHandle,
     cache: QuickAccessCache,
     backend: QuickAccessBackendState,
-) -> Vec<QuickAccessMonitor> {
-    let mut monitors = Vec::with_capacity(2);
+) -> Vec<ActiveMonitor> {
+    let mut monitors = Vec::with_capacity(EXPECTED_MONITORS);
     for qa_type in [QuickAccess::RecentFiles, QuickAccess::FrequentFolders] {
         match start_monitor(app.clone(), cache.clone(), backend.clone(), qa_type) {
             Ok(monitor) => monitors.push(monitor),
@@ -277,18 +304,21 @@ fn start_monitor(
     cache: QuickAccessCache,
     backend: QuickAccessBackendState,
     qa_type: QuickAccess,
-) -> Result<QuickAccessMonitor> {
+) -> Result<ActiveMonitor> {
     let options = QuickAccessMonitorOptions::new()
         .with_qa_type(qa_type)
         .try_poll_interval(POLL_INTERVAL)?;
     let error_reported = Arc::new(AtomicBool::new(false));
-    Ok(
+    let callback_error = error_reported.clone();
+    let monitor =
         QuickAccessManager::new().watch_quick_access(options, move |result| match result {
             Ok(event) => {
-                error_reported.store(false, Ordering::Relaxed);
                 let has_added_items = !event.added_items().is_empty();
                 if let Err(error) = cache.update_from_paths(&app, &backend, qa_type) {
+                    callback_error.store(true, Ordering::Relaxed);
                     report_background_error("update_quick_access_cache", error);
+                } else {
+                    callback_error.store(false, Ordering::Relaxed);
                 }
                 if has_added_items {
                     if let Some(monitor) = app.try_state::<AutoCleanMonitor>() {
@@ -298,12 +328,15 @@ fn start_monitor(
                     }
                 }
             }
-            Err(error) if !error_reported.swap(true, Ordering::Relaxed) => {
+            Err(error) if !callback_error.swap(true, Ordering::Relaxed) => {
                 report_background_error("watch_quick_access", error);
             }
             Err(_) => {}
-        })?,
-    )
+        })?;
+    Ok(ActiveMonitor {
+        _monitor: monitor,
+        error_reported,
+    })
 }
 
 fn qa_name(qa_type: QuickAccess) -> &'static str {

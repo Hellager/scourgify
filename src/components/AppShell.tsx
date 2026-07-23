@@ -3,7 +3,6 @@ import {
   type Dispatch,
   type ReactNode,
   type SetStateAction,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -22,6 +21,7 @@ import {
 import { toast } from "sonner";
 import { AppCommandPalette } from "@/components/AppCommandPalette";
 import { ConfigDrawer } from "@/components/ConfigDrawer";
+import { SidebarRuntimeStatus } from "@/components/SidebarRuntimeStatus";
 import { TitleBar } from "@/components/TitleBar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -29,7 +29,6 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
@@ -49,16 +48,9 @@ import { configSchema, defaultConfig, type ConfigForm } from "@/lib/config";
 import { useI18n } from "@/lib/i18n";
 import { invokeCommand } from "@/lib/commands";
 
-interface DashboardSummary {
-  recent: number;
-  frequent: number;
-  selected: number;
-}
-
 interface AppShellContextValue {
   config: ConfigForm;
   setConfig: Dispatch<SetStateAction<ConfigForm>>;
-  updateDashboardSummary: (summary: DashboardSummary) => void;
 }
 
 type PrivacyState =
@@ -77,11 +69,6 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
   const [config, setConfig] = useState<ConfigForm>(defaultConfig);
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   const [privacyActive, setPrivacyActive] = useState(false);
-  const [summary, setSummary] = useState<DashboardSummary>({
-    recent: 0,
-    frequent: 0,
-    selected: 0,
-  });
   const onDashboard = location.pathname === "/";
 
   useEffect(() => {
@@ -128,14 +115,7 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
       window.removeEventListener(OPEN_CONFIG_DRAWER_EVENT, openConfigDrawer);
   }, []);
 
-  const updateDashboardSummary = useCallback(
-    (next: DashboardSummary) => setSummary(next),
-    [],
-  );
-  const context = useMemo(
-    () => ({ config, setConfig, updateDashboardSummary }),
-    [config, updateDashboardSummary],
-  );
+  const context = useMemo(() => ({ config, setConfig }), [config]);
   const navigation = [
     { icon: Gauge, label: t("dataCenter"), path: "/" },
     { icon: ShieldCheck, label: t("rules"), path: "/rules" },
@@ -183,22 +163,7 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
                     </SidebarMenu>
                   </SidebarGroupContent>
                 </SidebarGroup>
-                <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-                  <SidebarGroupLabel>{t("counts")}</SidebarGroupLabel>
-                  <SidebarGroupContent>
-                    <div className="grid gap-1 px-2 text-xs text-muted-foreground">
-                      <span>
-                        {t("recent")}: {summary.recent}
-                      </span>
-                      <span>
-                        {t("frequent")}: {summary.frequent}
-                      </span>
-                      <span>
-                        {t("selected")}: {summary.selected}
-                      </span>
-                    </div>
-                  </SidebarGroupContent>
-                </SidebarGroup>
+                <SidebarRuntimeStatus />
               </ScrollArea>
               <div className="mt-auto flex justify-end px-2 pb-2 group-data-[collapsible=icon]:justify-center">
                 <SidebarTrigger />

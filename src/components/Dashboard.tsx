@@ -233,7 +233,7 @@ const quickAccessChartColors = ["#2563eb", "#16a34a"];
 
 export function Dashboard() {
   const { language, t } = useI18n();
-  const { config, updateDashboardSummary } = useAppShell();
+  const { config } = useAppShell();
   const [activeTab, setActiveTab] = useState<QaType>("recent");
   const [counts, setCounts] = useState<QaCounts>(emptyCounts);
   const [items, setItems] = useState<QaItem[]>([]);
@@ -590,14 +590,6 @@ export function Dashboard() {
       unlisten.then((cleanup) => cleanup());
     };
   }, [activeTab, loadCounts, loadItems]);
-
-  useEffect(() => {
-    updateDashboardSummary({
-      recent: counts.recent,
-      frequent: counts.frequent,
-      selected: selectedPaths.size,
-    });
-  }, [counts.frequent, counts.recent, selectedPaths.size, updateDashboardSummary]);
 
   const switchTab = (value: unknown) => {
     const nextTab = toQaType(value);
