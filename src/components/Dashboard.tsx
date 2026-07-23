@@ -73,6 +73,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -1200,7 +1201,7 @@ function ConfirmActionDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         {isSmart ? (
-          <div className="max-h-64 overflow-y-auto rounded-md border">
+          <ScrollArea className="h-64 rounded-md border">
             {smartTargets.map((item) => (
               <div
                 className="grid gap-1 border-b px-3 py-2 text-sm last:border-b-0"
@@ -1219,7 +1220,7 @@ function ConfirmActionDialog({
                 </span>
               </div>
             ))}
-          </div>
+          </ScrollArea>
         ) : null}
         <AlertDialogFooter>
           <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>

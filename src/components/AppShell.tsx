@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { AppCommandPalette } from "@/components/AppCommandPalette";
 import { ConfigDrawer } from "@/components/ConfigDrawer";
 import { TitleBar } from "@/components/TitleBar";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sidebar,
   SidebarContent,
@@ -154,6 +155,7 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
           minimizeLabel={t("minimizeWindow")}
           mode="dashboard"
           switchModeLabel={t("appModeGrid")}
+          title={t("appName")}
         />
         <SidebarProvider className="min-h-0 flex-1">
           <Sidebar
@@ -161,52 +163,55 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
             collapsible="icon"
             variant="sidebar"
           >
-            <SidebarContent>
-              <SidebarGroup>
-                <SidebarGroupLabel>{t("commandNavigation")}</SidebarGroupLabel>
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    {navigation.map(({ icon: Icon, label, path }) => (
-                      <SidebarMenuItem key={path}>
-                        <SidebarMenuButton
-                          isActive={location.pathname === path}
-                          render={<Link to={path} />}
-                          tooltip={label}
-                        >
-                          <Icon />
-                          <span>{label}</span>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </SidebarGroup>
-              <SidebarGroup>
-                <SidebarGroupLabel>{t("counts")}</SidebarGroupLabel>
-                <SidebarGroupContent>
-                  <div className="grid gap-1 px-2 text-xs text-muted-foreground">
-                    <span>
-                      {t("recent")}: {summary.recent}
-                    </span>
-                    <span>
-                      {t("frequent")}: {summary.frequent}
-                    </span>
-                    <span>
-                      {t("selected")}: {summary.selected}
-                    </span>
-                  </div>
-                </SidebarGroupContent>
-              </SidebarGroup>
-              <div className="mt-auto px-2 pb-2">
-                <SidebarTrigger className="w-full justify-start" />
+            <SidebarContent className="overflow-hidden">
+              <ScrollArea className="min-h-0 flex-1">
+                <SidebarGroup>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      {navigation.map(({ icon: Icon, label, path }) => (
+                        <SidebarMenuItem key={path}>
+                          <SidebarMenuButton
+                            isActive={location.pathname === path}
+                            render={<Link to={path} />}
+                            tooltip={label}
+                          >
+                            <Icon />
+                            <span>{label}</span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      ))}
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+                <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+                  <SidebarGroupLabel>{t("counts")}</SidebarGroupLabel>
+                  <SidebarGroupContent>
+                    <div className="grid gap-1 px-2 text-xs text-muted-foreground">
+                      <span>
+                        {t("recent")}: {summary.recent}
+                      </span>
+                      <span>
+                        {t("frequent")}: {summary.frequent}
+                      </span>
+                      <span>
+                        {t("selected")}: {summary.selected}
+                      </span>
+                    </div>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              </ScrollArea>
+              <div className="mt-auto flex justify-end px-2 pb-2 group-data-[collapsible=icon]:justify-center">
+                <SidebarTrigger />
               </div>
             </SidebarContent>
           </Sidebar>
-          <SidebarInset className="min-h-0 overflow-auto bg-background text-foreground">
-            <div className={onDashboard ? "min-w-0" : "hidden"}>
-              {dashboard}
-            </div>
-            {onDashboard ? null : <Outlet />}
+          <SidebarInset className="min-h-0 overflow-hidden bg-background text-foreground">
+            <ScrollArea className="min-h-0 flex-1">
+              <div className={onDashboard ? "min-w-0" : "hidden"}>
+                {dashboard}
+              </div>
+              {onDashboard ? null : <Outlet />}
+            </ScrollArea>
           </SidebarInset>
           <ConfigDrawer
             config={config}

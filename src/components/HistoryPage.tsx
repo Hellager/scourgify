@@ -574,7 +574,7 @@ export function HistoryPage() {
                 : `${t("historyCount", { count: total })} / ${overallTotal}`}
             </span>
           </div>
-          <div className="overflow-x-auto rounded-md border">
+          <div className="rounded-md border">
             <Table>
               <TableHeader>
                 {table.getHeaderGroups().map((headerGroup) => (

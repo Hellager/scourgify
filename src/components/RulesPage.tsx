@@ -386,7 +386,7 @@ export function RulesPage() {
               {t("ruleCount", { count: filteredRules.length })}
             </span>
           </div>
-          <div className="overflow-x-auto rounded-md border">
+          <div className="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -341,22 +342,24 @@ export function MockTestPage() {
               Clear
             </Button>
           </div>
-          <div className="grid max-h-96 gap-2 overflow-y-auto">
-            {events.length ? (
-              events.map((event) => (
-                <div className="rounded-md border p-2 text-xs" key={event.id}>
-                  <div className="font-medium">{event.name}</div>
-                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-muted-foreground">
-                    {JSON.stringify(event.payload, null, 2)}
-                  </pre>
-                </div>
-              ))
-            ) : (
-              <div className="flex min-h-24 items-center justify-center rounded-md border border-dashed text-xs text-muted-foreground">
-                No events received.
+          {events.length ? (
+            <ScrollArea className="h-96">
+              <div className="grid gap-2 pr-3">
+                {events.map((event) => (
+                  <div className="rounded-md border p-2 text-xs" key={event.id}>
+                    <div className="font-medium">{event.name}</div>
+                    <pre className="mt-1 whitespace-pre-wrap text-muted-foreground">
+                      {JSON.stringify(event.payload, null, 2)}
+                    </pre>
+                  </div>
+                ))}
               </div>
-            )}
-          </div>
+            </ScrollArea>
+          ) : (
+            <div className="flex min-h-24 items-center justify-center rounded-md border border-dashed text-xs text-muted-foreground">
+              No events received.
+            </div>
+          )}
         </aside>
       </section>
     </main>

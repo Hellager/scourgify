@@ -107,6 +107,7 @@ export function GridMode() {
         minimizeLabel={t("minimizeWindow")}
         mode="grid"
         switchModeLabel={t("dashboard")}
+        title={t("appName")}
       />
       <div
         aria-busy={loading}

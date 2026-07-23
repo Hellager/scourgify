@@ -1,5 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Gauge, LayoutGrid, Minus, Square, X } from "lucide-react";
+import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -14,6 +15,7 @@ interface TitleBarProps {
   minimizeLabel: string;
   mode: "dashboard" | "grid";
   switchModeLabel: string;
+  title: string;
 }
 
 export function TitleBar({
@@ -22,8 +24,11 @@ export function TitleBar({
   minimizeLabel,
   mode,
   switchModeLabel,
+  title,
 }: TitleBarProps) {
+  const { resolvedTheme } = useTheme();
   const dashboard = mode === "dashboard";
+  const titleBarIcon = resolvedTheme === "dark" ? darkIcon : lightIcon;
   const switchMode = async () => {
     try {
       await invokeCommand("set_app_mode", {
@@ -47,15 +52,16 @@ export function TitleBar({
           className="flex min-w-0 items-center gap-2 px-3"
           data-tauri-drag-region
         >
-          <picture className="pointer-events-none shrink-0">
-            <source media="(prefers-color-scheme: dark)" srcSet={darkIcon} />
-            <img alt="" className="size-4" src={lightIcon} />
-          </picture>
+          <img
+            alt=""
+            className="pointer-events-none size-4 shrink-0"
+            src={titleBarIcon}
+          />
           <h1
             className="truncate text-left text-xs font-medium text-secondary-foreground"
             data-tauri-drag-region
           >
-            Scourgify
+            {title}
           </h1>
         </div>
       ) : (
@@ -65,7 +71,7 @@ export function TitleBar({
             className="px-3 text-center text-xs font-medium text-secondary-foreground"
             data-tauri-drag-region
           >
-            Scourgify
+            {title}
           </h1>
         </>
       )}

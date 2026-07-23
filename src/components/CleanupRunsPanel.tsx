@@ -243,7 +243,7 @@ export function CleanupRunsPanel() {
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-      <div className="overflow-x-auto rounded-md border">
+      <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
