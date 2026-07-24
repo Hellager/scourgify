@@ -1,4 +1,4 @@
-use crate::rules::{NewRule, Rule, RuleType};
+use crate::rules::{NewRule, Rule, RuleScope, RuleType};
 use anyhow::{Context, Result};
 use rusqlite::{
     params,
@@ -25,9 +25,22 @@ impl FromSql for RuleType {
     }
 }
 
+impl FromSql for RuleScope {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value.as_str()? {
+            "all" => Ok(Self::All),
+            "files" => Ok(Self::Files),
+            "folders" => Ok(Self::Folders),
+            _ => Err(FromSqlError::InvalidType),
+        }
+    }
+}
+
 pub fn list(connection: &Connection) -> Result<Vec<Rule>> {
     let mut statement = connection
-        .prepare("SELECT id, keyword, rule_type, enabled, created_at FROM rules ORDER BY id ASC")
+        .prepare(
+            "SELECT id, keyword, rule_type, scope, enabled, created_at FROM rules ORDER BY id ASC",
+        )
         .context("failed to prepare rule list query")?;
     let rows = statement
         .query_map([], row_to_rule)
@@ -42,8 +55,13 @@ pub fn add(connection: &Connection, rule: NewRule) -> Result<Rule> {
     let rule = normalize(rule)?;
     connection
         .execute(
-            "INSERT INTO rules (keyword, rule_type, enabled) VALUES (?1, ?2, ?3)",
-            params![rule.keyword, rule.rule_type.as_str(), rule.enabled],
+            "INSERT INTO rules (keyword, rule_type, scope, enabled) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                rule.keyword,
+                rule.rule_type.as_str(),
+                rule.scope.as_str(),
+                rule.enabled
+            ],
         )
         .context("failed to add rule")?;
     find(connection, connection.last_insert_rowid())?.context("added rule was not found")
@@ -53,8 +71,14 @@ pub fn update(connection: &Connection, id: i64, rule: NewRule) -> Result<Rule> {
     let rule = normalize(rule)?;
     let changed = connection
         .execute(
-            "UPDATE rules SET keyword = ?1, rule_type = ?2, enabled = ?3 WHERE id = ?4",
-            params![rule.keyword, rule.rule_type.as_str(), rule.enabled, id],
+            "UPDATE rules SET keyword = ?1, rule_type = ?2, scope = ?3, enabled = ?4 WHERE id = ?5",
+            params![
+                rule.keyword,
+                rule.rule_type.as_str(),
+                rule.scope.as_str(),
+                rule.enabled,
+                id
+            ],
         )
         .with_context(|| format!("failed to update rule {id}"))?;
     ensure_rule_changed(id, changed)?;
@@ -82,7 +106,7 @@ pub fn toggle(connection: &Connection, id: i64, enabled: bool) -> Result<Rule> {
 fn find(connection: &Connection, id: i64) -> Result<Option<Rule>> {
     connection
         .query_row(
-            "SELECT id, keyword, rule_type, enabled, created_at FROM rules WHERE id = ?1",
+            "SELECT id, keyword, rule_type, scope, enabled, created_at FROM rules WHERE id = ?1",
             [id],
             row_to_rule,
         )
@@ -95,8 +119,9 @@ fn row_to_rule(row: &Row<'_>) -> rusqlite::Result<Rule> {
         id: row.get(0)?,
         keyword: row.get(1)?,
         rule_type: row.get(2)?,
-        enabled: row.get(3)?,
-        created_at: row.get(4)?,
+        scope: row.get(3)?,
+        enabled: row.get(4)?,
+        created_at: row.get(5)?,
     })
 }
 
@@ -124,15 +149,20 @@ mod tests {
         let connection = test_connection();
         connection.execute("DELETE FROM rules", []).unwrap();
 
-        let first = add(&connection, new_rule("  Temp  ", RuleType::Blacklist, true)).unwrap();
+        let first = add(
+            &connection,
+            new_rule("  Temp  ", RuleType::Blacklist, RuleScope::Files, true),
+        )
+        .unwrap();
         let second = add(
             &connection,
-            new_rule("Projects", RuleType::Whitelist, false),
+            new_rule("Projects", RuleType::Whitelist, RuleScope::Folders, false),
         )
         .unwrap();
 
         assert_eq!(first.keyword, "Temp");
         assert_eq!(first.rule_type, RuleType::Blacklist);
+        assert_eq!(first.scope, RuleScope::Files);
         assert!(first.enabled);
         assert!(!first.created_at.is_empty());
         assert_eq!(
@@ -148,18 +178,22 @@ mod tests {
     #[test]
     fn updates_and_toggles_rule() {
         let connection = test_connection();
-        let id = add(&connection, new_rule("Temp", RuleType::Blacklist, true))
-            .unwrap()
-            .id;
+        let id = add(
+            &connection,
+            new_rule("Temp", RuleType::Blacklist, RuleScope::All, true),
+        )
+        .unwrap()
+        .id;
 
         let updated = update(
             &connection,
             id,
-            new_rule("Documents", RuleType::Whitelist, false),
+            new_rule("Documents", RuleType::Whitelist, RuleScope::Folders, false),
         )
         .unwrap();
         assert_eq!(updated.keyword, "Documents");
         assert_eq!(updated.rule_type, RuleType::Whitelist);
+        assert_eq!(updated.scope, RuleScope::Folders);
         assert!(!updated.enabled);
 
         let toggled = toggle(&connection, id, true).unwrap();
@@ -169,9 +203,12 @@ mod tests {
     #[test]
     fn removes_rule() {
         let connection = test_connection();
-        let id = add(&connection, new_rule("Temp", RuleType::Blacklist, true))
-            .unwrap()
-            .id;
+        let id = add(
+            &connection,
+            new_rule("Temp", RuleType::Blacklist, RuleScope::All, true),
+        )
+        .unwrap()
+        .id;
 
         remove(&connection, id).unwrap();
 
@@ -182,9 +219,12 @@ mod tests {
     fn rejects_empty_keyword() {
         let connection = test_connection();
 
-        let error = add(&connection, new_rule("   ", RuleType::Whitelist, true))
-            .unwrap_err()
-            .to_string();
+        let error = add(
+            &connection,
+            new_rule("   ", RuleType::Whitelist, RuleScope::All, true),
+        )
+        .unwrap_err()
+        .to_string();
 
         assert!(error.contains("keyword cannot be empty"));
     }
@@ -196,7 +236,7 @@ mod tests {
         assert!(update(
             &connection,
             i64::MAX,
-            new_rule("Temp", RuleType::Blacklist, true)
+            new_rule("Temp", RuleType::Blacklist, RuleScope::All, true)
         )
         .unwrap_err()
         .to_string()
@@ -211,10 +251,11 @@ mod tests {
             .contains("not found"));
     }
 
-    fn new_rule(keyword: &str, rule_type: RuleType, enabled: bool) -> NewRule {
+    fn new_rule(keyword: &str, rule_type: RuleType, scope: RuleScope, enabled: bool) -> NewRule {
         NewRule {
             keyword: keyword.to_string(),
             rule_type,
+            scope,
             enabled,
         }
     }

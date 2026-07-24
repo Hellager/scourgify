@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::rules::{Rule, RuleType};
+use crate::rules::{Rule, RuleScope, RuleType};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -10,16 +10,16 @@ pub enum MatchResult {
     Neutral,
 }
 
-pub fn classify(path: &str, rules: &[Rule]) -> MatchResult {
+pub fn classify(path: &str, item_scope: RuleScope, rules: &[Rule]) -> MatchResult {
     let path = path.to_lowercase();
-    if let Some(rule) = first_match(&path, rules, RuleType::Whitelist) {
+    if let Some(rule) = first_match(&path, item_scope, rules, RuleType::Whitelist) {
         return MatchResult::Protected {
             rule_id: rule.id,
             keyword: rule.keyword.clone(),
         };
     }
 
-    match first_match(&path, rules, RuleType::Blacklist) {
+    match first_match(&path, item_scope, rules, RuleType::Blacklist) {
         Some(rule) => MatchResult::Targeted {
             rule_id: rule.id,
             keyword: rule.keyword.clone(),
@@ -28,12 +28,18 @@ pub fn classify(path: &str, rules: &[Rule]) -> MatchResult {
     }
 }
 
-fn first_match<'a>(path: &str, rules: &'a [Rule], rule_type: RuleType) -> Option<&'a Rule> {
+fn first_match<'a>(
+    path: &str,
+    item_scope: RuleScope,
+    rules: &'a [Rule],
+    rule_type: RuleType,
+) -> Option<&'a Rule> {
     rules
         .iter()
         .filter(|rule| {
             rule.enabled
                 && rule.rule_type == rule_type
+                && rule.scope.applies_to(item_scope)
                 && !rule.keyword.is_empty()
                 && path.contains(&rule.keyword.to_lowercase())
         })
@@ -49,7 +55,11 @@ mod tests {
         let rules = [rule(1, "TEMP", RuleType::Blacklist, true)];
 
         assert_eq!(
-            classify(r"C:\Users\test\AppData\Temp\report.txt", &rules),
+            classify(
+                r"C:\Users\test\AppData\Temp\report.txt",
+                RuleScope::Files,
+                &rules,
+            ),
             MatchResult::Targeted {
                 rule_id: 1,
                 keyword: "TEMP".to_string(),
@@ -65,7 +75,7 @@ mod tests {
         ];
 
         assert_eq!(
-            classify(r"C:\Projects\report.txt", &rules),
+            classify(r"C:\Projects\report.txt", RuleScope::Files, &rules),
             MatchResult::Protected {
                 rule_id: 2,
                 keyword: "report".to_string(),
@@ -81,7 +91,7 @@ mod tests {
         ];
 
         assert_eq!(
-            classify(r"C:\AppData\Temp\report.txt", &rules),
+            classify(r"C:\AppData\Temp\report.txt", RuleScope::Files, &rules,),
             MatchResult::Targeted {
                 rule_id: 3,
                 keyword: "AppData".to_string(),
@@ -97,7 +107,7 @@ mod tests {
         ];
 
         assert_eq!(
-            classify(r"C:\Users\test\Temp\report.txt", &rules),
+            classify(r"C:\Users\test\Temp\report.txt", RuleScope::Files, &rules,),
             MatchResult::Neutral
         );
     }
@@ -107,9 +117,30 @@ mod tests {
         let rules = [rule(1, "Temp", RuleType::Blacklist, true)];
 
         assert_eq!(
-            classify(r"C:\Users\test\Documents\report.txt", &rules),
+            classify(
+                r"C:\Users\test\Documents\report.txt",
+                RuleScope::Files,
+                &rules,
+            ),
             MatchResult::Neutral
         );
+    }
+
+    #[test]
+    fn applies_rules_only_to_their_selected_scope() {
+        let rules = [Rule {
+            scope: RuleScope::Folders,
+            ..rule(1, "Temp", RuleType::Blacklist, true)
+        }];
+
+        assert_eq!(
+            classify(r"C:\Temp", RuleScope::Files, &rules),
+            MatchResult::Neutral
+        );
+        assert!(matches!(
+            classify(r"C:\Temp", RuleScope::Folders, &rules),
+            MatchResult::Targeted { .. }
+        ));
     }
 
     fn rule(id: i64, keyword: &str, rule_type: RuleType, enabled: bool) -> Rule {
@@ -117,6 +148,7 @@ mod tests {
             id,
             keyword: keyword.to_string(),
             rule_type,
+            scope: RuleScope::All,
             enabled,
             created_at: "2026-07-13 00:00:00".to_string(),
         }

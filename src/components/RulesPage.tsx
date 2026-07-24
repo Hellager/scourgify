@@ -2,16 +2,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
 import {
+  type Column,
+  type ColumnDef,
+  type ColumnFiltersState,
+  flexRender,
+  getCoreRowModel,
+  getFilteredRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
+import {
+  FilterX,
+  ListFilter,
   Pencil,
   Plus,
-  RefreshCw,
   Search,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { PageHeader } from "@/components/AppShell";
 import {
   DatabaseRecoveryPanel,
   type DatabaseStatus,
@@ -36,6 +45,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -59,6 +77,7 @@ import { invokeCommand } from "@/lib/commands";
 const ruleFormSchema = z.object({
   keyword: z.string().trim().min(1),
   rule_type: z.enum(["whitelist", "blacklist"]),
+  scope: z.enum(["all", "files", "folders"]),
   enabled: z.boolean(),
 });
 
@@ -77,6 +96,7 @@ type PrivacyState =
 const emptyRule: RuleForm = {
   keyword: "",
   rule_type: "whitelist",
+  scope: "all",
   enabled: true,
 };
 
@@ -91,14 +111,8 @@ export function RulesPage() {
   const [editingRule, setEditingRule] = useState<Rule | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Rule | null>(null);
   const [mutatingId, setMutatingId] = useState<number | null>(null);
-  const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<"all" | Rule["rule_type"]>(
-    "all",
-  );
-  const [statusFilter, setStatusFilter] = useState<
-    "all" | "enabled" | "disabled"
-  >("all");
-  const refreshTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const addTriggerRef = useRef<HTMLButtonElement | null>(null);
   const formTriggerRef = useRef<HTMLButtonElement | null>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
   const {
@@ -139,19 +153,21 @@ export function RulesPage() {
 
   const writesDisabled =
     loading || database?.available !== true || privacyActive;
-  const filteredRules = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-    return rules.filter(
-      (rule) =>
-        (!keyword || rule.keyword.toLowerCase().includes(keyword)) &&
-        (typeFilter === "all" || rule.rule_type === typeFilter) &&
-        (statusFilter === "all" || rule.enabled === (statusFilter === "enabled")),
-    );
-  }, [rules, search, statusFilter, typeFilter]);
-  const whitelistCount = filteredRules.filter(
-    (rule) => rule.rule_type === "whitelist",
-  ).length;
-  const blacklistCount = filteredRules.length - whitelistCount;
+  const ruleTypeLabels = useMemo<Record<RuleForm["rule_type"], string>>(
+    () => ({
+      whitelist: t("whitelist"),
+      blacklist: t("blacklist"),
+    }),
+    [t],
+  );
+  const ruleScopeLabels = useMemo<Record<RuleForm["scope"], string>>(
+    () => ({
+      all: t("ruleScopeAll"),
+      files: t("ruleScopeFiles"),
+      folders: t("ruleScopeFolders"),
+    }),
+    [t],
+  );
   const conflictingKeywords = useMemo(() => {
     const rulesByKeyword = new Map<
       string,
@@ -177,16 +193,20 @@ export function RulesPage() {
     setFormOpen(true);
   };
 
-  const openEdit = (rule: Rule, trigger: HTMLButtonElement) => {
-    formTriggerRef.current = trigger;
-    setEditingRule(rule);
-    reset({
-      keyword: rule.keyword,
-      rule_type: rule.rule_type,
-      enabled: rule.enabled,
-    });
-    setFormOpen(true);
-  };
+  const openEdit = useCallback(
+    (rule: Rule, trigger: HTMLButtonElement) => {
+      formTriggerRef.current = trigger;
+      setEditingRule(rule);
+      reset({
+        keyword: rule.keyword,
+        rule_type: rule.rule_type,
+        scope: rule.scope,
+        enabled: rule.enabled,
+      });
+      setFormOpen(true);
+    },
+    [reset],
+  );
 
   const saveRule = handleSubmit(async (values) => {
     try {
@@ -209,23 +229,26 @@ export function RulesPage() {
     }
   });
 
-  const toggleRule = async (rule: Rule, enabled: boolean) => {
-    setMutatingId(rule.id);
-    try {
-      const saved = await invokeCommand<Rule>("toggle_rule", {
-        id: rule.id,
-        enabled,
-      });
-      setRules((current) =>
-        current.map((item) => (item.id === saved.id ? saved : item)),
-      );
-      toast.success(t("ruleSaved"));
-    } catch (toggleError) {
-      toast.error(errorMessage(toggleError));
-    } finally {
-      setMutatingId(null);
-    }
-  };
+  const toggleRule = useCallback(
+    async (rule: Rule, enabled: boolean) => {
+      setMutatingId(rule.id);
+      try {
+        const saved = await invokeCommand<Rule>("toggle_rule", {
+          id: rule.id,
+          enabled,
+        });
+        setRules((current) =>
+          current.map((item) => (item.id === saved.id ? saved : item)),
+        );
+        toast.success(t("ruleSaved"));
+      } catch (toggleError) {
+        toast.error(errorMessage(toggleError));
+      } finally {
+        setMutatingId(null);
+      }
+    },
+    [t],
+  );
 
   const deleteRule = async () => {
     if (!pendingDelete) {
@@ -246,41 +269,161 @@ export function RulesPage() {
     }
   };
 
+  const columns = useMemo<ColumnDef<Rule>[]>(
+    () => [
+      {
+        accessorKey: "keyword",
+        header: ({ column }) => (
+          <KeywordFilterHeader
+            clearLabel={t("clearRuleKeywordFilter")}
+            column={column}
+            filterLabel={t("filterRuleKeyword")}
+            label={t("ruleKeyword")}
+          />
+        ),
+        filterFn: "includesString",
+        cell: ({ row }) => (
+          <span
+            className="block max-w-md truncate font-medium"
+            title={row.original.keyword}
+          >
+            {row.original.keyword}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "rule_type",
+        header: ({ column }) => (
+          <EnumFilterHeader
+            column={column}
+            emptyValue="all"
+            label={t("ruleType")}
+            options={[
+              { label: t("allRuleTypes"), value: "all" },
+              { label: t("whitelist"), value: "whitelist" },
+              { label: t("blacklist"), value: "blacklist" },
+            ]}
+          />
+        ),
+        filterFn: "equalsString",
+        cell: ({ row }) => (
+          <RuleTypeLabel ruleType={row.original.rule_type} />
+        ),
+      },
+      {
+        accessorKey: "scope",
+        header: ({ column }) => (
+          <EnumFilterHeader
+            column={column}
+            emptyValue="any"
+            label={t("ruleScope")}
+            options={[
+              { label: t("allRuleScopes"), value: "any" },
+              { label: t("ruleScopeAll"), value: "all" },
+              { label: t("ruleScopeFiles"), value: "files" },
+              { label: t("ruleScopeFolders"), value: "folders" },
+            ]}
+          />
+        ),
+        filterFn: "equalsString",
+        cell: ({ row }) => <RuleScopeLabel scope={row.original.scope} />,
+      },
+      {
+        id: "status",
+        accessorFn: (rule) => (rule.enabled ? "enabled" : "disabled"),
+        header: ({ column }) => (
+          <EnumFilterHeader
+            column={column}
+            emptyValue="all"
+            label={t("ruleStatus")}
+            options={[
+              { label: t("allRuleStatuses"), value: "all" },
+              { label: t("enabled"), value: "enabled" },
+              { label: t("disabled"), value: "disabled" },
+            ]}
+          />
+        ),
+        filterFn: "equalsString",
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2">
+            <Switch
+              aria-label={t("ruleToggleLabel", {
+                keyword: row.original.keyword,
+              })}
+              checked={row.original.enabled}
+              disabled={
+                writesDisabled || mutatingId === row.original.id
+              }
+              onCheckedChange={(enabled) =>
+                void toggleRule(row.original, enabled)
+              }
+              size="sm"
+            />
+            <span className="text-sm text-muted-foreground">
+              {row.original.enabled ? t("enabled") : t("disabled")}
+            </span>
+          </div>
+        ),
+      },
+      {
+        id: "actions",
+        enableColumnFilter: false,
+        header: t("actions"),
+        cell: ({ row }) => (
+          <div className="flex justify-end gap-1">
+            <Button
+              aria-label={t("editRule")}
+              disabled={writesDisabled}
+              onClick={(event) => openEdit(row.original, event.currentTarget)}
+              size="icon-sm"
+              title={t("editRule")}
+              type="button"
+              variant="ghost"
+            >
+              <Pencil />
+            </Button>
+            <Button
+              aria-label={t("deleteRule")}
+              disabled={writesDisabled}
+              onClick={(event) => {
+                deleteTriggerRef.current = event.currentTarget;
+                setPendingDelete(row.original);
+              }}
+              size="icon-sm"
+              title={t("deleteRule")}
+              type="button"
+              variant="ghost"
+            >
+              <Trash2 />
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [
+      mutatingId,
+      openEdit,
+      ruleScopeLabels,
+      ruleTypeLabels,
+      t,
+      toggleRule,
+      writesDisabled,
+    ],
+  );
+
+  const table = useReactTable({
+    data: rules,
+    columns,
+    state: { columnFilters },
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getRowId: (rule) => String(rule.id),
+    onColumnFiltersChange: setColumnFilters,
+  });
+
   return (
     <>
-      <PageHeader
-        actions={
-          <>
-          <Button
-            aria-label={t("refreshRules")}
-            disabled={loading}
-            onClick={() => void loadRules()}
-            ref={refreshTriggerRef}
-            size="icon-sm"
-            title={t("refreshRules")}
-            type="button"
-            variant="outline"
-          >
-            <RefreshCw className={loading ? "animate-spin" : ""} />
-          </Button>
-          <Button
-            disabled={writesDisabled}
-            onClick={(event) => {
-              formTriggerRef.current = event.currentTarget;
-              openCreate();
-            }}
-            type="button"
-          >
-            <Plus />
-            {t("addRule")}
-          </Button>
-          </>
-        }
-        subtitle={t("rulesSubtitle")}
-        title={t("rules")}
-      />
-
-      <div className="mx-auto grid max-w-6xl gap-4 p-6">
+      <div className="mx-auto grid max-w-6xl gap-4 p-6 pb-24">
         {database && !database.available ? (
           <DatabaseRecoveryPanel
             onRecovered={loadRules}
@@ -314,59 +457,6 @@ export function RulesPage() {
           </section>
         ) : null}
 
-        <section className="grid gap-3" aria-label={t("filterRules")}>
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem_12rem]">
-            <label className="relative min-w-0">
-              <span className="sr-only">{t("filterRules")}</span>
-              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                className="pl-9"
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t("filterRules")}
-                type="search"
-                value={search}
-              />
-            </label>
-            <Select
-              onValueChange={(value) =>
-                setTypeFilter(value as "all" | Rule["rule_type"])
-              }
-              value={typeFilter}
-            >
-              <SelectTrigger aria-label={t("ruleType")} className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("all")}</SelectItem>
-                <SelectItem value="whitelist">{t("whitelist")}</SelectItem>
-                <SelectItem value="blacklist">{t("blacklist")}</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select
-              onValueChange={(value) =>
-                setStatusFilter(value as "all" | "enabled" | "disabled")
-              }
-              value={statusFilter}
-            >
-              <SelectTrigger aria-label={t("ruleStatus")} className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("all")}</SelectItem>
-                <SelectItem value="enabled">{t("enabled")}</SelectItem>
-                <SelectItem value="disabled">{t("disabled")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="text-sm tabular-nums text-muted-foreground">
-            {t("ruleFilterSummary", {
-              count: filteredRules.length,
-              whitelist: whitelistCount,
-              blacklist: blacklistCount,
-            })}
-          </p>
-        </section>
-
         {conflictingKeywords.length > 0 ? (
           <section className="border-l-2 border-amber-500 px-4 py-2">
             <p className="break-words text-sm text-muted-foreground">
@@ -377,92 +467,49 @@ export function RulesPage() {
           </section>
         ) : null}
 
-        <section aria-labelledby="rules-list-title">
-          <div className="mb-3 flex items-center justify-between gap-4">
-            <h2 className="text-sm font-semibold" id="rules-list-title">
-              {t("rules")}
-            </h2>
-            <span className="text-sm tabular-nums text-muted-foreground">
-              {t("ruleCount", { count: filteredRules.length })}
-            </span>
-          </div>
+        <section aria-label={t("rules")}>
           <div className="rounded-md border">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>{t("ruleKeyword")}</TableHead>
-                  <TableHead>{t("ruleType")}</TableHead>
-                  <TableHead>{t("ruleStatus")}</TableHead>
-                  <TableHead className="w-28 text-right">{t("actions")}</TableHead>
-                </TableRow>
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <TableRow key={headerGroup.id}>
+                    {headerGroup.headers.map((header) => (
+                      <TableHead
+                        className={ruleColumnClassName(header.column.id)}
+                        key={header.id}
+                      >
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(
+                              header.column.columnDef.header,
+                              header.getContext(),
+                            )}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                ))}
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <RuleTableMessage message={t("loadingRules")} />
                 ) : rules.length === 0 ? (
                   <RuleTableMessage message={t("noRules")} />
-                ) : filteredRules.length === 0 ? (
+                ) : table.getRowModel().rows.length === 0 ? (
                   <RuleTableMessage message={t("noMatches")} />
                 ) : (
-                  filteredRules.map((rule) => (
-                    <TableRow key={rule.id}>
-                      <TableCell className="max-w-md font-medium">
-                        <span className="block truncate" title={rule.keyword}>
-                          {rule.keyword}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <RuleTypeLabel ruleType={rule.rule_type} />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            aria-label={t("ruleToggleLabel", {
-                              keyword: rule.keyword,
-                            })}
-                            checked={rule.enabled}
-                            disabled={
-                              writesDisabled || mutatingId === rule.id
-                            }
-                            onCheckedChange={(enabled) =>
-                              void toggleRule(rule, enabled)
-                            }
-                            size="sm"
-                          />
-                          <span className="text-sm text-muted-foreground">
-                            {rule.enabled ? t("enabled") : t("disabled")}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            aria-label={t("editRule")}
-                            disabled={writesDisabled}
-                            onClick={(event) => openEdit(rule, event.currentTarget)}
-                            size="icon-sm"
-                            title={t("editRule")}
-                            type="button"
-                            variant="ghost"
-                          >
-                            <Pencil />
-                          </Button>
-                          <Button
-                            aria-label={t("deleteRule")}
-                            disabled={writesDisabled}
-                            onClick={(event) => {
-                              deleteTriggerRef.current = event.currentTarget;
-                              setPendingDelete(rule);
-                            }}
-                            size="icon-sm"
-                            title={t("deleteRule")}
-                            type="button"
-                            variant="ghost"
-                          >
-                            <Trash2 />
-                          </Button>
-                        </div>
-                      </TableCell>
+                  table.getRowModel().rows.map((row) => (
+                    <TableRow key={row.id}>
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell
+                          className={ruleColumnClassName(cell.column.id)}
+                          key={cell.id}
+                        >
+                          {flexRender(
+                            cell.column.columnDef.cell,
+                            cell.getContext(),
+                          )}
+                        </TableCell>
+                      ))}
                     </TableRow>
                   ))
                 )}
@@ -471,6 +518,22 @@ export function RulesPage() {
           </div>
         </section>
       </div>
+
+      <Button
+        aria-label={t("addRule")}
+        className="fixed bottom-6 right-6 z-20 size-12 rounded-full shadow-lg"
+        disabled={writesDisabled}
+        onClick={(event) => {
+          formTriggerRef.current = event.currentTarget;
+          openCreate();
+        }}
+        ref={addTriggerRef}
+        size="icon-lg"
+        title={t("addRule")}
+        type="button"
+      >
+        <Plus className="size-5" />
+      </Button>
 
       <Dialog
         open={formOpen}
@@ -487,7 +550,7 @@ export function RulesPage() {
             formTriggerRef.current?.isConnected &&
             !formTriggerRef.current.disabled
               ? formTriggerRef.current
-              : refreshTriggerRef.current
+              : addTriggerRef.current
           }
         >
           <form onSubmit={(event) => void saveRule(event)}>
@@ -520,11 +583,30 @@ export function RulesPage() {
                     <span className="text-sm font-medium">{t("ruleType")}</span>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue>{ruleTypeLabels[field.value]}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="whitelist">{t("whitelist")}</SelectItem>
                         <SelectItem value="blacklist">{t("blacklist")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </label>
+                )}
+              />
+              <Controller
+                control={control}
+                name="scope"
+                render={({ field }) => (
+                  <label className="grid gap-2">
+                    <span className="text-sm font-medium">{t("ruleScope")}</span>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue>{ruleScopeLabels[field.value]}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t("ruleScopeAll")}</SelectItem>
+                        <SelectItem value="files">{t("ruleScopeFiles")}</SelectItem>
+                        <SelectItem value="folders">{t("ruleScopeFolders")}</SelectItem>
                       </SelectContent>
                     </Select>
                   </label>
@@ -568,7 +650,7 @@ export function RulesPage() {
             deleteTriggerRef.current?.isConnected &&
             !deleteTriggerRef.current.disabled
               ? deleteTriggerRef.current
-              : refreshTriggerRef.current
+              : addTriggerRef.current
           }
         >
           <AlertDialogHeader>
@@ -606,9 +688,160 @@ export function RulesPage() {
         }
       >
         <ShieldCheck className="size-3" />
-        {whitelist ? t("whitelist") : t("blacklist")}
+        {ruleTypeLabels[ruleType]}
       </span>
     );
+  }
+
+  function RuleScopeLabel({ scope }: { scope: Rule["scope"] }) {
+    return (
+      <span className="text-sm text-muted-foreground">
+        {ruleScopeLabels[scope]}
+      </span>
+    );
+  }
+}
+
+interface FilterOption {
+  label: string;
+  value: string;
+}
+
+function KeywordFilterHeader({
+  clearLabel,
+  column,
+  filterLabel,
+  label,
+}: {
+  clearLabel: string;
+  column: Column<Rule, unknown>;
+  filterLabel: string;
+  label: string;
+}) {
+  const value = (column.getFilterValue() as string | undefined) ?? "";
+  const active = column.getIsFiltered();
+
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span>{label}</span>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              aria-label={filterLabel}
+              className={
+                active
+                  ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                  : "text-muted-foreground"
+              }
+              size="icon-xs"
+              title={filterLabel}
+              type="button"
+              variant="ghost"
+            >
+              <Search />
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end" className="w-64">
+          <div className="px-2 py-1">
+            <Input
+              aria-label={filterLabel}
+              autoFocus
+              onChange={(event) =>
+                column.setFilterValue(event.target.value || undefined)
+              }
+              onKeyDown={(event) => event.stopPropagation()}
+              placeholder={filterLabel}
+              type="search"
+              value={value}
+            />
+          </div>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={!active}
+            onSelect={() => column.setFilterValue(undefined)}
+          >
+            <FilterX />
+            {clearLabel}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+function EnumFilterHeader({
+  column,
+  emptyValue,
+  label,
+  options,
+}: {
+  column: Column<Rule, unknown>;
+  emptyValue: string;
+  label: string;
+  options: FilterOption[];
+}) {
+  const active = column.getIsFiltered();
+  const value = (column.getFilterValue() as string | undefined) ?? emptyValue;
+
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span>{label}</span>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              aria-label={label}
+              className={
+                active
+                  ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                  : "text-muted-foreground"
+              }
+              size="icon-xs"
+              title={label}
+              type="button"
+              variant="ghost"
+            >
+              <ListFilter />
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuRadioGroup
+            onValueChange={(nextValue) =>
+              column.setFilterValue(
+                nextValue === emptyValue ? undefined : nextValue,
+              )
+            }
+            value={value}
+          >
+            {options.map((option) => (
+              <DropdownMenuRadioItem key={option.value} value={option.value}>
+                {option.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+function ruleColumnClassName(columnId: string): string {
+  switch (columnId) {
+    case "keyword":
+      return "min-w-52";
+    case "rule_type":
+      return "min-w-40";
+    case "scope":
+      return "min-w-44";
+    case "status":
+      return "min-w-40";
+    case "actions":
+      return "w-28 text-right";
+    default:
+      return "";
   }
 }
 
@@ -617,7 +850,7 @@ function RuleTableMessage({ message }: { message: string }) {
     <TableRow>
       <TableCell
         className="h-40 text-center text-muted-foreground"
-        colSpan={4}
+        colSpan={5}
       >
         {message}
       </TableCell>

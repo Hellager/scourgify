@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
-pub(super) const SCHEMA_VERSION: u32 = 3;
+pub(super) const SCHEMA_VERSION: u32 = 4;
 pub(super) const BUILTIN_WHITELIST_RULES: &[&str] = &["Desktop", "Documents"];
 
 const SCHEMA_V1: &str = r#"
@@ -89,6 +89,11 @@ CREATE INDEX idx_records_run_id ON clean_records(run_id);
 CREATE INDEX idx_cleanup_runs_date_id ON cleanup_runs(started_at DESC, id DESC);
 "#;
 
+const SCHEMA_V4: &str = r#"
+ALTER TABLE rules ADD COLUMN scope TEXT NOT NULL DEFAULT 'all'
+    CHECK(scope IN ('all', 'files', 'folders'));
+"#;
+
 pub(super) fn migrate(connection: &mut Connection) -> Result<u32> {
     let current_version = connection
         .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
@@ -111,6 +116,10 @@ pub(super) fn migrate(connection: &mut Connection) -> Result<u32> {
     }
     if version == 2 {
         migrate_to_v3(connection)?;
+        version = 3;
+    }
+    if version == 3 {
+        migrate_to_v4(connection)?;
     }
     Ok(SCHEMA_VERSION)
 }
@@ -170,4 +179,19 @@ fn migrate_to_v3(connection: &mut Connection) -> Result<()> {
     transaction
         .commit()
         .context("failed to commit schema v3 migration")
+}
+
+fn migrate_to_v4(connection: &mut Connection) -> Result<()> {
+    let transaction = connection
+        .transaction()
+        .context("failed to start schema v4 migration")?;
+    transaction
+        .execute_batch(SCHEMA_V4)
+        .context("failed to migrate schema to v4")?;
+    transaction
+        .pragma_update(None, "user_version", 4)
+        .context("failed to set SQLite user_version to 4")?;
+    transaction
+        .commit()
+        .context("failed to commit schema v4 migration")
 }

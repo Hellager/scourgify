@@ -7,7 +7,7 @@ use crate::{
     db::{history, rules, DatabaseStateError, DbState},
     error::{wincent_command_error, CommandError, CommandResult, ErrorCode},
     quick_access::{QaItem, QuickAccessCache},
-    rules::RuleType,
+    rules::{RuleScope, RuleType},
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -53,8 +53,8 @@ pub(crate) fn get_grid_summary(
         }
     };
 
-    let recent_matches = cleanup::count_classifications(&recent, &rules);
-    let frequent_matches = cleanup::count_classifications(&frequent, &rules);
+    let recent_matches = cleanup::count_classifications(&recent, RuleScope::Files, &rules);
+    let frequent_matches = cleanup::count_classifications(&frequent, RuleScope::Folders, &rules);
     summary.blacklist_rules = Some(
         rules
             .iter()

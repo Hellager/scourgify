@@ -427,7 +427,15 @@ mod tests {
 
         assert_eq!(user_version(&connection), 1);
         assert_eq!(migrate(&mut connection).unwrap(), SCHEMA_VERSION);
-        assert_eq!(user_version(&connection), 3);
+        assert_eq!(user_version(&connection), SCHEMA_VERSION);
+        assert_eq!(
+            connection
+                .query_row("SELECT scope FROM rules LIMIT 1", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap(),
+            "all"
+        );
         assert_eq!(
             connection
                 .query_row("SELECT source FROM clean_records", [], |row| {

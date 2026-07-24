@@ -17,7 +17,7 @@ use crate::{
         rules, DbState,
     },
     quick_access::{QaBatchResult, QaItem},
-    rules::Rule,
+    rules::{Rule, RuleScope},
 };
 use matcher::{classify, MatchResult};
 use thiserror::Error;
@@ -64,11 +64,15 @@ pub(crate) struct ClassificationCounts {
     pub protected: usize,
 }
 
-pub(crate) fn count_classifications(items: &[QaItem], rules: &[Rule]) -> ClassificationCounts {
+pub(crate) fn count_classifications(
+    items: &[QaItem],
+    item_scope: RuleScope,
+    rules: &[Rule],
+) -> ClassificationCounts {
     items
         .iter()
         .fold(ClassificationCounts::default(), |mut counts, item| {
-            match classify(&item.path, rules) {
+            match classify(&item.path, item_scope, rules) {
                 MatchResult::Targeted { .. } => counts.targeted += 1,
                 MatchResult::Protected { .. } => counts.protected += 1,
                 MatchResult::Neutral => {}
@@ -83,11 +87,12 @@ pub fn list_classified(
     items: Vec<QaItem>,
 ) -> Result<Vec<ClassifiedItem>> {
     let item_type = item_type_for(qa_type)?;
+    let item_scope = rule_scope_for(qa_type)?;
     let rules = load_rules(database)?;
     Ok(items
         .into_iter()
         .map(|item| ClassifiedItem {
-            match_result: classify(&item.path, &rules),
+            match_result: classify(&item.path, item_scope, &rules),
             path: item.path,
             name: item.name,
             item_type: item_type.to_string(),
@@ -109,7 +114,12 @@ pub fn remove_selected(
     history_retention: usize,
 ) -> Result<QaBatchResult> {
     let rules = load_rules(database)?;
-    let prepared = prepare_cleanup(paths, &rules, Selection::AllUnprotected);
+    let prepared = prepare_cleanup(
+        paths,
+        rule_scope_for(qa_type)?,
+        &rules,
+        Selection::AllUnprotected,
+    );
     run_operation(
         database,
         backend,
@@ -138,7 +148,12 @@ pub fn empty_current(
         .into_iter()
         .map(|item| item.path)
         .collect();
-    let prepared = prepare_cleanup(paths, &rules, Selection::AllUnprotected);
+    let prepared = prepare_cleanup(
+        paths,
+        rule_scope_for(qa_type)?,
+        &rules,
+        Selection::AllUnprotected,
+    );
     run_operation(
         database,
         backend,
@@ -168,7 +183,12 @@ pub fn smart_clean(
         .into_iter()
         .map(|item| item.path)
         .collect();
-    let prepared = prepare_cleanup(paths, &rules, Selection::TargetedOnly);
+    let prepared = prepare_cleanup(
+        paths,
+        rule_scope_for(qa_type)?,
+        &rules,
+        Selection::TargetedOnly,
+    );
     run_operation(
         database,
         backend,
@@ -199,7 +219,12 @@ pub(crate) fn smart_clean_in_run(
         .into_iter()
         .map(|item| item.path)
         .collect();
-    let prepared = prepare_cleanup(paths, &rules, Selection::TargetedOnly);
+    let prepared = prepare_cleanup(
+        paths,
+        rule_scope_for(qa_type)?,
+        &rules,
+        Selection::TargetedOnly,
+    );
     execute(
         database,
         backend,
@@ -342,7 +367,12 @@ fn load_rules(database: &DbState) -> Result<Vec<Rule>> {
     database.with_connection(|connection| rules::list(connection))
 }
 
-fn prepare_cleanup(paths: Vec<String>, rules: &[Rule], selection: Selection) -> PreparedCleanup {
+fn prepare_cleanup(
+    paths: Vec<String>,
+    item_scope: RuleScope,
+    rules: &[Rule],
+    selection: Selection,
+) -> PreparedCleanup {
     let mut seen = HashSet::new();
     let unique_paths = paths
         .into_iter()
@@ -352,7 +382,7 @@ fn prepare_cleanup(paths: Vec<String>, rules: &[Rule], selection: Selection) -> 
     let mut skipped_protected = Vec::new();
 
     for path in &unique_paths {
-        let match_result = classify(path, rules);
+        let match_result = classify(path, item_scope, rules);
         match (&selection, &match_result) {
             (Selection::AllUnprotected, MatchResult::Protected { .. }) => {
                 skipped_protected.push(path.clone());
@@ -407,6 +437,14 @@ fn item_type_for(qa_type: &str) -> Result<&'static str> {
     }
 }
 
+fn rule_scope_for(qa_type: &str) -> Result<RuleScope> {
+    match qa_type {
+        "recent" => Ok(RuleScope::Files),
+        "frequent" => Ok(RuleScope::Folders),
+        _ => Err(CleanupError::UnsupportedType(qa_type.to_string()).into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,6 +462,7 @@ mod tests {
                 r"C:\Temp\cache.bin".to_string(),
                 r"C:\Downloads\notes.txt".to_string(),
             ],
+            RuleScope::Files,
             &rules,
             Selection::AllUnprotected,
         );
@@ -450,6 +489,7 @@ mod tests {
                 r"C:\Temp\cache.bin".to_string(),
                 r"C:\Downloads\notes.txt".to_string(),
             ],
+            RuleScope::Files,
             &rules,
             Selection::TargetedOnly,
         );
@@ -473,7 +513,7 @@ mod tests {
         ];
 
         assert_eq!(
-            count_classifications(&items, &rules),
+            count_classifications(&items, RuleScope::Files, &rules),
             ClassificationCounts {
                 targeted: 1,
                 protected: 1,
@@ -485,6 +525,7 @@ mod tests {
     fn cleanup_deduplicates_paths_case_insensitively() {
         let prepared = prepare_cleanup(
             vec![r"C:\Temp\A.txt".to_string(), r"c:\temp\a.TXT".to_string()],
+            RuleScope::Files,
             &[],
             Selection::AllUnprotected,
         );
@@ -536,6 +577,7 @@ mod tests {
             id,
             keyword: keyword.to_string(),
             rule_type,
+            scope: RuleScope::All,
             enabled: true,
             created_at: "2026-07-13 00:00:00".to_string(),
         }
