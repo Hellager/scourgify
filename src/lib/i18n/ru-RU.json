@@ -248,7 +248,7 @@
   "runtimeRules": "Сопоставление правил",
   "runtimeRunning": "Выполняется",
   "runtimeStatus": "Состояние служб",
-  "runtimeStatusSummary": "Состояние служб: {{status}}",
+  "runtimeStatusSummary": "Состояние служб: {status}",
   "runtimeUnknown": "Неизвестно",
   "ruleToggleLabel": "Переключить {keyword}",
   "ruleType": "Тип правила",

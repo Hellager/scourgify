@@ -5,12 +5,16 @@ import {
   type Column,
   type ColumnDef,
   type ColumnFiltersState,
+  type PaginationState,
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
+  getPaginationRowModel,
   useReactTable,
 } from "@tanstack/react-table";
 import {
+  ChevronLeft,
+  ChevronRight,
   FilterX,
   ListFilter,
   Pencil,
@@ -112,6 +116,10 @@ export function RulesPage() {
   const [pendingDelete, setPendingDelete] = useState<Rule | null>(null);
   const [mutatingId, setMutatingId] = useState<number | null>(null);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 10,
+  });
   const addTriggerRef = useRef<HTMLButtonElement | null>(null);
   const formTriggerRef = useRef<HTMLButtonElement | null>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -414,12 +422,31 @@ export function RulesPage() {
   const table = useReactTable({
     data: rules,
     columns,
-    state: { columnFilters },
+    state: { columnFilters, pagination },
+    autoResetPageIndex: false,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
     getRowId: (rule) => String(rule.id),
-    onColumnFiltersChange: setColumnFilters,
+    onColumnFiltersChange: (updater) => {
+      setColumnFilters(updater);
+      setPagination((current) =>
+        current.pageIndex === 0 ? current : { ...current, pageIndex: 0 },
+      );
+    },
+    onPaginationChange: setPagination,
   });
+  const filteredRuleCount = table.getFilteredRowModel().rows.length;
+  const pageCount = table.getPageCount();
+
+  useEffect(() => {
+    const lastPageIndex = Math.max(pageCount - 1, 0);
+    setPagination((current) =>
+      current.pageIndex > lastPageIndex
+        ? { ...current, pageIndex: lastPageIndex }
+        : current,
+    );
+  }, [pageCount]);
 
   return (
     <>
@@ -494,7 +521,7 @@ export function RulesPage() {
                   <RuleTableMessage message={t("loadingRules")} />
                 ) : rules.length === 0 ? (
                   <RuleTableMessage message={t("noRules")} />
-                ) : table.getRowModel().rows.length === 0 ? (
+                ) : filteredRuleCount === 0 ? (
                   <RuleTableMessage message={t("noMatches")} />
                 ) : (
                   table.getRowModel().rows.map((row) => (
@@ -516,6 +543,39 @@ export function RulesPage() {
               </TableBody>
             </Table>
           </div>
+          {!loading && rules.length > 0 ? (
+            <div className="flex flex-col gap-3 py-4 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+              <span>
+                {t("pageStatus", {
+                  count: filteredRuleCount,
+                  page: pageCount === 0 ? 0 : pagination.pageIndex + 1,
+                  pageCount,
+                })}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  disabled={!table.getCanPreviousPage()}
+                  onClick={() => table.previousPage()}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <ChevronLeft />
+                  {t("previous")}
+                </Button>
+                <Button
+                  disabled={!table.getCanNextPage()}
+                  onClick={() => table.nextPage()}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {t("next")}
+                  <ChevronRight />
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </section>
       </div>
 

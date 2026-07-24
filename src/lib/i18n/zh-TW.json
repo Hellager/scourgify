@@ -248,7 +248,7 @@
   "runtimeRules": "規則匹配",
   "runtimeRunning": "執行中",
   "runtimeStatus": "服務狀態",
-  "runtimeStatusSummary": "服務狀態：{{status}}",
+  "runtimeStatusSummary": "服務狀態：{status}",
   "runtimeUnknown": "未知",
   "ruleToggleLabel": "切換 {keyword}",
   "ruleType": "規則類型",

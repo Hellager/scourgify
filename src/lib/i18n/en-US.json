@@ -248,7 +248,7 @@
   "runtimeRules": "Rule matching",
   "runtimeRunning": "Running",
   "runtimeStatus": "Service status",
-  "runtimeStatusSummary": "Service status: {{status}}",
+  "runtimeStatusSummary": "Service status: {status}",
   "runtimeUnknown": "Unknown",
   "ruleToggleLabel": "Toggle {keyword}",
   "ruleType": "Rule type",

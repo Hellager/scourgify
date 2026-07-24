@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   Activity,
+  Dices,
   FileClock,
   FolderClock,
   RefreshCw,
@@ -9,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -77,6 +79,10 @@ interface EventEntry {
   payload: unknown;
 }
 
+interface MockRulesResult {
+  generated: number;
+}
+
 const scenarios: Array<{ label: string; value: MockScenario }> = [
   { label: "Normal", value: "normal" },
   { label: "Empty", value: "empty" },
@@ -89,6 +95,10 @@ export function MockTestPage() {
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ruleCount, setRuleCount] = useState("20");
+  const [generatedRuleCount, setGeneratedRuleCount] = useState<number | null>(
+    null,
+  );
 
   const recordEvent = useCallback((name: string, payload: unknown) => {
     setEvents((current) => [
@@ -124,6 +134,27 @@ export function MockTestPage() {
     setError(null);
     try {
       setState(await operation());
+    } catch (value) {
+      setError(commandErrorMessage(value));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const generateRules = async () => {
+    const count = Number(ruleCount);
+    if (!Number.isInteger(count) || count < 1 || count > 1_000) {
+      setError("Rule count must be between 1 and 1000.");
+      return;
+    }
+
+    setPending(true);
+    setError(null);
+    try {
+      const result = await invokeCommand<MockRulesResult>("generate_mock_rules", {
+        count,
+      });
+      setGeneratedRuleCount(result.generated);
     } catch (value) {
       setError(commandErrorMessage(value));
     } finally {
@@ -218,6 +249,37 @@ export function MockTestPage() {
             <RotateCcw />
             Reset
           </Button>
+        </div>
+      </section>
+
+      <section className="border-b py-5">
+        <h2 className="mb-3 text-sm font-semibold">Mock rules</h2>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="grid w-40 gap-2 text-sm font-medium">
+            Number of rules
+            <Input
+              disabled={!enabled || pending}
+              inputMode="numeric"
+              max={1_000}
+              min={1}
+              onChange={(event) => setRuleCount(event.target.value)}
+              type="number"
+              value={ruleCount}
+            />
+          </label>
+          <Button
+            disabled={!enabled || pending}
+            onClick={() => void generateRules()}
+            type="button"
+          >
+            <Dices />
+            Generate rules
+          </Button>
+          {generatedRuleCount !== null ? (
+            <span className="pb-2 text-xs text-muted-foreground">
+              {generatedRuleCount} mock rules generated.
+            </span>
+          ) : null}
         </div>
       </section>
 

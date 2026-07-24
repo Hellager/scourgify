@@ -36,7 +36,11 @@ void i18n.use(initReactI18next).init({
   resources,
   lng: "en-US",
   fallbackLng: "en-US",
-  interpolation: { escapeValue: false },
+  interpolation: {
+    escapeValue: false,
+    prefix: "{",
+    suffix: "}",
+  },
   initImmediate: false,
 });
 

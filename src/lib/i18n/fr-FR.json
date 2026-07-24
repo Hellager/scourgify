@@ -248,7 +248,7 @@
   "runtimeRules": "Correspondance des règles",
   "runtimeRunning": "En cours",
   "runtimeStatus": "État des services",
-  "runtimeStatusSummary": "État des services : {{status}}",
+  "runtimeStatusSummary": "État des services : {status}",
   "runtimeUnknown": "Inconnu",
   "ruleToggleLabel": "Activer ou désactiver {keyword}",
   "ruleType": "Type de règle",

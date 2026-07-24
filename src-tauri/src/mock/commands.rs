@@ -1,4 +1,6 @@
 use chrono::Utc;
+use fake::{faker::filesystem::en::FileName, Fake, Faker};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -9,14 +11,22 @@ use crate::{
     error::{CommandError, CommandResult, ErrorCode},
     privacy::PrivacyManager,
     quick_access::{QuickAccessCache, QuickAccessWatchers},
+    rules::{NewRule, RuleScope, RuleType},
 };
 
 use super::{MockScenario, MockSnapshot};
+
+const MAX_MOCK_RULES: usize = 1_000;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct MockState {
     pub enabled: bool,
     pub snapshot: MockSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct MockRulesResult {
+    pub generated: usize,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -130,6 +140,31 @@ pub(crate) fn reset_mock_data(
 }
 
 #[tauri::command]
+pub(crate) fn generate_mock_rules(
+    backend: State<'_, QuickAccessBackendState>,
+    database: State<'_, DbState>,
+    count: usize,
+) -> CommandResult<MockRulesResult> {
+    ensure_enabled(backend.inner())?;
+    if !(1..=MAX_MOCK_RULES).contains(&count) {
+        return Err(CommandError::expected(
+            "generate_mock_rules",
+            ErrorCode::ValidationInvalidArgument,
+            "The mock rule count is invalid.",
+            false,
+            format!("rule count must be between 1 and {MAX_MOCK_RULES}"),
+        ));
+    }
+
+    let mock_rules = random_rules(count);
+    database
+        .with_connection(|connection| replace_mock_rules(connection, mock_rules))
+        .map_err(|error| mock_error("generate_mock_rules", error))?;
+
+    Ok(MockRulesResult { generated: count })
+}
+
+#[tauri::command]
 pub(crate) fn trigger_mock_event(
     app: AppHandle,
     backend: State<'_, QuickAccessBackendState>,
@@ -210,6 +245,57 @@ fn state(backend: &QuickAccessBackendState) -> CommandResult<MockState> {
     })
 }
 
+fn random_rules(count: usize) -> Vec<NewRule> {
+    (0..count).map(random_rule).collect()
+}
+
+fn replace_mock_rules(
+    connection: &mut rusqlite::Connection,
+    mock_rules: Vec<NewRule>,
+) -> anyhow::Result<()> {
+    let transaction = connection.transaction()?;
+    transaction.execute("DELETE FROM rules", [])?;
+    {
+        let mut statement = transaction.prepare(
+            "INSERT INTO rules (keyword, rule_type, scope, enabled)
+             VALUES (?1, ?2, ?3, ?4)",
+        )?;
+        for rule in mock_rules {
+            statement.execute(params![
+                rule.keyword,
+                rule.rule_type.as_str(),
+                rule.scope.as_str(),
+                rule.enabled
+            ])?;
+        }
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
+fn random_rule(index: usize) -> NewRule {
+    let generated: String = FileName().fake();
+    let keyword = generated.trim();
+    let keyword = if keyword.is_empty() { "item" } else { keyword };
+    let suffix: u32 = (0..1_000_000).fake();
+    let scope_index: u8 = (0..3).fake();
+
+    NewRule {
+        keyword: format!("{keyword}-{suffix:06}-{index}"),
+        rule_type: if Faker.fake() {
+            RuleType::Whitelist
+        } else {
+            RuleType::Blacklist
+        },
+        scope: match scope_index {
+            0 => RuleScope::All,
+            1 => RuleScope::Files,
+            _ => RuleScope::Folders,
+        },
+        enabled: Faker.fake(),
+    }
+}
+
 fn ensure_enabled(backend: &QuickAccessBackendState) -> CommandResult<()> {
     if backend.mode() == BackendMode::Mock {
         Ok(())
@@ -232,4 +318,53 @@ fn mock_error(operation: &str, error: impl std::fmt::Display) -> CommandError {
         true,
         error,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn generates_requested_number_of_unique_mock_rules() {
+        let rules = random_rules(1_000);
+
+        assert_eq!(rules.len(), 1_000);
+        assert!(rules.iter().all(|rule| !rule.keyword.trim().is_empty()));
+        assert_eq!(
+            rules
+                .iter()
+                .map(|rule| rule.keyword.as_str())
+                .collect::<HashSet<_>>()
+                .len(),
+            1_000
+        );
+    }
+
+    #[test]
+    fn replaces_existing_rules_with_large_batch() {
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE rules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    keyword TEXT NOT NULL,
+                    rule_type TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    enabled INTEGER NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO rules (keyword, rule_type, scope, enabled)
+                VALUES ('existing', 'whitelist', 'all', 1);",
+            )
+            .unwrap();
+
+        replace_mock_rules(&mut connection, random_rules(1_000)).unwrap();
+
+        let count = connection
+            .query_row("SELECT COUNT(*) FROM rules", [], |row| row.get::<_, i64>(0))
+            .unwrap();
+        assert_eq!(count, 1_000);
+    }
 }
