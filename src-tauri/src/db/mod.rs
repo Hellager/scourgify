@@ -15,6 +15,7 @@ mod history_export;
 pub(crate) mod history_runs;
 mod migrations;
 pub(crate) mod rules;
+pub(crate) mod rules_transfer;
 mod stats;
 
 use migrations::migrate;

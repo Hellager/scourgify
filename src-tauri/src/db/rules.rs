@@ -92,6 +92,26 @@ pub fn remove(connection: &Connection, id: i64) -> Result<()> {
     ensure_rule_changed(id, changed)
 }
 
+pub fn clear(connection: &mut Connection, ids: Option<&[i64]>) -> Result<usize> {
+    let Some(ids) = ids else {
+        return connection
+            .execute("DELETE FROM rules", [])
+            .context("failed to clear rules");
+    };
+    let transaction = connection.transaction()?;
+    let mut affected = 0;
+    {
+        let mut statement = transaction.prepare("DELETE FROM rules WHERE id = ?1")?;
+        for id in ids {
+            affected += statement
+                .execute([id])
+                .with_context(|| format!("failed to clear rule {id}"))?;
+        }
+    }
+    transaction.commit()?;
+    Ok(affected)
+}
+
 pub fn toggle(connection: &Connection, id: i64, enabled: bool) -> Result<Rule> {
     let changed = connection
         .execute(
@@ -213,6 +233,47 @@ mod tests {
         remove(&connection, id).unwrap();
 
         assert!(find(&connection, id).unwrap().is_none());
+    }
+
+    #[test]
+    fn clears_all_rules() {
+        let mut connection = test_connection();
+        connection.execute("DELETE FROM rules", []).unwrap();
+        add(
+            &connection,
+            new_rule("Temp", RuleType::Blacklist, RuleScope::All, true),
+        )
+        .unwrap();
+        add(
+            &connection,
+            new_rule("Projects", RuleType::Whitelist, RuleScope::Folders, false),
+        )
+        .unwrap();
+
+        assert_eq!(clear(&mut connection, None).unwrap(), 2);
+        assert!(list(&connection).unwrap().is_empty());
+        assert_eq!(clear(&mut connection, None).unwrap(), 0);
+    }
+
+    #[test]
+    fn clears_only_selected_rules() {
+        let mut connection = test_connection();
+        connection.execute("DELETE FROM rules", []).unwrap();
+        let first = add(
+            &connection,
+            new_rule("Temp", RuleType::Blacklist, RuleScope::All, true),
+        )
+        .unwrap();
+        let second = add(
+            &connection,
+            new_rule("Projects", RuleType::Whitelist, RuleScope::Folders, false),
+        )
+        .unwrap();
+
+        assert_eq!(clear(&mut connection, Some(&[first.id])).unwrap(), 1);
+        let remaining = list(&connection).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, second.id);
     }
 
     #[test]

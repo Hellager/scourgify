@@ -121,6 +121,13 @@ impl MockQuickAccessBackend {
         if path.trim().is_empty() {
             return PathKind::Missing;
         }
+        let local_path = std::path::Path::new(path);
+        if local_path.is_file() {
+            return PathKind::File;
+        }
+        if local_path.is_dir() {
+            return PathKind::Directory;
+        }
         if path.ends_with("\\") || path.contains("\\Folders\\") {
             PathKind::Directory
         } else if path.contains("\\Recent\\") || path.ends_with(".txt") || path.ends_with(".docx") {

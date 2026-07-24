@@ -147,7 +147,8 @@ pub(crate) fn open_in_explorer(
         .map_err(|error| validation_error("open_in_explorer", error))?;
     log::info!("open in explorer started path={}", path.display());
 
-    if backend.mode() == BackendMode::Real {
+    // Mock mode still uses the real filesystem for imported/exported files.
+    if backend.mode() == BackendMode::Real || path.exists() {
         tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|error| {
             CommandError::unexpected(
                 "open_in_explorer",

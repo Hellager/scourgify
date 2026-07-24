@@ -48,7 +48,7 @@ pub(crate) struct Rule {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct NewRule {
     pub keyword: String,
     pub rule_type: RuleType,

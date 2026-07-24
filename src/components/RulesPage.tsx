@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { open as openFile, save as saveFile } from "@tauri-apps/plugin-dialog";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
 import {
@@ -6,6 +7,7 @@ import {
   type ColumnDef,
   type ColumnFiltersState,
   type PaginationState,
+  type RowSelectionState,
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
@@ -15,12 +17,17 @@ import {
 import {
   ChevronLeft,
   ChevronRight,
+  FileDown,
+  FileUp,
   FilterX,
   ListFilter,
+  LoaderCircle,
+  MoreHorizontal,
   Pencil,
   Plus,
   Search,
   ShieldCheck,
+  SquareX,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -40,6 +47,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -92,6 +100,34 @@ interface Rule extends RuleForm {
   created_at: string;
 }
 
+interface RuleExportResult {
+  count: number;
+  path: string;
+  version: number;
+}
+
+interface RuleImportResult {
+  count: number;
+  version: number;
+}
+
+interface RuleImportPreview {
+  count: number;
+  rules: RuleForm[];
+  version: number;
+}
+
+interface ActionReceipt {
+  affected: number;
+}
+
+interface PendingRuleImport {
+  path: string;
+  preview: RuleImportPreview;
+}
+
+type ClearTarget = "all" | "selected";
+
 type PrivacyState =
   | "Inactive"
   | "ActiveFull"
@@ -104,6 +140,8 @@ const emptyRule: RuleForm = {
   enabled: true,
 };
 
+const IMPORT_PREVIEW_PAGE_SIZE = 20;
+
 export function RulesPage() {
   const { t } = useI18n();
   const [rules, setRules] = useState<Rule[]>([]);
@@ -114,12 +152,23 @@ export function RulesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<Rule | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Rule | null>(null);
+  const [clearTarget, setClearTarget] = useState<ClearTarget | null>(null);
+  const [clearing, setClearing] = useState(false);
   const [mutatingId, setMutatingId] = useState<number | null>(null);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: 10,
   });
+  const [transferring, setTransferring] = useState<
+    "import" | "export" | null
+  >(null);
+  const [pendingImport, setPendingImport] = useState<PendingRuleImport | null>(
+    null,
+  );
+  const [importSelection, setImportSelection] = useState<Set<number>>(new Set());
+  const [importPage, setImportPage] = useState(0);
   const addTriggerRef = useRef<HTMLButtonElement | null>(null);
   const formTriggerRef = useRef<HTMLButtonElement | null>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -147,6 +196,7 @@ export function RulesPage() {
       setRules(
         databaseStatus.available ? await invokeCommand<Rule[]>("get_rules") : [],
       );
+      setRowSelection({});
     } catch (loadError) {
       setRules([]);
       setError(errorMessage(loadError));
@@ -161,6 +211,24 @@ export function RulesPage() {
 
   const writesDisabled =
     loading || database?.available !== true || privacyActive;
+  const importDisabled = writesDisabled || transferring !== null;
+  const exportDisabled =
+    loading ||
+    database?.available !== true ||
+    rules.length === 0 ||
+    transferring !== null;
+  const clearAllDisabled =
+    writesDisabled || rules.length === 0 || transferring !== null || clearing;
+  const selectedRuleIds = useMemo(
+    () =>
+      rules
+        .filter((rule) => rowSelection[String(rule.id)])
+        .map((rule) => rule.id),
+    [rowSelection, rules],
+  );
+  const clearRuleSelection = useCallback(() => setRowSelection({}), []);
+  const clearSelectedDisabled =
+    clearAllDisabled || selectedRuleIds.length === 0;
   const ruleTypeLabels = useMemo<Record<RuleForm["rule_type"], string>>(
     () => ({
       whitelist: t("whitelist"),
@@ -277,8 +345,187 @@ export function RulesPage() {
     }
   };
 
+  const selectRuleImportFile = useCallback(async (title: string) => {
+    const path = await openFile({
+      directory: false,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+      multiple: false,
+      title,
+    });
+    return path && !Array.isArray(path) ? path : null;
+  }, []);
+
+  const importAllRules = useCallback(async () => {
+    try {
+      const path = await selectRuleImportFile(t("importAllRules"));
+      if (!path) {
+        return;
+      }
+      setTransferring("import");
+      const result = await invokeCommand<RuleImportResult>("import_rules", {
+        indices: null,
+        path,
+      });
+      await loadRules();
+      toast.success(t("rulesImported", { count: result.count }));
+    } catch (importError) {
+      toast.error(errorMessage(importError));
+    } finally {
+      setTransferring(null);
+    }
+  }, [loadRules, selectRuleImportFile, t]);
+
+  const chooseRulesToImport = useCallback(async () => {
+    try {
+      const path = await selectRuleImportFile(t("selectiveImportRules"));
+      if (!path) {
+        return;
+      }
+      setTransferring("import");
+      const preview = await invokeCommand<RuleImportPreview>(
+        "preview_rules_import",
+        {
+          path,
+        },
+      );
+      setPendingImport({ path, preview });
+      setImportSelection(new Set(preview.rules.map((_, index) => index)));
+      setImportPage(0);
+    } catch (importError) {
+      toast.error(errorMessage(importError));
+    } finally {
+      setTransferring(null);
+    }
+  }, [selectRuleImportFile, t]);
+
+  const importSelectedRules = async () => {
+    if (!pendingImport || importSelection.size === 0) {
+      return;
+    }
+    setTransferring("import");
+    try {
+      const result = await invokeCommand<RuleImportResult>("import_rules", {
+        indices: Array.from(importSelection).sort((left, right) => left - right),
+        path: pendingImport.path,
+      });
+      await loadRules();
+      setPendingImport(null);
+      setImportSelection(new Set());
+      toast.success(t("rulesImported", { count: result.count }));
+    } catch (importError) {
+      toast.error(errorMessage(importError));
+    } finally {
+      setTransferring(null);
+    }
+  };
+
+  const exportRules = useCallback(
+    async (ids?: number[]) => {
+      try {
+        const selected = ids && ids.length > 0;
+        const path = await saveFile({
+          defaultPath: ruleExportFileName(selected ? "selected" : undefined),
+          filters: [{ name: "JSON", extensions: ["json"] }],
+          title: selected
+            ? t("exportSelectedRules", { count: ids.length })
+            : t("exportAllRules"),
+        });
+        if (!path) {
+          return;
+        }
+        setTransferring("export");
+        const result = await invokeCommand<RuleExportResult>("export_rules", {
+          ids: selected ? ids : undefined,
+          path,
+        });
+        toast.success(t("rulesExported", { count: result.count }), {
+          action: {
+            label: t("openFolder"),
+            onClick: () => {
+              void invokeCommand("open_in_explorer", {
+                path: result.path,
+              }).catch((openError) => toast.error(errorMessage(openError)));
+            },
+          },
+        });
+      } catch (exportError) {
+        toast.error(errorMessage(exportError));
+      } finally {
+        setTransferring(null);
+      }
+    },
+    [t],
+  );
+
+  const clearRules = async () => {
+    if (!clearTarget) {
+      return;
+    }
+    const ids = clearTarget === "selected" ? selectedRuleIds : undefined;
+    if (clearTarget === "selected" && ids.length === 0) {
+      return;
+    }
+    const selectedIds = ids ? new Set(ids) : null;
+    setClearing(true);
+    try {
+      const result = await invokeCommand<ActionReceipt>("clear_rules", {
+        ids: ids ?? null,
+      });
+      setRules((current) =>
+        selectedIds
+          ? current.filter((rule) => !selectedIds.has(rule.id))
+          : [],
+      );
+      setRowSelection({});
+      setClearTarget(null);
+      toast.success(t("rulesCleared", { count: result.affected }));
+    } catch (clearError) {
+      toast.error(errorMessage(clearError));
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const importPageCount = pendingImport
+    ? Math.ceil(pendingImport.preview.rules.length / IMPORT_PREVIEW_PAGE_SIZE)
+    : 0;
+  const importPageRules = pendingImport
+    ? pendingImport.preview.rules
+        .slice(
+          importPage * IMPORT_PREVIEW_PAGE_SIZE,
+          (importPage + 1) * IMPORT_PREVIEW_PAGE_SIZE,
+        )
+        .map((rule, offset) => ({
+          index: importPage * IMPORT_PREVIEW_PAGE_SIZE + offset,
+          rule,
+        }))
+    : [];
+
   const columns = useMemo<ColumnDef<Rule>[]>(
     () => [
+      {
+        id: "select",
+        enableColumnFilter: false,
+        header: ({ table: ruleTable }) => (
+          <Checkbox
+            aria-label={t("selectCurrentPage")}
+            checked={ruleTable.getIsAllPageRowsSelected()}
+            disabled={ruleTable.getRowModel().rows.length === 0}
+            indeterminate={ruleTable.getIsSomePageRowsSelected()}
+            onCheckedChange={(checked) =>
+              ruleTable.toggleAllPageRowsSelected(Boolean(checked))
+            }
+            parent
+          />
+        ),
+        cell: ({ row }) => (
+          <Checkbox
+            aria-label={t("selectItem", { name: row.original.keyword })}
+            checked={row.getIsSelected()}
+            onCheckedChange={(checked) => row.toggleSelected(Boolean(checked))}
+          />
+        ),
+      },
       {
         accessorKey: "keyword",
         header: ({ column }) => (
@@ -376,7 +623,96 @@ export function RulesPage() {
       {
         id: "actions",
         enableColumnFilter: false,
-        header: t("actions"),
+        header: () => (
+          <div className="flex min-w-0 items-center justify-between gap-1">
+            <span className="truncate" title={t("actions")}>
+              {t("actions")}
+            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    aria-label={t("ruleDataActions")}
+                    className="text-muted-foreground"
+                    disabled={
+                      importDisabled && exportDisabled && clearAllDisabled
+                    }
+                    size="icon-xs"
+                    title={t("ruleDataActions")}
+                    type="button"
+                    variant="ghost"
+                  >
+                    {transferring || clearing ? (
+                      <LoaderCircle className="animate-spin" />
+                    ) : (
+                      <MoreHorizontal />
+                    )}
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end" className="w-60">
+                <DropdownMenuItem
+                  disabled={selectedRuleIds.length === 0}
+                  onClick={clearRuleSelection}
+                >
+                  <SquareX />
+                  {t("deselectAllRules")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={importDisabled}
+                  onClick={() => void importAllRules()}
+                >
+                  <FileUp />
+                  {t("importAllRules")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={importDisabled}
+                  onClick={() => void chooseRulesToImport()}
+                >
+                  <FileUp />
+                  {t("selectiveImportRules")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={exportDisabled}
+                  onClick={() => void exportRules()}
+                >
+                  <FileDown />
+                  {t("exportAllRules")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={exportDisabled || selectedRuleIds.length === 0}
+                  onClick={() => void exportRules(selectedRuleIds)}
+                >
+                  <FileDown />
+                  {t("exportSelectedRules", {
+                    count: selectedRuleIds.length,
+                  })}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={clearSelectedDisabled}
+                  onClick={() => setClearTarget("selected")}
+                  variant="destructive"
+                >
+                  <Trash2 />
+                  {t("clearSelectedRules", {
+                    count: selectedRuleIds.length,
+                  })}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={clearAllDisabled}
+                  onClick={() => setClearTarget("all")}
+                  variant="destructive"
+                >
+                  <Trash2 />
+                  {t("clearRules")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ),
         cell: ({ row }) => (
           <div className="flex gap-1">
             <Button
@@ -409,12 +745,23 @@ export function RulesPage() {
       },
     ],
     [
+      chooseRulesToImport,
+      clearAllDisabled,
+      clearRuleSelection,
+      clearSelectedDisabled,
+      clearing,
+      exportDisabled,
+      exportRules,
+      importAllRules,
+      importDisabled,
       mutatingId,
       openEdit,
       ruleScopeLabels,
       ruleTypeLabels,
+      selectedRuleIds,
       t,
       toggleRule,
+      transferring,
       writesDisabled,
     ],
   );
@@ -422,12 +769,13 @@ export function RulesPage() {
   const table = useReactTable({
     data: rules,
     columns,
-    state: { columnFilters, pagination },
+    state: { columnFilters, pagination, rowSelection },
     autoResetPageIndex: false,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getRowId: (rule) => String(rule.id),
+    onRowSelectionChange: setRowSelection,
     onColumnFiltersChange: (updater) => {
       setColumnFilters(updater);
       setPagination((current) =>
@@ -545,13 +893,29 @@ export function RulesPage() {
           </div>
           {!loading && rules.length > 0 ? (
             <div className="grid gap-y-3 py-4 text-sm text-muted-foreground sm:grid-cols-[minmax(0,1fr)_auto_7rem] sm:items-center">
-              <span className="min-w-0 pr-16 sm:pr-0">
-                {t("pageStatus", {
-                  count: filteredRuleCount,
-                  page: pageCount === 0 ? 0 : pagination.pageIndex + 1,
-                  pageCount,
-                })}
-              </span>
+              <div className="flex min-w-0 flex-wrap items-center gap-2 pr-16 sm:pr-0">
+                <span>
+                  {t("pageStatus", {
+                    count: filteredRuleCount,
+                    page: pageCount === 0 ? 0 : pagination.pageIndex + 1,
+                    pageCount,
+                  })}
+                </span>
+                {selectedRuleIds.length > 0 ? (
+                  <Button
+                    aria-label={t("deselectAllRules")}
+                    className="h-7 px-2"
+                    onClick={clearRuleSelection}
+                    size="sm"
+                    title={t("deselectAllRules")}
+                    type="button"
+                    variant="ghost"
+                  >
+                    <SquareX />
+                    {t("deselectAllRules")} ({selectedRuleIds.length})
+                  </Button>
+                ) : null}
+              </div>
               <div className="flex flex-wrap items-center justify-end gap-2 pr-16 sm:justify-self-end sm:pr-0">
                 <Button
                   disabled={!table.getCanPreviousPage()}
@@ -595,6 +959,168 @@ export function RulesPage() {
       >
         <Plus className="size-5" />
       </Button>
+
+      <Dialog
+        open={pendingImport !== null}
+        onOpenChange={(open) => {
+          if (!open && transferring !== "import") {
+            setPendingImport(null);
+            setImportSelection(new Set());
+            setImportPage(0);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl" closeLabel={t("close")}>
+          <DialogHeader>
+            <DialogTitle>{t("selectiveImportRules")}</DialogTitle>
+            <DialogDescription>{t("selectRulesToImport")}</DialogDescription>
+          </DialogHeader>
+          {pendingImport ? (
+            <div className="grid gap-3">
+              <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                <div className="flex min-w-0 items-center gap-3">
+                  <Checkbox
+                    aria-label={t("selectAllRules")}
+                    checked={
+                      importSelection.size === pendingImport.preview.rules.length
+                    }
+                    indeterminate={
+                      importSelection.size > 0 &&
+                      importSelection.size < pendingImport.preview.rules.length
+                    }
+                    onCheckedChange={(checked) =>
+                      setImportSelection(
+                        checked
+                          ? new Set(
+                              pendingImport.preview.rules.map(
+                                (_, index) => index,
+                              ),
+                            )
+                          : new Set(),
+                      )
+                    }
+                    parent
+                  />
+                  <span className="truncate text-sm font-medium">
+                    {t("selectedRulesCount", {
+                      count: pendingImport.preview.rules.length,
+                      selected: importSelection.size,
+                    })}
+                  </span>
+                </div>
+                <Button
+                  onClick={() =>
+                    setImportSelection(
+                      importSelection.size === pendingImport.preview.rules.length
+                        ? new Set()
+                        : new Set(
+                            pendingImport.preview.rules.map((_, index) => index),
+                          ),
+                    )
+                  }
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  {importSelection.size === pendingImport.preview.rules.length
+                    ? t("deselectAllRules")
+                    : t("selectAllRules")}
+                </Button>
+              </div>
+              <div className="max-h-72 overflow-y-auto rounded-md border">
+                {importPageRules.map(({ index, rule }) => (
+                  <div
+                    className="flex min-h-11 items-center gap-3 border-b px-3 py-2 last:border-b-0 hover:bg-muted/50"
+                    key={`${index}-${rule.keyword}`}
+                  >
+                    <Checkbox
+                      aria-label={t("selectItem", { name: rule.keyword })}
+                      checked={importSelection.has(index)}
+                      onCheckedChange={(checked) =>
+                        setImportSelection((current) => {
+                          const next = new Set(current);
+                          if (checked) {
+                            next.add(index);
+                          } else {
+                            next.delete(index);
+                          }
+                          return next;
+                        })
+                      }
+                    />
+                    <span
+                      className="min-w-0 flex-1 truncate font-medium"
+                      title={rule.keyword}
+                    >
+                      {rule.keyword}
+                    </span>
+                    <RuleTypeLabel ruleType={rule.rule_type} />
+                    <RuleScopeLabel scope={rule.scope} />
+                    <span className="w-14 text-right text-xs text-muted-foreground">
+                      {rule.enabled ? t("enabled") : t("disabled")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {importPageCount > 1 ? (
+                <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+                  <span>
+                    {t("pageStatus", {
+                      count: pendingImport.preview.rules.length,
+                      page: importPage + 1,
+                      pageCount: importPageCount,
+                    })}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      disabled={importPage === 0}
+                      onClick={() => setImportPage((page) => page - 1)}
+                      size="icon-sm"
+                      title={t("previous")}
+                      type="button"
+                      variant="outline"
+                    >
+                      <ChevronLeft />
+                    </Button>
+                    <Button
+                      disabled={importPage + 1 >= importPageCount}
+                      onClick={() => setImportPage((page) => page + 1)}
+                      size="icon-sm"
+                      title={t("next")}
+                      type="button"
+                      variant="outline"
+                    >
+                      <ChevronRight />
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <DialogFooter>
+            <DialogClose
+              disabled={transferring === "import"}
+              render={<Button type="button" variant="outline" />}
+            >
+              {t("cancel")}
+            </DialogClose>
+            <Button
+              disabled={
+                importSelection.size === 0 || transferring === "import"
+              }
+              onClick={() => void importSelectedRules()}
+              type="button"
+            >
+              {transferring === "import" ? (
+                <LoaderCircle className="animate-spin" />
+              ) : (
+                <FileUp />
+              )}
+              {t("importSelectedRules", { count: importSelection.size })}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={formOpen}
@@ -731,6 +1257,52 @@ export function RulesPage() {
               variant="destructive"
             >
               {t("deleteRule")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={clearTarget !== null}
+        onOpenChange={(open) => !clearing && !open && setClearTarget(null)}
+      >
+        <AlertDialogContent finalFocus={() => addTriggerRef.current}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t(
+                clearTarget === "selected"
+                  ? "clearSelectedRulesQuestion"
+                  : "clearRulesQuestion",
+              )}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(
+                clearTarget === "selected"
+                  ? "clearSelectedRulesDescription"
+                  : "clearRulesDescription",
+                {
+                  count:
+                    clearTarget === "selected"
+                      ? selectedRuleIds.length
+                      : rules.length,
+                },
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearing}>
+              {t("cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={clearing}
+              onClick={() => void clearRules()}
+              type="button"
+              variant="destructive"
+            >
+              {clearing ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
+              {clearTarget === "selected"
+                ? t("clearSelectedRules", { count: selectedRuleIds.length })
+                : t("clearRules")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -891,6 +1463,8 @@ function EnumFilterHeader({
 
 function ruleColumnClassName(columnId: string): string {
   switch (columnId) {
+    case "select":
+      return "w-10";
     case "keyword":
       return "min-w-52";
     case "rule_type":
@@ -911,7 +1485,7 @@ function RuleTableMessage({ message }: { message: string }) {
     <TableRow>
       <TableCell
         className="h-40 text-center text-muted-foreground"
-        colSpan={5}
+        colSpan={6}
       >
         {message}
       </TableCell>
@@ -921,4 +1495,9 @@ function RuleTableMessage({ message }: { message: string }) {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function ruleExportFileName(suffix?: string): string {
+  const date = new Date().toISOString().slice(0, 10);
+  return `scourgify-rules-${date}${suffix ? `-${suffix}` : ""}.json`;
 }
