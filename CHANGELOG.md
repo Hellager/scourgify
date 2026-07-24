@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.2 - 2026-07-24
+
+- Added rule scopes for files, folders, or all targets, with localized rule editing and table filtering.
+- Reworked the Rules center with TanStack Table, pagination, column filters, stable cross-page selection, and global deselection.
+- Added versioned JSON rule import and export for all or selected rules, including paginated selective-import preview and validation.
+- Added transactional batch clearing for all or selected rules with confirmation feedback.
+- Added Mock Lab rule generation with randomized data and improved large-data pagination behavior.
+- Fixed revealing exported files from the real filesystem while running in mock mode.
+
 ## 0.6.0 - 2026-07-16
 
 - Reorganized the Rust backend by application, command, cleanup, configuration, database, and Quick Access responsibilities.
