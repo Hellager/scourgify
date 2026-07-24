@@ -378,7 +378,7 @@ export function RulesPage() {
         enableColumnFilter: false,
         header: t("actions"),
         cell: ({ row }) => (
-          <div className="flex justify-end gap-1">
+          <div className="flex gap-1">
             <Button
               aria-label={t("editRule")}
               disabled={writesDisabled}
@@ -450,7 +450,7 @@ export function RulesPage() {
 
   return (
     <>
-      <div className="mx-auto grid max-w-6xl gap-4 p-6 pb-24">
+      <div className="mx-auto grid h-full max-w-6xl content-start gap-4 overflow-hidden p-4">
         {database && !database.available ? (
           <DatabaseRecoveryPanel
             onRecovered={loadRules}
@@ -544,15 +544,15 @@ export function RulesPage() {
             </Table>
           </div>
           {!loading && rules.length > 0 ? (
-            <div className="flex flex-col gap-3 py-4 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-              <span>
+            <div className="grid gap-y-3 py-4 text-sm text-muted-foreground sm:grid-cols-[minmax(0,1fr)_auto_7rem] sm:items-center">
+              <span className="min-w-0 pr-16 sm:pr-0">
                 {t("pageStatus", {
                   count: filteredRuleCount,
                   page: pageCount === 0 ? 0 : pagination.pageIndex + 1,
                   pageCount,
                 })}
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2 pr-16 sm:justify-self-end sm:pr-0">
                 <Button
                   disabled={!table.getCanPreviousPage()}
                   onClick={() => table.previousPage()}
@@ -574,6 +574,7 @@ export function RulesPage() {
                   <ChevronRight />
                 </Button>
               </div>
+              <span aria-hidden="true" className="hidden sm:block" />
             </div>
           ) : null}
         </section>
@@ -899,7 +900,7 @@ function ruleColumnClassName(columnId: string): string {
     case "status":
       return "min-w-40";
     case "actions":
-      return "w-28 text-right";
+      return "w-28";
     default:
       return "";
   }

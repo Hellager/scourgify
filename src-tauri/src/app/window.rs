@@ -36,23 +36,37 @@ pub(crate) fn install_close_handler<R: Runtime>(app: &tauri::AppHandle<R>) {
 }
 
 pub(crate) fn show_dashboard<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {
-    show_window(app, "#/", LogicalSize::new(1040.0, 720.0), true)
+    show_window(
+        app,
+        "#/",
+        LogicalSize::new(1040.0, 720.0),
+        LogicalSize::new(1040.0, 670.0),
+        true,
+    )
 }
 
 pub(crate) fn show_grid<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {
-    show_window(app, "#/grid", LogicalSize::new(600.0, 400.0), true)
+    show_window(
+        app,
+        "#/grid",
+        LogicalSize::new(600.0, 400.0),
+        LogicalSize::new(400.0, 320.0),
+        true,
+    )
 }
 
 fn show_window<R: Runtime>(
     app: &tauri::AppHandle<R>,
     route: &str,
     size: LogicalSize<f64>,
+    min_size: LogicalSize<f64>,
     resizable: bool,
 ) -> Result<(), tauri::Error> {
     if let Some(window) = app.get_webview_window("main") {
         window.unmaximize()?;
         window.set_decorations(false)?;
         window.set_resizable(resizable)?;
+        window.set_min_size(Some(min_size))?;
         window.set_size(size)?;
         window.eval(format!("window.location.hash = '{route}'"))?;
         window.center()?;

@@ -70,6 +70,7 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   const [privacyActive, setPrivacyActive] = useState(false);
   const onDashboard = location.pathname === "/";
+  const onRules = location.pathname === "/rules";
 
   useEffect(() => {
     invokeCommand<ConfigForm>("get_config")
@@ -171,12 +172,22 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
             </SidebarContent>
           </Sidebar>
           <SidebarInset className="min-h-0 overflow-hidden bg-background text-foreground">
-            <ScrollArea className="min-h-0 flex-1">
-              <div className={onDashboard ? "min-w-0" : "hidden"}>
+            <div
+              className={onDashboard ? "min-h-0 min-w-0 flex-1" : "hidden"}
+            >
+              <ScrollArea className="size-full">
                 {dashboard}
+              </ScrollArea>
+            </div>
+            {onDashboard ? null : onRules ? (
+              <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                <Outlet />
               </div>
-              {onDashboard ? null : <Outlet />}
-            </ScrollArea>
+            ) : (
+              <ScrollArea className="min-h-0 flex-1">
+                <Outlet />
+              </ScrollArea>
+            )}
           </SidebarInset>
           <ConfigDrawer
             config={config}
