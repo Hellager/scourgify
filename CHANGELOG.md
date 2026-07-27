@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3 - 2026-07-27
+
+- Rebuilt cleanup history around TanStack Table with fixed 10-row pagination, time sorting, per-column filters, and a simplified item-only view.
+- Added persistent record visibility backed by `clean_records.visible`, including hide, restore-hidden, delete, and clear actions; hidden records remain in aggregate statistics and full exports.
+- Added all-record CSV export from the History page and improved path-filter focus and clearing behavior.
+- Expanded Mock Lab cleanup-history generation with `fake` timestamps from the last year, Windows-style file and directory paths, path-derived rule keywords, five UI-language path vocabularies, and a 1,000-record limit.
+- Migrated SQLite schema to v5 to add indexed clean-record visibility.
+
 ## 0.6.2 - 2026-07-24
 
 - Added rule scopes for files, folders, or all targets, with localized rule editing and table filtering.
