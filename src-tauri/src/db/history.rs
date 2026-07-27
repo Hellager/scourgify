@@ -23,6 +23,8 @@ pub(crate) enum HistoryError {
     ItemType(String),
     #[error("unsupported history date_range: {0}")]
     DateRange(String),
+    #[error("clean record not found: {0}")]
+    NotFound(i64),
     #[error("history export path is invalid: {0}")]
     ExportPath(String),
 }
@@ -122,6 +124,7 @@ pub struct CleanRecord {
     pub rule_keyword: Option<String>,
     pub source: CleanSource,
     pub cleaned_at: String,
+    pub visible: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -133,6 +136,7 @@ pub(super) struct ExportCleanRecord {
     rule_keyword: Option<String>,
     source: CleanSource,
     cleaned_at: String,
+    visible: bool,
 }
 
 impl From<CleanRecord> for ExportCleanRecord {
@@ -145,6 +149,7 @@ impl From<CleanRecord> for ExportCleanRecord {
             rule_keyword: record.rule_keyword,
             source: record.source,
             cleaned_at: record.cleaned_at,
+            visible: record.visible,
         }
     }
 }
@@ -159,8 +164,7 @@ pub(super) struct ValidatedHistoryFilter {
 }
 
 pub(super) const HISTORY_FILTERS: &str =
-    "WHERE (?1 IS NULL OR item_path LIKE ?1 ESCAPE '\\' COLLATE NOCASE
-                    OR COALESCE(rule_keyword, '') LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
+    "WHERE (?1 IS NULL OR item_path LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
            AND (?2 IS NULL OR item_type = ?2)
            AND (?3 IS NULL
                 OR (?3 = 1 AND rule_keyword IS NOT NULL)
@@ -171,13 +175,14 @@ pub(super) const HISTORY_FILTERS: &str =
            AND (?6 IS NULL OR run_id = ?6)";
 
 pub(super) const HISTORY_COLUMNS: &str =
-    "id, run_id, item_path, item_type, rule_id, rule_keyword, source, cleaned_at";
+    "id, run_id, item_path, item_type, rule_id, rule_keyword, source, cleaned_at, visible";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CleanRecordPage {
     pub records: Vec<CleanRecord>,
     pub total: u64,
     pub overall_total: u64,
+    pub hidden_total: u64,
     pub page: u32,
     pub page_size: u32,
 }
@@ -312,13 +317,22 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
         _ => return Err(HistoryError::SortOrder.into()),
     };
     let filter = validate_history_filter(query.filter)?;
-    let count_sql = format!("SELECT COUNT(*) FROM clean_records {HISTORY_FILTERS}");
+    let count_sql = format!("SELECT COUNT(*) FROM clean_records {HISTORY_FILTERS} AND visible = 1");
     let overall_total = connection
         .query_row("SELECT COUNT(*) FROM clean_records", [], |row| {
             row.get::<_, i64>(0)
         })
         .context("failed to count all clean records")?;
     let overall_total = u64::try_from(overall_total).context("clean record count is negative")?;
+    let hidden_total = connection
+        .query_row(
+            "SELECT COUNT(*) FROM clean_records WHERE visible = 0",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .context("failed to count hidden clean records")?;
+    let hidden_total =
+        u64::try_from(hidden_total).context("hidden clean record count is negative")?;
     let total = connection
         .query_row(&count_sql, history_filter_params(&filter), |row| {
             row.get::<_, i64>(0)
@@ -330,7 +344,7 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
     let sql = format!(
         "SELECT {HISTORY_COLUMNS}
          FROM clean_records
-         {HISTORY_FILTERS}
+         {HISTORY_FILTERS} AND visible = 1
          ORDER BY {sort_column} {sort_order}, id {sort_order}
          LIMIT ?7 OFFSET ?8"
     );
@@ -359,6 +373,7 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
         records,
         total,
         overall_total,
+        hidden_total,
         page: query.page,
         page_size: query.page_size,
     })
@@ -426,6 +441,7 @@ pub(super) fn read_clean_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<Cle
         rule_keyword: row.get(5)?,
         source: row.get(6)?,
         cleaned_at: row.get(7)?,
+        visible: row.get(8)?,
     })
 }
 
@@ -464,6 +480,36 @@ pub fn clear(connection: &mut Connection) -> Result<HistoryClearResult> {
         clean_records: u64::try_from(clean_records).context("cleared record count is too large")?,
         cleanup_runs: u64::try_from(cleanup_runs).context("cleared run count is too large")?,
     })
+}
+
+pub fn remove(connection: &Connection, id: i64) -> Result<()> {
+    let affected = connection
+        .execute("DELETE FROM clean_records WHERE id = ?1", [id])
+        .context("failed to delete clean record")?;
+    if affected == 0 {
+        return Err(HistoryError::NotFound(id).into());
+    }
+    Ok(())
+}
+
+pub fn set_visible(connection: &Connection, id: i64, visible: bool) -> Result<()> {
+    let affected = connection
+        .execute(
+            "UPDATE clean_records SET visible = ?1 WHERE id = ?2",
+            params![visible, id],
+        )
+        .context("failed to update clean record visibility")?;
+    if affected == 0 {
+        return Err(HistoryError::NotFound(id).into());
+    }
+    Ok(())
+}
+
+pub fn restore_hidden(connection: &Connection) -> Result<u64> {
+    let affected = connection
+        .execute("UPDATE clean_records SET visible = 1 WHERE visible = 0", [])
+        .context("failed to restore hidden clean records")?;
+    u64::try_from(affected).context("restored clean record count is too large")
 }
 
 pub fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
@@ -782,6 +828,79 @@ mod tests {
     }
 
     #[test]
+    fn removes_one_clean_record() {
+        let connection = test_connection();
+        connection
+            .execute(
+                "INSERT INTO clean_records (item_path, item_type)
+                 VALUES ('C:\\Temp\\remove.txt', 'recent_file')",
+                [],
+            )
+            .unwrap();
+        let id = connection.last_insert_rowid();
+
+        remove(&connection, id).unwrap();
+
+        let count = connection
+            .query_row("SELECT COUNT(*) FROM clean_records", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(
+            remove(&connection, id)
+                .unwrap_err()
+                .downcast_ref::<HistoryError>(),
+            Some(&HistoryError::NotFound(id))
+        );
+    }
+
+    #[test]
+    fn hides_records_from_lists_but_keeps_them_in_exports() {
+        let connection = test_connection();
+        connection
+            .execute(
+                "INSERT INTO clean_records (item_path, item_type)
+                 VALUES ('C:\\Temp\\visible.txt', 'recent_file'),
+                        ('C:\\Temp\\hidden.txt', 'recent_file')",
+                [],
+            )
+            .unwrap();
+        let hidden_id = connection.last_insert_rowid();
+        set_visible(&connection, hidden_id, false).unwrap();
+
+        let page = list(&connection, history_query()).unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.overall_total, 2);
+        assert_eq!(page.hidden_total, 1);
+        assert_eq!(page.records[0].item_path, r"C:\Temp\visible.txt");
+        assert!(page.records[0].visible);
+
+        let path = export_path("csv");
+        let exported = export(
+            &connection,
+            path.to_str().unwrap(),
+            HistoryExportFormat::Csv,
+            HistoryFilter::default(),
+        )
+        .unwrap();
+        assert_eq!(exported.count, 2);
+        let rows = csv::Reader::from_path(&path)
+            .unwrap()
+            .records()
+            .collect::<csv::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(&rows[0][7], "false");
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(restore_hidden(&connection).unwrap(), 1);
+        let page = list(&connection, history_query()).unwrap();
+        assert_eq!(page.total, 2);
+        assert_eq!(page.hidden_total, 0);
+    }
+
+    #[test]
     fn exports_filtered_csv_with_special_characters() {
         let mut connection = test_connection();
         let special_path = "C:\\Temp\\\"report\",\n报告.txt";
@@ -823,6 +942,7 @@ mod tests {
                 "rule_keyword",
                 "source",
                 "cleaned_at",
+                "visible",
             ]
         );
         let rows = reader.records().collect::<csv::Result<Vec<_>>>().unwrap();
@@ -871,6 +991,7 @@ mod tests {
                 "rule_keyword",
                 "run_id",
                 "source",
+                "visible",
             ]
         );
         std::fs::remove_file(path).unwrap();

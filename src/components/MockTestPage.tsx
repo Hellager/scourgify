@@ -5,6 +5,7 @@ import {
   Dices,
   FileClock,
   FolderClock,
+  History,
   RefreshCw,
   RotateCcw,
 } from "lucide-react";
@@ -83,12 +84,18 @@ interface MockRulesResult {
   generated: number;
 }
 
+interface MockHistoryResult {
+  generated: number;
+}
+
 const scenarios: Array<{ label: string; value: MockScenario }> = [
   { label: "Normal", value: "normal" },
   { label: "Empty", value: "empty" },
   { label: "Partial failure", value: "partial_failure" },
   { label: "Post-mutation warning", value: "post_mutation_warning" },
 ];
+const MAX_MOCK_RULES = 1_000;
+const MAX_MOCK_HISTORY_RECORDS = 1_000;
 
 export function MockTestPage() {
   const [state, setState] = useState<MockState | null>(null);
@@ -99,6 +106,10 @@ export function MockTestPage() {
   const [generatedRuleCount, setGeneratedRuleCount] = useState<number | null>(
     null,
   );
+  const [historyCount, setHistoryCount] = useState("50");
+  const [generatedHistoryCount, setGeneratedHistoryCount] = useState<
+    number | null
+  >(null);
 
   const recordEvent = useCallback((name: string, payload: unknown) => {
     setEvents((current) => [
@@ -143,7 +154,7 @@ export function MockTestPage() {
 
   const generateRules = async () => {
     const count = Number(ruleCount);
-    if (!Number.isInteger(count) || count < 1 || count > 1_000) {
+    if (!Number.isInteger(count) || count < 1 || count > MAX_MOCK_RULES) {
       setError("Rule count must be between 1 and 1000.");
       return;
     }
@@ -155,6 +166,32 @@ export function MockTestPage() {
         count,
       });
       setGeneratedRuleCount(result.generated);
+    } catch (value) {
+      setError(commandErrorMessage(value));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const generateHistory = async () => {
+    const count = Number(historyCount);
+    if (
+      !Number.isInteger(count) ||
+      count < 1 ||
+      count > MAX_MOCK_HISTORY_RECORDS
+    ) {
+      setError("History count must be between 1 and 1000.");
+      return;
+    }
+
+    setPending(true);
+    setError(null);
+    try {
+      const result = await invokeCommand<MockHistoryResult>(
+        "generate_mock_history",
+        { count },
+      );
+      setGeneratedHistoryCount(result.generated);
     } catch (value) {
       setError(commandErrorMessage(value));
     } finally {
@@ -260,7 +297,7 @@ export function MockTestPage() {
             <Input
               disabled={!enabled || pending}
               inputMode="numeric"
-              max={1_000}
+              max={MAX_MOCK_RULES}
               min={1}
               onChange={(event) => setRuleCount(event.target.value)}
               type="number"
@@ -278,6 +315,45 @@ export function MockTestPage() {
           {generatedRuleCount !== null ? (
             <span className="pb-2 text-xs text-muted-foreground">
               {generatedRuleCount} mock rules generated.
+            </span>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="border-b py-5">
+        <h2 className="mb-3 text-sm font-semibold">Mock cleanup history</h2>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="grid w-40 gap-2 text-sm font-medium">
+            Number of records
+            <Input
+              disabled={!enabled || pending}
+              inputMode="numeric"
+              max={MAX_MOCK_HISTORY_RECORDS}
+              min={1}
+              onChange={(event) => {
+                const value = event.target.value;
+                const count = Number(value);
+                setHistoryCount(
+                  value !== "" && count > MAX_MOCK_HISTORY_RECORDS
+                    ? String(MAX_MOCK_HISTORY_RECORDS)
+                    : value,
+                );
+              }}
+              type="number"
+              value={historyCount}
+            />
+          </label>
+          <Button
+            disabled={!enabled || pending}
+            onClick={() => void generateHistory()}
+            type="button"
+          >
+            <History />
+            Generate history
+          </Button>
+          {generatedHistoryCount !== null ? (
+            <span className="pb-2 text-xs text-muted-foreground">
+              {generatedHistoryCount} mock history records generated.
             </span>
           ) : null}
         </div>

@@ -80,6 +80,9 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         history::export_clean_records,
         history::export_cleanup_runs,
         history::clear_clean_records,
+        history::remove_clean_record,
+        history::set_clean_record_visibility,
+        history::restore_hidden_clean_records,
         history::get_stats,
         quick_access::restore_qa_defaults,
         quick_access::get_qa_visibility,
@@ -131,6 +134,9 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         history::export_clean_records,
         history::export_cleanup_runs,
         history::clear_clean_records,
+        history::remove_clean_record,
+        history::set_clean_record_visibility,
+        history::restore_hidden_clean_records,
         history::get_stats,
         quick_access::restore_qa_defaults,
         quick_access::get_qa_visibility,
@@ -142,6 +148,7 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         crate::mock::commands::refresh_mock_data,
         crate::mock::commands::reset_mock_data,
         crate::mock::commands::generate_mock_rules,
+        crate::mock::commands::generate_mock_history,
         crate::mock::commands::trigger_mock_event,
     ]
 }

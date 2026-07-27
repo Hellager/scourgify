@@ -89,6 +89,7 @@ fn export_items_csv(
             "rule_keyword",
             "source",
             "cleaned_at",
+            "visible",
         ])
         .context("failed to write CSV history header")?;
     let count = visit_filtered_records(connection, filter, |record| {

@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
-pub(super) const SCHEMA_VERSION: u32 = 4;
+pub(super) const SCHEMA_VERSION: u32 = 5;
 pub(super) const BUILTIN_WHITELIST_RULES: &[&str] = &["Desktop", "Documents"];
 
 const SCHEMA_V1: &str = r#"
@@ -94,6 +94,14 @@ ALTER TABLE rules ADD COLUMN scope TEXT NOT NULL DEFAULT 'all'
     CHECK(scope IN ('all', 'files', 'folders'));
 "#;
 
+const SCHEMA_V5: &str = r#"
+ALTER TABLE clean_records ADD COLUMN visible INTEGER NOT NULL DEFAULT 1
+    CHECK(visible IN (0, 1));
+
+CREATE INDEX idx_records_visible_date_id
+    ON clean_records(visible, cleaned_at DESC, id DESC);
+"#;
+
 pub(super) fn migrate(connection: &mut Connection) -> Result<u32> {
     let current_version = connection
         .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
@@ -120,6 +128,10 @@ pub(super) fn migrate(connection: &mut Connection) -> Result<u32> {
     }
     if version == 3 {
         migrate_to_v4(connection)?;
+        version = 4;
+    }
+    if version == 4 {
+        migrate_to_v5(connection)?;
     }
     Ok(SCHEMA_VERSION)
 }
@@ -194,4 +206,56 @@ fn migrate_to_v4(connection: &mut Connection) -> Result<()> {
     transaction
         .commit()
         .context("failed to commit schema v4 migration")
+}
+
+fn migrate_to_v5(connection: &mut Connection) -> Result<()> {
+    let transaction = connection
+        .transaction()
+        .context("failed to start schema v5 migration")?;
+    transaction
+        .execute_batch(SCHEMA_V5)
+        .context("failed to migrate schema to v5")?;
+    transaction
+        .pragma_update(None, "user_version", 5)
+        .context("failed to set SQLite user_version to 5")?;
+    transaction
+        .commit()
+        .context("failed to commit schema v5 migration")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upgrades_v4_records_as_visible() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .unwrap();
+        migrate_to_v1(&mut connection).unwrap();
+        migrate_to_v2(&mut connection).unwrap();
+        migrate_to_v3(&mut connection).unwrap();
+        migrate_to_v4(&mut connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO clean_records (item_path, item_type)
+                 VALUES ('C:\\old-history.txt', 'recent_file')",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+                .unwrap(),
+            4
+        );
+        assert_eq!(migrate(&mut connection).unwrap(), SCHEMA_VERSION);
+        assert!(connection
+            .query_row("SELECT visible FROM clean_records", [], |row| {
+                row.get::<_, bool>(0)
+            })
+            .unwrap());
+    }
 }

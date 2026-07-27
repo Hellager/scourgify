@@ -1,5 +1,7 @@
 use tauri::State;
 
+use super::ActionReceipt;
+
 use crate::{
     db::history_runs::{CleanupRunFilter, CleanupRunPage, CleanupRunQuery},
     db::{
@@ -74,6 +76,47 @@ pub(crate) fn clear_clean_records(
 }
 
 #[tauri::command]
+pub(crate) fn remove_clean_record(
+    database: State<'_, DbState>,
+    id: i64,
+) -> CommandResult<ActionReceipt> {
+    database
+        .with_connection(|connection| history::remove(connection, id))
+        .map_err(|error| history_error("remove_clean_record", error))?;
+    Ok(ActionReceipt::new("remove_clean_record", id.to_string(), 1))
+}
+
+#[tauri::command]
+pub(crate) fn set_clean_record_visibility(
+    database: State<'_, DbState>,
+    id: i64,
+    visible: bool,
+) -> CommandResult<ActionReceipt> {
+    database
+        .with_connection(|connection| history::set_visible(connection, id, visible))
+        .map_err(|error| history_error("set_clean_record_visibility", error))?;
+    Ok(ActionReceipt::new(
+        "set_clean_record_visibility",
+        id.to_string(),
+        1,
+    ))
+}
+
+#[tauri::command]
+pub(crate) fn restore_hidden_clean_records(
+    database: State<'_, DbState>,
+) -> CommandResult<ActionReceipt> {
+    let affected = database
+        .with_connection(|connection| history::restore_hidden(connection))
+        .map_err(|error| history_error("restore_hidden_clean_records", error))?;
+    Ok(ActionReceipt::new(
+        "restore_hidden_clean_records",
+        "hidden",
+        affected,
+    ))
+}
+
+#[tauri::command]
 pub(crate) fn get_stats(database: State<'_, DbState>, range: StatsRange) -> CommandResult<Stats> {
     database
         .with_connection(|connection| history::stats(connection, range))
@@ -86,6 +129,14 @@ fn history_error(operation: &str, error: anyhow::Error) -> CommandError {
             ErrorCode::DatabaseUnavailable,
             "The cleanup database is unavailable.",
         )
+    } else if matches!(
+        error.downcast_ref::<HistoryError>(),
+        Some(HistoryError::NotFound(_))
+    ) {
+        (
+            ErrorCode::ResourceNotFound,
+            "The requested history record was not found.",
+        )
     } else if error.downcast_ref::<HistoryError>().is_some() {
         (
             ErrorCode::ValidationInvalidArgument,
@@ -97,7 +148,10 @@ fn history_error(operation: &str, error: anyhow::Error) -> CommandError {
             "The history operation could not be completed.",
         )
     };
-    if code == ErrorCode::ValidationInvalidArgument {
+    if matches!(
+        code,
+        ErrorCode::ResourceNotFound | ErrorCode::ValidationInvalidArgument
+    ) {
         CommandError::expected(operation, code, message, false, error)
     } else {
         CommandError::unexpected(operation, code, message, true, error)

@@ -446,11 +446,19 @@ mod tests {
             "manual"
         );
         assert!(connection
+            .query_row("SELECT visible FROM clean_records", [], |row| {
+                row.get::<_, bool>(0)
+            })
+            .unwrap());
+        assert!(connection
             .execute(
                 "INSERT INTO clean_records (item_path, item_type, source)
                  VALUES (?1, 'recent_file', 'invalid')",
                 [r"C:\invalid.txt"],
             )
+            .is_err());
+        assert!(connection
+            .execute("UPDATE clean_records SET visible = 2", [])
             .is_err());
     }
 
