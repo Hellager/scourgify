@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.4 - 2026-07-29
+
+- Redesigned the Data Center around compact summary cards for Recent Files, Frequent Folders, cleaned items, and automatic cleanup, with table-based detail dialogs for each data set.
+- Added complete automatic-cleanup configuration for disabled, monitor, recurring-hour, and daily-time modes, including live countdowns for scheduled runs.
+- Added a compact black Lottie ECG indicator for monitor-based cleanup, with a continuous one-way pulse across multiple waves.
+- Reworked cleanup trends with reliable mock-history rendering, focus-only 24-hour, 7-day, and 30-day ranges, and backend support for the new 24-hour statistics range.
+- Simplified the trend chart by removing its frame, title, Y-axis labels, and grid lines, and moved ordered Recent Files and Frequent Folders series controls below the chart.
+
 ## 0.6.3 - 2026-07-27
 
 - Rebuilt cleanup history around TanStack Table with fixed 10-row pagination, time sorting, per-column filters, and a simplified item-only view.
