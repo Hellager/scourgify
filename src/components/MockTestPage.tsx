@@ -29,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { REFRESH_DASHBOARD_EVENT, dispatchAppEvent } from "@/lib/app-events";
 import { commandErrorMessage, invokeCommand } from "@/lib/commands";
 
 type MockScenario =
@@ -192,6 +193,7 @@ export function MockTestPage() {
         { count },
       );
       setGeneratedHistoryCount(result.generated);
+      dispatchAppEvent(REFRESH_DASHBOARD_EVENT);
     } catch (value) {
       setError(commandErrorMessage(value));
     } finally {

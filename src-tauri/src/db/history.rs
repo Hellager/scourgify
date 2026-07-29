@@ -191,6 +191,8 @@ pub struct CleanRecordPage {
 pub struct StatsTrendPoint {
     pub period: String,
     pub count: u64,
+    pub recent_files: u64,
+    pub frequent_folders: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -219,6 +221,8 @@ pub struct HistoryTotals {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 pub enum StatsRange {
+    #[serde(rename = "24h")]
+    Last24Hours,
     #[serde(rename = "7d")]
     Last7Days,
     #[serde(rename = "30d")]
@@ -230,6 +234,7 @@ pub enum StatsRange {
 impl StatsRange {
     pub(super) fn date_modifier(self) -> Option<&'static str> {
         match self {
+            Self::Last24Hours => Some("-1 day"),
             Self::Last7Days => Some("-6 days"),
             Self::Last30Days => Some("-29 days"),
             Self::All => None,

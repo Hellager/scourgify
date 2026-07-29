@@ -3,77 +3,32 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
+import Lottie from "lottie-react";
+import { useLocation } from "react-router-dom";
 import {
-  type Column,
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  type PaginationState,
-  type RowSelectionState,
-  type SortingState,
-  useReactTable,
-  type VisibilityState,
-} from "@tanstack/react-table";
-import {
-  CartesianGrid,
-  Cell,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
+  Area,
+  AreaChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
-  YAxis,
 } from "recharts";
-import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  ChevronLeft,
-  ChevronRight,
-  Columns3,
-  FolderOpen,
-  Pin,
-  PinOff,
-  Plus,
-  RotateCcw,
-  Search,
-  ShieldCheck,
-  Sparkles,
-  Target,
-  Trash2,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import ecgMonitorAnimation from "@/assets/ecg-monitor.json";
+import { useAppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -89,44 +44,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  notifyOperationComplete,
-  notifyPartialFailure,
-} from "@/lib/notifications";
 import { QUICK_ACCESS_CHANGED_EVENT, REFRESH_DASHBOARD_EVENT } from "@/lib/app-events";
-import { type I18nKey, useI18n } from "@/lib/i18n";
+import { invokeCommand } from "@/lib/commands";
 import {
-  commandIssueMessage,
-  type CommandErrorPayload,
-  type CommandWarningPayload,
-  invokeCommand,
-} from "@/lib/commands";
-import { useAppShell } from "@/components/AppShell";
-import {
-  DatabaseRecoveryPanel,
-  type DatabaseStatus,
-} from "@/components/DatabaseRecoveryPanel";
+  type AutoCleanPolicy,
+  configSchema,
+  type ConfigForm,
+} from "@/lib/config";
+import { type I18nKey, type Language, useI18n } from "@/lib/i18n";
 
 type QaType = "recent" | "frequent";
-
-type QaMatch =
-  | { status: "protected"; rule_id: number; keyword: string }
-  | { status: "targeted"; rule_id: number; keyword: string }
-  | { status: "neutral" };
-
-interface QaItem {
-  path: string;
-  name: string;
-  item_type: "recent_file" | "frequent_folder";
-  last_interaction_at: number | null;
-  pinned: boolean | null;
-  match: QaMatch;
-}
-
-interface QaTableRow extends QaItem {
-  type: string;
-}
+type DashboardDialog = QaType | "cleaned" | "auto" | null;
+type AutoCleanFormMode = AutoCleanPolicy["kind"];
+type StatsRange = "24h" | "7d" | "30d";
+type TrendSeries = "recent_files" | "frequent_folders";
 
 interface QaCounts {
   recent: number;
@@ -134,68 +65,35 @@ interface QaCounts {
   all: number;
 }
 
-interface QuickAccessChanged {
-  qa_type: QaType;
-  revision: number;
-}
-
-interface QaBatchResult {
-  total: number;
-  succeeded: string[];
-  failed: Array<{ path: string; error: CommandErrorPayload }>;
-  warnings: Array<{ path: string; warning: CommandWarningPayload }>;
-  skipped_protected: string[];
-  history_error: string | null;
-}
-
-interface QaRestoreResult {
-  success: boolean;
-  recent: QaRestoreSectionResult | null;
-  frequent: QaRestoreSectionResult | null;
-}
-
-interface QaRestoreSectionResult {
-  success: boolean;
-  deleted_lnk_count: number;
-  recent_files_cleared: boolean | null;
-  backing_file_deleted: boolean | null;
-  rebuilt: boolean | null;
-  non_default_raw_path_count: number;
-  raw_path_cleanup: {
-    success: boolean;
-    requested_count: number;
-    backing_file_deleted: boolean;
-    rebuilt: boolean;
-    remaining_count: number;
-    error: CommandErrorPayload | null;
-  } | null;
-  error: CommandErrorPayload | null;
-}
-
-interface OperationSummary {
-  action: string;
-  failed: number;
-  message: string;
-  succeeded: number;
-  target: string;
-  total: number;
-  updatedAt: string;
-}
-
-interface QuickAccessChartItem {
-  color: string;
+interface QaItem {
+  path: string;
   name: string;
-  value: number;
+  last_interaction_at: number | null;
+  pinned: boolean | null;
+}
+
+interface CleanRecord {
+  id: number;
+  item_path: string;
+  item_type: "recent_file" | "frequent_folder";
+  source: "manual" | "auto";
+  cleaned_at: string;
+}
+
+interface CleanRecordPage {
+  records: CleanRecord[];
+  total: number;
+  overall_total: number;
+  hidden_total: number;
+  page: number;
+  page_size: number;
 }
 
 interface StatsTrendPoint {
   period: string;
   count: number;
-}
-
-interface RuleHitStat {
-  keyword: string;
-  count: number;
+  recent_files: number;
+  frequent_folders: number;
 }
 
 interface Stats {
@@ -205,1637 +103,937 @@ interface Stats {
   retained_total: number;
   daily_trend: StatsTrendPoint[];
   weekly_trend: StatsTrendPoint[];
-  rule_hits: RuleHitStat[];
+  rule_hits: Array<{ keyword: string; count: number }>;
 }
 
-type StatsRange = "7d" | "30d" | "all";
+interface QuickAccessChanged {
+  qa_type: QaType;
+  revision: number;
+}
 
-type PrivacyState =
-  | "Inactive"
-  | "ActiveFull"
-  | { ActivePartial: { recent: boolean; frequent: boolean } };
-
-type PendingAction =
-  | "remove"
-  | "empty"
-  | "smart"
-  | "restore-current"
-  | "restore-all"
-  | null;
-
-const emptyCounts: QaCounts = {
-  recent: 0,
-  frequent: 0,
-  all: 0,
-};
-
-const quickAccessChartColors = ["#2563eb", "#16a34a"];
+const emptyCounts: QaCounts = { recent: 0, frequent: 0, all: 0 };
+const HISTORY_PAGE_SIZE = 10;
 
 export function Dashboard() {
   const { language, t } = useI18n();
-  const { config } = useAppShell();
-  const [activeTab, setActiveTab] = useState<QaType>("recent");
+  const { config, setConfig } = useAppShell();
+  const location = useLocation();
   const [counts, setCounts] = useState<QaCounts>(emptyCounts);
-  const [items, setItems] = useState<QaItem[]>([]);
-  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [mutating, setMutating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [database, setDatabase] = useState<DatabaseStatus | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [statsRange, setStatsRange] = useState<StatsRange>("30d");
-  const [statsLoading, setStatsLoading] = useState(true);
-  const [statsError, setStatsError] = useState<string | null>(null);
-  const [privacyActive, setPrivacyActive] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
-  const [addItemPath, setAddItemPath] = useState("");
-  const [lastOperationSummary, setLastOperationSummary] =
-    useState<OperationSummary | null>(null);
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [pagination, setPagination] = useState<PaginationState>({
-    pageIndex: 0,
-    pageSize: 20,
+  const [range, setRange] = useState<StatsRange>("30d");
+  const [chartFocused, setChartFocused] = useState(false);
+  const [visibleSeries, setVisibleSeries] = useState<Record<TrendSeries, boolean>>({
+    recent_files: true,
+    frequent_folders: true,
   });
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
-  const actionTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const databaseAvailable = database?.available ?? true;
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<DashboardDialog>(null);
+  const [qaItems, setQaItems] = useState<QaItem[]>([]);
+  const [qaLoading, setQaLoading] = useState(false);
+  const [qaError, setQaError] = useState<string | null>(null);
+  const [history, setHistory] = useState<CleanRecordPage | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [autoMode, setAutoMode] = useState<AutoCleanFormMode>("disabled");
+  const [autoHours, setAutoHours] = useState("24");
+  const [autoTime, setAutoTime] = useState("09:00");
+  const [savingAutoClean, setSavingAutoClean] = useState(false);
 
-  const filteredItems = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    if (!normalized) {
-      return items;
-    }
-
-    return items.filter((item) => {
-      return (
-        item.name.toLowerCase().includes(normalized) ||
-        item.path.toLowerCase().includes(normalized)
-      );
-    });
-  }, [items, query]);
-
-  const quickAccessChartData = useMemo(
-    () => [
-      {
-        color: quickAccessChartColors[0],
-        name: t("recentFiles"),
-        value: counts.recent,
-      },
-      {
-        color: quickAccessChartColors[1],
-        name: t("frequentFolders"),
-        value: counts.frequent,
-      },
-    ],
-    [counts.frequent, counts.recent, t],
-  );
-  const quickAccessTotal = counts.recent + counts.frequent;
-  const smartTargets = useMemo(
-    () => items.filter((item) => item.match.status === "targeted"),
-    [items],
-  );
-  const cleanableCount = useMemo(
-    () => items.filter((item) => item.match.status !== "protected").length,
-    [items],
-  );
-
-  const tableData = useMemo<QaTableRow[]>(
-    () =>
-      filteredItems.map((item) => ({
-        ...item,
-        type: activeTab === "recent" ? t("recentFile") : t("frequentFolders"),
-      })),
-    [activeTab, filteredItems, t],
-  );
-
-  const rowSelection = useMemo<RowSelectionState>(
-    () =>
-      Object.fromEntries(Array.from(selectedPaths).map((path) => [path, true])),
-    [selectedPaths],
-  );
-
-  const columns = useMemo<ColumnDef<QaTableRow>[]>(
-    () => [
-      {
-        id: "select",
-        enableHiding: false,
-        enableSorting: false,
-        header: t("selected"),
-        cell: ({ row }) => (
-          <Checkbox
-            aria-label={t("selectItem", { name: row.original.name })}
-            checked={selectedPaths.has(row.original.path)}
-            disabled={row.original.match.status === "protected"}
-            onCheckedChange={(checked) =>
-              togglePath(row.original.path, checked)
-            }
-          />
-        ),
-      },
-      {
-        accessorKey: "name",
-        header: t("name"),
-        cell: ({ row }) => (
-          <span className="block max-w-64 truncate font-medium">
-            {row.original.name}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "path",
-        header: t("path"),
-        cell: ({ row }) => (
-          <span className="block max-w-[560px] truncate text-muted-foreground">
-            {row.original.path}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "last_interaction_at",
-        header: t("lastUsed"),
-        cell: ({ row }) => {
-          const timestamp = row.original.last_interaction_at;
-          return timestamp === null ? null : (
-            <span
-              className="whitespace-nowrap text-muted-foreground"
-              title={new Date(timestamp).toLocaleString(language)}
-            >
-              {formatRelativeTime(timestamp, language)}
-            </span>
-          );
-        },
-      },
-      ...(activeTab === "frequent"
-        ? [
-            {
-              accessorKey: "pinned",
-              header: t("pinStatus"),
-              cell: ({ row }: { row: { original: QaTableRow } }) => {
-                const pinned = row.original.pinned;
-                if (pinned === null) {
-                  return (
-                    <span className="text-muted-foreground">{t("unknown")}</span>
-                  );
-                }
-                const Icon = pinned ? Pin : PinOff;
-                return (
-                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
-                    <Icon className="size-4" />
-                    {t(pinned ? "pinned" : "unpinned")}
-                  </span>
-                );
-              },
-            },
-          ]
-        : []),
-      {
-        id: "match",
-        accessorFn: (row) => row.match.status,
-        header: t("ruleMatch"),
-        cell: ({ row }) => <MatchStatusLabel match={row.original.match} t={t} />,
-      },
-      {
-        accessorKey: "type",
-        header: t("type"),
-        cell: ({ row }) => (
-          <span className="whitespace-nowrap text-muted-foreground">
-            {row.original.type}
-          </span>
-        ),
-      },
-      {
-        id: "location",
-        enableSorting: false,
-        header: t("location"),
-        cell: ({ row }) => (
-          <div className="text-right">
-            <Button
-              aria-label={t("openLocationFor", { name: row.original.name })}
-              onClick={() => void openLocation(row.original.path)}
-              size="icon-sm"
-              title={t("openLocation")}
-              type="button"
-              variant="ghost"
-            >
-              <FolderOpen />
-            </Button>
-          </div>
-        ),
-      },
-    ],
-    [activeTab, language, selectedPaths, t],
-  );
-
-  const table = useReactTable({
-    data: tableData,
-    columns,
-    state: {
-      sorting,
-      pagination,
-      columnVisibility,
-      rowSelection,
-    },
-    enableRowSelection: (row) => row.original.match.status !== "protected",
-    getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getRowId: (row) => row.path,
-    getSortedRowModel: getSortedRowModel(),
-    onColumnVisibilityChange: setColumnVisibility,
-    onPaginationChange: setPagination,
-    onSortingChange: setSorting,
-  });
-
-  const pageRows = table.getRowModel().rows;
-  const selectablePageRows = pageRows.filter(
-    (row) => row.original.match.status !== "protected",
-  );
-  const allPageSelected =
-    selectablePageRows.length > 0 &&
-    selectablePageRows.every((row) => selectedPaths.has(row.id));
-  const somePageSelected =
-    selectablePageRows.some((row) => selectedPaths.has(row.id)) &&
-    !allPageSelected;
-  const visibleColumnCount = table.getVisibleLeafColumns().length;
-  const pageCount = table.getPageCount();
-
-  const loadCounts = useCallback(async (fresh = false) => {
-    setCounts(await invokeCommand<QaCounts>("get_qa_counts", { fresh }));
+  const loadCounts = useCallback(async () => {
+    setCounts(await invokeCommand<QaCounts>("get_qa_counts", { fresh: false }));
   }, []);
 
   const loadStats = useCallback(async () => {
-    setStatsLoading(true);
-    setStatsError(null);
-    try {
-      setStats(await invokeCommand<Stats>("get_stats", { range: statsRange }));
-    } catch (error) {
-      setStats(null);
-      setStatsError(errorMessage(error));
-    } finally {
-      setStatsLoading(false);
-    }
-  }, [statsRange]);
+    setStats(await invokeCommand<Stats>("get_stats", { range }));
+  }, [range]);
 
-  const loadItems = useCallback(async (qaType: QaType, fresh = false) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const database = await invokeCommand<DatabaseStatus>("get_database_status");
-      setDatabase(database);
-      let nextItems: QaItem[];
-      if (database.available) {
-        nextItems = await invokeCommand<QaItem[]>("list_qa_items_classified", {
-          fresh,
-          qaType,
-        });
-      } else {
-        const legacyItems = await invokeCommand<
-          Array<Pick<QaItem, "path" | "name" | "last_interaction_at" | "pinned">>
-        >("list_qa_items", { fresh, qaType });
-        nextItems = legacyItems.map((item) => ({
-          ...item,
-          item_type: qaType === "recent" ? "recent_file" : "frequent_folder",
-          match: { status: "neutral" },
-        }));
-      }
-      setItems(nextItems);
-      const currentPaths = new Set(nextItems.map((item) => item.path));
-      setSelectedPaths(
-        (current) => new Set(Array.from(current).filter((path) => currentPaths.has(path))),
-      );
-    } catch (error) {
-      setItems([]);
-      setError(errorMessage(error));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const syncPrivacyState = useCallback(async () => {
-    const state = await invokeCommand<PrivacyState>("privacy_state");
-    const active = state !== "Inactive";
-    setPrivacyActive(active);
-    return active;
-  }, []);
-
-  const refresh = useCallback(async (fresh = false) => {
-    setSelectedPaths(new Set());
-    setPagination((current) => ({ ...current, pageIndex: 0 }));
-    const [countsResult, privacyResult] = await Promise.allSettled([
-      loadCounts(fresh),
-      syncPrivacyState(),
+  const loadOverview = useCallback(async () => {
+    setOverviewLoading(true);
+    setOverviewError(null);
+    const [countsResult, statsResult] = await Promise.allSettled([
+      loadCounts(),
+      loadStats(),
     ]);
     if (countsResult.status === "rejected") {
       setCounts(emptyCounts);
-      setError(errorMessage(countsResult.reason));
     }
-    if (privacyResult.status === "rejected") {
-      setPrivacyActive(false);
+    if (statsResult.status === "rejected") {
+      setStats(null);
+      setOverviewError(errorMessage(statsResult.reason));
     }
-    await loadItems(activeTab);
-  }, [activeTab, loadCounts, loadItems, syncPrivacyState]);
+    setOverviewLoading(false);
+  }, [loadCounts, loadStats]);
 
-  const refreshAll = useCallback(
-    (fresh = false) => Promise.all([refresh(fresh), loadStats()]),
-    [loadStats, refresh],
-  );
+  const loadQaItems = useCallback(async (qaType: QaType) => {
+    setQaLoading(true);
+    setQaError(null);
+    try {
+      setQaItems(
+        await invokeCommand<QaItem[]>("list_qa_items", {
+          fresh: false,
+          qaType,
+        }),
+      );
+    } catch (error) {
+      setQaItems([]);
+      setQaError(errorMessage(error));
+    } finally {
+      setQaLoading(false);
+    }
+  }, []);
+
+  const loadHistory = useCallback(async (page: number) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      setHistory(
+        await invokeCommand<CleanRecordPage>("get_clean_records", {
+          query: {
+            page,
+            page_size: HISTORY_PAGE_SIZE,
+            sort_by: "cleaned_at",
+            sort_order: "desc",
+            search: "",
+            item_type: null,
+            matched_by_rule: null,
+            source: null,
+            run_id: null,
+            date_range: null,
+          },
+        }),
+      );
+    } catch (error) {
+      setHistory(null);
+      setHistoryError(errorMessage(error));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (location.pathname === "/") {
+      void loadOverview();
+    }
+  }, [loadOverview, location.pathname]);
 
   useEffect(() => {
-    void loadStats();
-  }, [loadStats]);
-
-  useEffect(() => {
-    setPagination((current) =>
-      current.pageIndex === 0 ? current : { ...current, pageIndex: 0 },
-    );
-  }, [activeTab, query, items.length]);
-
-  useEffect(() => {
-    const refreshDashboard = (event: Event) => {
-      const { fresh = true } = (event as CustomEvent<{ fresh?: boolean }>).detail ?? {};
-      void refreshAll(fresh);
-    };
-
+    const refreshDashboard = () => void loadOverview();
     window.addEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
-    return () => {
-      window.removeEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
-    };
-  }, [refreshAll]);
+    return () => window.removeEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
+  }, [loadOverview]);
 
   useEffect(() => {
     let timeout: number | undefined;
-    let refreshItems = false;
-    const unlisten = listen<QuickAccessChanged>(
-      QUICK_ACCESS_CHANGED_EVENT,
-      ({ payload }) => {
-        refreshItems ||= payload.qa_type === activeTab;
-        window.clearTimeout(timeout);
-        timeout = window.setTimeout(() => {
-          const shouldRefreshItems = refreshItems;
-          refreshItems = false;
-          void loadCounts().catch((error) => setError(errorMessage(error)));
-          if (shouldRefreshItems) {
-            void loadItems(activeTab);
-          }
-        }, 100);
-      },
-    );
-
+    const unlisten = listen<QuickAccessChanged>(QUICK_ACCESS_CHANGED_EVENT, () => {
+      window.clearTimeout(timeout);
+      timeout = window.setTimeout(
+        () => void loadCounts().catch(() => setCounts(emptyCounts)),
+        100,
+      );
+    });
     return () => {
       window.clearTimeout(timeout);
-      unlisten.then((cleanup) => cleanup());
+      void unlisten.then((cleanup) => cleanup());
     };
-  }, [activeTab, loadCounts, loadItems]);
+  }, [loadCounts]);
 
-  const switchTab = (value: unknown) => {
-    const nextTab = toQaType(value);
-    setActiveTab(nextTab);
-    setAddItemPath("");
-    setSelectedPaths(new Set());
-    setQuery("");
-    setPagination((current) => ({ ...current, pageIndex: 0 }));
-  };
-
-  const togglePath = (path: string, checked: boolean) => {
-    setSelectedPaths((current) => {
-      const next = new Set(current);
-      if (checked) {
-        next.add(path);
-      } else {
-        next.delete(path);
-      }
-      return next;
-    });
-  };
-
-  const toggleCurrentPage = (checked: boolean) => {
-    setSelectedPaths((current) => {
-      const next = new Set(current);
-      for (const row of selectablePageRows) {
-        if (checked) {
-          next.add(row.id);
-        } else {
-          next.delete(row.id);
-        }
-      }
-      return next;
-    });
-  };
-
-  const selectedCount = selectedPaths.size;
-  const currentLabel =
-    activeTab === "recent" ? t("recentFiles") : t("frequentFolders");
-  const actionsDisabled = loading || mutating || privacyActive;
-  const cleanupActionsDisabled = actionsDisabled || !databaseAvailable;
-  const removeDisabled = cleanupActionsDisabled || selectedCount === 0;
-  const emptyDisabled = cleanupActionsDisabled || cleanableCount === 0;
-  const smartDisabled = cleanupActionsDisabled || smartTargets.length === 0;
-  const addDisabled = actionsDisabled || addItemPath.trim() === "";
-
-  const executeAction = async (action: Exclude<PendingAction, null>) => {
-    setPendingAction(null);
-    setMutating(true);
-    try {
-      if (await syncPrivacyState()) {
-        toast.warning(t("privacyWriteDisabled"));
-        return;
-      }
-
-      if (action === "remove" || action === "empty" || action === "smart") {
-        const result =
-          action === "remove"
-            ? await invokeCommand<QaBatchResult>("remove_qa_items", {
-                qaType: activeTab,
-                paths: Array.from(selectedPaths),
-              })
-            : action === "empty"
-              ? await invokeCommand<QaBatchResult>("empty_qa_items", {
-                  qaType: activeTab,
-                })
-              : await invokeCommand<QaBatchResult>("smart_clean", {
-                  qaType: activeTab,
-                });
-        const actionLabel = getOperationLabel(action, t);
-        const message = cleanupResultMessage(result, t);
-        setLastOperationSummary(
-          createOperationSummary({
-            action: actionLabel,
-            failed: result.failed.length,
-            message,
-            succeeded: result.succeeded.length,
-            target: currentLabel,
-            total: result.total,
-          }),
-        );
-        showCleanupToast(result, t);
-        if (result.failed.length > 0 || result.warnings.length > 0 || result.history_error) {
-          void notifyPartialFailure(
-            "Scourgify",
-            result.history_error
-              ? t("cleanupHistoryWarning")
-              : result.warnings.length > 0
-                ? commandIssueMessage(result.warnings[0].warning)
-                : message,
-          );
-        } else {
-          void notifyOperationComplete("Scourgify", message);
-        }
-      } else {
-        const result = await invokeCommand<QaRestoreResult>("restore_qa_defaults", {
-          qaType: action === "restore-all" ? "all" : activeTab,
-        });
-        setLastOperationSummary(
-          createRestoreOperationSummary(
-            result,
-            action === "restore-all" ? t("all") : currentLabel,
-            t,
-          ),
-        );
-        showRestoreToast(result, t);
-        if (result.success) {
-          void notifyOperationComplete("Scourgify", t("restoredDefaults"));
-        } else {
-          void notifyPartialFailure(
-            "Scourgify",
-            t("partialRestore", { failed: getRestoreFailedCount(result) }),
-          );
-        }
-      }
-
-      await refreshAll();
-    } catch (error) {
-      setLastOperationSummary(
-        createFailedOperationSummary(action, currentLabel, error, t),
+  const openDialog = (next: Exclude<DashboardDialog, null>) => {
+    setDialog(next);
+    if (next === "recent" || next === "frequent") {
+      void loadQaItems(next);
+    } else if (next === "cleaned") {
+      void loadHistory(1);
+    } else {
+      const policy = config.auto_clean;
+      setAutoMode(policy.kind);
+      setAutoHours(
+        policy.kind === "every_hours" ? String(policy.hours) : "24",
       );
-      toast.error(errorMessage(error));
-    } finally {
-      setMutating(false);
+      setAutoTime(
+        policy.kind === "daily_at"
+          ? `${String(policy.hour).padStart(2, "0")}:${String(policy.minute).padStart(2, "0")}`
+          : "09:00",
+      );
     }
   };
 
-  const openAction = async (
-    action: Exclude<PendingAction, null>,
-    trigger: HTMLButtonElement,
-  ) => {
-    try {
-      if (await syncPrivacyState()) {
-        toast.warning(t("privacyWriteDisabled"));
-        return;
-      }
-      if (action === "smart" && smartTargets.length === 0) {
-        toast.info(t("noSmartCleanTargets"));
-        return;
-      }
-      if (action === "smart" && !config.smart_clean_confirm) {
-        await executeAction(action);
-        return;
-      }
-      actionTriggerRef.current = trigger;
-      setPendingAction(action);
-    } catch (error) {
-      toast.error(errorMessage(error));
+  const saveAutoClean = async () => {
+    const hours = Number(autoHours);
+    const [hour, minute] = autoTime.split(":").map(Number);
+    if (
+      autoMode === "every_hours" &&
+      (!Number.isInteger(hours) || hours < 1 || hours > 168)
+    ) {
+      toast.error(t("autoCleanInvalidSchedule"));
+      return;
     }
-  };
-
-  const confirmPendingAction = async () => {
-    if (pendingAction) {
-      await executeAction(pendingAction);
-    }
-  };
-
-  const chooseItem = async () => {
-    try {
-      const selected = await open({
-        directory: activeTab === "frequent",
-        multiple: false,
-      });
-      if (typeof selected === "string") {
-        setAddItemPath(selected);
-      }
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
-  };
-
-  const addItem = async () => {
-    const path = addItemPath.trim();
-    if (!path) {
+    if (
+      autoMode === "daily_at" &&
+      (!Number.isInteger(hour) ||
+        !Number.isInteger(minute) ||
+        hour < 0 ||
+        hour > 23 ||
+        minute < 0 ||
+        minute > 59)
+    ) {
+      toast.error(t("autoCleanInvalidSchedule"));
       return;
     }
 
-    setMutating(true);
+    const autoClean: AutoCleanPolicy =
+      autoMode === "every_hours"
+        ? { kind: "every_hours", hours }
+        : autoMode === "daily_at"
+          ? { kind: "daily_at", hour, minute }
+        : autoMode === "monitor"
+          ? { kind: "monitor" }
+          : { kind: "disabled" };
+    setSavingAutoClean(true);
     try {
-      if (await syncPrivacyState()) {
-        toast.warning(t("privacyWriteDisabled"));
-        return;
-      }
-      const result = await invokeCommand<{
-        warnings: CommandWarningPayload[];
-      }>("add_qa_item", { qaType: activeTab, path });
-      setAddItemPath("");
-      if (result.warnings.length > 0) {
-        toast.warning(commandIssueMessage(result.warnings[0]));
-      } else {
-        toast.success(t("addedItem"));
-      }
-      await refresh();
+      const nextConfig: ConfigForm = { ...config, auto_clean: autoClean };
+      const saved = await invokeCommand<ConfigForm>("update_config", {
+        nextConfig,
+      });
+      setConfig(configSchema.parse(saved));
+      setDialog(null);
+      toast.success(t("settingsSaved"));
     } catch (error) {
       toast.error(errorMessage(error));
     } finally {
-      setMutating(false);
+      setSavingAutoClean(false);
     }
   };
 
-  const openLocation = async (path: string) => {
-    try {
-      await invokeCommand("open_in_explorer", { path });
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
-  };
-
-  const tableState = getTableState({
-    error,
-    filteredCount: filteredItems.length,
-    itemCount: items.length,
-    loading,
-    query,
-    t,
-  });
+  const nextAutoCleanTime = useMemo(
+    () => getNextAutoCleanTime(config.auto_clean, config.auto_clean_last_run),
+    [config.auto_clean, config.auto_clean_last_run],
+  );
+  const autoCleanCardValue =
+    config.auto_clean.kind === "monitor" ? (
+      <AutoCleanMonitorPulse label={t("autoCleanMonitor")} />
+    ) : nextAutoCleanTime ? (
+      <AutoCleanCountdown
+        active={location.pathname === "/"}
+        target={nextAutoCleanTime}
+      />
+    ) : (
+      formatAutoCleanPolicy(config.auto_clean, t)
+    );
+  const draftNextAutoCleanTime = getDraftNextAutoCleanTime(
+    autoMode,
+    autoHours,
+    autoTime,
+    config.auto_clean_last_run,
+  );
+  const draftNextAutoCleanDetail = draftNextAutoCleanTime
+    ? `${t("autoCleanNextRun")}: ${draftNextAutoCleanTime.toLocaleString(language)}`
+    : null;
 
   return (
-    <>
-      <section className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
-        <CountCard label={t("recentFiles")} value={counts.recent} />
-        <CountCard label={t("frequentFolders")} value={counts.frequent} />
-        <CountCard label={t("visible")} value={filteredItems.length} />
-        <CountCard label={t("selected")} value={selectedPaths.size} />
+    <main className="mx-auto grid w-full max-w-7xl gap-6 p-6">
+      <section className="grid grid-cols-4 gap-4">
+        <SummaryCard
+          onOpen={() => openDialog("recent")}
+          title={t("recentFiles")}
+          value={counts.recent}
+        />
+        <SummaryCard
+          onOpen={() => openDialog("frequent")}
+          title={t("frequentFolders")}
+          value={counts.frequent}
+        />
+        <SummaryCard
+          onOpen={() => openDialog("cleaned")}
+          title={t("cleaned")}
+          value={stats?.total ?? "--"}
+        />
+        <SummaryCard
+          onOpen={() => openDialog("auto")}
+          title={t("autoClean")}
+          value={autoCleanCardValue}
+        />
       </section>
 
-      <section className="grid gap-4 px-6 pb-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-        <OverviewChart data={quickAccessChartData} t={t} total={quickAccessTotal} />
-        <OperationSummaryPanel summary={lastOperationSummary} t={t} />
-      </section>
-
-      {database && !database.available ? (
-        <div className="px-6 pb-6">
-          <DatabaseRecoveryPanel
-            onStatusChange={setDatabase}
-            status={database}
-          />
-        </div>
-      ) : null}
-
-      <HistoryStats
-        available={databaseAvailable}
-        error={statsError}
-        loading={statsLoading}
-        onRangeChange={setStatsRange}
-        range={statsRange}
+      <CleanupHistoryChart
+        chartFocused={chartFocused}
+        error={overviewError}
+        language={language}
+        loading={overviewLoading}
+        onChartFocusChange={setChartFocused}
+        onRangeChange={setRange}
+        onSeriesToggle={(series) =>
+          setVisibleSeries((current) => ({ ...current, [series]: !current[series] }))
+        }
+        range={range}
         stats={stats}
         t={t}
+        visibleSeries={visibleSeries}
       />
 
-      <section className="grid gap-3 px-6 pb-6 md:grid-cols-[1fr_auto_auto]">
-        <label className="min-w-0">
-          <span className="sr-only">{t("itemPath")}</span>
-          <Input
-            disabled={actionsDisabled}
-            onChange={(event) => setAddItemPath(event.target.value)}
-            placeholder={t("itemPath")}
-            value={addItemPath}
-          />
-        </label>
-        <Button
-          disabled={actionsDisabled}
-          onClick={() => void chooseItem()}
-          type="button"
-          variant="outline"
-        >
-          {t("browse")}
-        </Button>
-        <Button
-          disabled={addDisabled}
-          onClick={() => void addItem()}
-          type="button"
-        >
-          <Plus />
-          {t("addItem")}
-        </Button>
-      </section>
-
-      <section className="px-6 pb-6">
-        <Tabs value={activeTab} onValueChange={switchTab}>
-          <div className="flex flex-col gap-3 border-b pb-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center">
-              <TabsList>
-                {(["recent", "frequent"] as const).map((tab) => (
-                  <TabsTrigger key={tab} value={tab}>
-                    {tab === "recent" ? t("recentFiles") : t("frequentFolders")}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              <label className="relative w-full md:w-80">
-                <span className="sr-only">{t("searchQuickAccess")}</span>
-                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t("searchPlaceholder")}
-                  type="search"
-                  value={query}
-                />
-              </label>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {privacyActive ? (
-                <span className="text-xs text-muted-foreground">
-                  {t("privacyActive")}
-                </span>
-              ) : null}
-              {!databaseAvailable ? (
-                <span className="text-xs text-destructive">
-                  {t("databaseUnavailable")}
-                </span>
-              ) : null}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button size="sm" type="button" variant="outline">
-                      <Columns3 />
-                      {t("columns")}
-                    </Button>
-                  }
-                />
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuLabel>{t("visibleColumns")}</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {table
-                    .getAllLeafColumns()
-                    .filter((column) => column.getCanHide())
-                    .map((column) => (
-                      <DropdownMenuCheckboxItem
-                        checked={column.getIsVisible()}
-                        key={column.id}
-                        onCheckedChange={(checked) =>
-                          column.toggleVisibility(checked)
-                        }
-                      >
-                        {getColumnLabel(column.id, t)}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button
-                disabled={smartDisabled}
-                onClick={(event) => void openAction("smart", event.currentTarget)}
-                size="sm"
-                type="button"
-              >
-                <Sparkles />
-                {t("smartCleanCount", { count: smartTargets.length })}
-              </Button>
-              <Button
-                disabled={removeDisabled}
-                onClick={(event) => void openAction("remove", event.currentTarget)}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <Trash2 />
-                {t("actionRemoveSelected")}
-              </Button>
-              <Button
-                disabled={emptyDisabled}
-                onClick={(event) => void openAction("empty", event.currentTarget)}
-                size="sm"
-                type="button"
-                variant="destructive"
-              >
-                {t("clearCurrent", { label: currentLabel })}
-              </Button>
-              <Button
-                disabled={actionsDisabled}
-                onClick={(event) =>
-                  void openAction("restore-current", event.currentTarget)
-                }
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <RotateCcw />
-                {t("restoreCurrent", { label: currentLabel })}
-              </Button>
-              <Button
-                disabled={actionsDisabled}
-                onClick={(event) =>
-                  void openAction("restore-all", event.currentTarget)
-                }
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                {t("restoreAll")}
-              </Button>
-            </div>
-          </div>
-
-          <TabsContent className="pt-4" value={activeTab}>
-            <Table>
-              <TableHeader>
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <TableRow key={headerGroup.id}>
-                    {headerGroup.headers.map((header) => (
-                      <TableHead
-                        className={getHeaderClassName(header.column.id)}
-                        key={header.id}
-                      >
-                        {header.column.id === "select" ? (
-                          <Checkbox
-                            aria-label={t("selectCurrentPage")}
-                            checked={allPageSelected}
-                            disabled={selectablePageRows.length === 0}
-                            indeterminate={somePageSelected}
-                            onCheckedChange={toggleCurrentPage}
-                            parent
-                          />
-                        ) : header.isPlaceholder ? null : header.column.getCanSort() ? (
-                          <SortableHeader column={header.column}>
-                            {flexRender(
-                              header.column.columnDef.header,
-                              header.getContext(),
-                            )}
-                          </SortableHeader>
-                        ) : (
-                          flexRender(
-                            header.column.columnDef.header,
-                            header.getContext(),
-                          )
-                        )}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableHeader>
-              <TableBody>
-                {tableState ? (
-                  <TableRow>
-                    <TableCell
-                      className="h-40 text-center text-muted-foreground"
-                      colSpan={visibleColumnCount}
-                    >
-                      <div className="flex flex-col items-center gap-3">
-                        <span>{tableState}</span>
-                        {error ? (
-                          <Button
-                            onClick={() => void refresh(true)}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            {t("refreshQuickAccess")}
-                          </Button>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  table.getRowModel().rows.map((row) => (
-                    <TableRow
-                      data-state={
-                        selectedPaths.has(row.id) ? "selected" : undefined
-                      }
-                      key={row.id}
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <TableCell
-                          className={getCellClassName(cell.column.id)}
-                          key={cell.id}
-                        >
-                          {flexRender(
-                            cell.column.columnDef.cell,
-                            cell.getContext(),
-                          )}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-            <div className="flex flex-col gap-3 border-t py-4 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
-              <div>
-                {t("pageStatus", {
-                  count: filteredItems.length,
-                  page: pageCount === 0 ? 0 : pagination.pageIndex + 1,
-                  pageCount,
-                })}
-              </div>
-              <div className="flex items-center gap-2">
-                <span>{t("rowsPerPage")}</span>
-                <Select
-                  onValueChange={(value) => table.setPageSize(Number(value))}
-                  value={String(pagination.pageSize)}
-                >
-                  <SelectTrigger className="h-8 w-20">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="10">10</SelectItem>
-                    <SelectItem value="20">20</SelectItem>
-                    <SelectItem value="50">50</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  disabled={!table.getCanPreviousPage()}
-                  onClick={() => table.previousPage()}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  <ChevronLeft />
-                  {t("previous")}
-                </Button>
-                <Button
-                  disabled={!table.getCanNextPage()}
-                  onClick={() => table.nextPage()}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {t("next")}
-                  <ChevronRight />
-                </Button>
-              </div>
-            </div>
-          </TabsContent>
-        </Tabs>
-      </section>
-      <ConfirmActionDialog
-        action={pendingAction}
-        currentLabel={currentLabel}
-        finalFocus={() =>
-          actionTriggerRef.current && !actionTriggerRef.current.disabled
-            ? actionTriggerRef.current
-            : null
-        }
-        isFrequent={activeTab === "frequent"}
-        onClose={() => setPendingAction(null)}
-        onConfirm={() => void confirmPendingAction()}
-        selectedCount={selectedCount}
-        smartTargets={smartTargets}
+      <QuickAccessDialog
+        items={qaItems}
+        language={language}
+        loading={qaLoading}
+        error={qaError}
+        onOpenChange={(open) => !open && setDialog(null)}
+        open={dialog === "recent" || dialog === "frequent"}
+        qaType={dialog === "frequent" ? "frequent" : "recent"}
         t={t}
       />
-    </>
+      <CleanedItemsDialog
+        error={historyError}
+        history={history}
+        language={language}
+        loading={historyLoading}
+        onLoadPage={(page) => void loadHistory(page)}
+        onOpenChange={(open) => !open && setDialog(null)}
+        open={dialog === "cleaned"}
+        t={t}
+      />
+      <AutoCleanDialog
+        hours={autoHours}
+        mode={autoMode}
+        onHoursChange={setAutoHours}
+        onModeChange={setAutoMode}
+        onOpenChange={(open) => !open && setDialog(null)}
+        onSave={() => void saveAutoClean()}
+        onTimeChange={setAutoTime}
+        open={dialog === "auto"}
+        nextRun={draftNextAutoCleanDetail}
+        saving={savingAutoClean}
+        t={t}
+        time={autoTime}
+      />
+    </main>
   );
 }
 
-function ConfirmActionDialog({
-  action,
-  currentLabel,
-  finalFocus,
-  isFrequent,
-  onClose,
-  onConfirm,
-  selectedCount,
-  smartTargets,
-  t,
+function SummaryCard({
+  detail,
+  onOpen,
+  title,
+  value,
 }: {
-  action: PendingAction;
-  currentLabel: string;
-  finalFocus: () => HTMLElement | null;
-  isFrequent: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-  selectedCount: number;
-  smartTargets: QaItem[];
-  t: (key: I18nKey, values?: Record<string, string | number>) => string;
+  detail?: ReactNode;
+  onOpen: () => void;
+  title: string;
+  value: ReactNode;
 }) {
-  const isEmpty = action === "empty";
-  const isSmart = action === "smart";
-  const isRestore = action === "restore-current" || action === "restore-all";
-  const title = isSmart
-    ? t("smartCleanQuestion")
-    : isEmpty
-    ? t("clearCurrentQuestion", { label: currentLabel })
-    : isRestore
-      ? action === "restore-all"
-        ? t("restoreAllDefaultsQuestion")
-        : t("restoreCurrentDefaultsQuestion", { label: currentLabel })
-      : t("removeSelectedQuestion");
-  const description = isSmart
-    ? t("smartCleanDescription", { count: smartTargets.length })
-    : isEmpty
-    ? t("emptyCurrentDescription", { label: currentLabel })
-    : isRestore
-      ? action === "restore-all"
-        ? t("restoreAllDescription")
-        : t("restoreCurrentDescription", { label: currentLabel })
-      : t("removeSelectedDescription", { count: selectedCount });
-
   return (
-    <AlertDialog open={action !== null} onOpenChange={(open) => !open && onClose()}>
-      <AlertDialogContent
-        className={isSmart ? "sm:max-w-2xl" : undefined}
-        finalFocus={finalFocus}
+    <div className="flex h-24 min-w-0 flex-col items-center justify-center rounded-md border bg-card p-3 text-center text-card-foreground">
+      <button
+        className="rounded-sm text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={onOpen}
+        type="button"
       >
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {description}
-            {isEmpty && isFrequent
-              ? t("emptyFrequentWarning")
-              : ""}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        {isSmart ? (
-          <ScrollArea className="h-64 rounded-md border">
-            {smartTargets.map((item) => (
-              <div
-                className="grid gap-1 border-b px-3 py-2 text-sm last:border-b-0"
-                key={item.path}
-              >
-                <div className="flex min-w-0 items-center justify-between gap-3">
-                  <span className="truncate font-medium">{item.name}</span>
-                  {item.match.status === "targeted" ? (
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {item.match.keyword}
-                    </span>
-                  ) : null}
-                </div>
-                <span className="truncate text-xs text-muted-foreground">
-                  {item.path}
-                </span>
-              </div>
-            ))}
-          </ScrollArea>
-        ) : null}
-        <AlertDialogFooter>
-          <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={onConfirm}
-            type="button"
-            variant="destructive"
-          >
-            {isSmart
-              ? t("smartClean")
-              : isEmpty
-                ? t("actionClear")
-                : isRestore
-                  ? t("restore")
-                  : t("actionRemoveSelected")}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-function MatchStatusLabel({
-  match,
-  t,
-}: {
-  match: QaMatch;
-  t: (key: I18nKey, values?: Record<string, string | number>) => string;
-}) {
-  if (match.status === "neutral") {
-    return <span className="text-xs text-muted-foreground">{t("neutral")}</span>;
-  }
-
-  const Icon = match.status === "protected" ? ShieldCheck : Target;
-  return (
-    <span
-      className={
-        match.status === "protected"
-          ? "inline-flex max-w-48 items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400"
-          : "inline-flex max-w-48 items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400"
-      }
-      title={match.keyword}
-    >
-      <Icon className="size-3.5 shrink-0" />
-      <span className="shrink-0">
-        {t(match.status === "protected" ? "protected" : "targeted")}
-      </span>
-      <span className="truncate">{match.keyword}</span>
-    </span>
-  );
-}
-
-function CountCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md border bg-card p-4 text-card-foreground">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="mt-3 text-2xl font-semibold tabular-nums">{value}</p>
-    </div>
-  );
-}
-
-function OverviewChart({
-  data,
-  t,
-  total,
-}: {
-  data: QuickAccessChartItem[];
-  t: (key: I18nKey, values?: Record<string, string | number>) => string;
-  total: number;
-}) {
-  return (
-    <div className="rounded-md border bg-card p-4 text-card-foreground">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-sm font-semibold">
-            {t("quickAccessComposition")}
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t("currentSplit")}
-          </p>
-        </div>
-        <span className="text-2xl font-semibold tabular-nums">{total}</span>
+        {title}
+      </button>
+      <div className="mt-1 max-w-full text-xl font-semibold tabular-nums">
+        {value}
       </div>
-      {total === 0 ? (
-        <div className="grid h-48 place-items-center text-sm text-muted-foreground">
-          {t("noItems")}
+      {detail ? (
+        <div
+          className="mt-0.5 w-full truncate text-[11px] text-muted-foreground"
+          title={typeof detail === "string" ? detail : undefined}
+        >
+          {detail}
         </div>
-      ) : (
-        <div className="mt-4 grid gap-4 md:grid-cols-[240px_1fr] md:items-center">
-          <div className="h-48">
-            <ResponsiveContainer height="100%" width="100%">
-              <PieChart>
-                <Pie
-                  data={data}
-                  dataKey="value"
-                  innerRadius={54}
-                  nameKey="name"
-                  outerRadius={78}
-                  paddingAngle={2}
-                >
-                  {data.map((item) => (
-                    <Cell fill={item.color} key={item.name} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="grid gap-3">
-            {data.map((item) => (
-              <div
-                className="flex items-center justify-between gap-3 text-sm"
-                key={item.name}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <span
-                    className="size-2.5 rounded-full"
-                    style={{ backgroundColor: item.color }}
-                  />
-                  <span className="truncate">{item.name}</span>
-                </span>
-                <span className="font-medium tabular-nums">
-                  {item.value} / {Math.round((item.value / total) * 100)}%
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
-function OperationSummaryPanel({
-  summary,
-  t,
+function AutoCleanCountdown({
+  active,
+  target,
 }: {
-  summary: OperationSummary | null;
-  t: (key: I18nKey, values?: Record<string, string | number>) => string;
+  active: boolean;
+  target: Date;
 }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    setNow(Date.now());
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [active, target]);
+
+  return <>{formatCountdown(target.getTime() - now)}</>;
+}
+
+function AutoCleanMonitorPulse({ label }: { label: string }) {
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updatePreference = () => setReduceMotion(mediaQuery.matches);
+    updatePreference();
+    mediaQuery.addEventListener("change", updatePreference);
+    return () => mediaQuery.removeEventListener("change", updatePreference);
+  }, []);
+
   return (
-    <div className="rounded-md border bg-card p-4 text-card-foreground">
-      <div>
-        <h2 className="text-sm font-semibold">{t("lastOperation")}</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {t("latestBatchResult")}
-        </p>
-      </div>
-      {summary ? (
-        <div className="mt-5 grid gap-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium">{summary.action}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {summary.target} / {summary.updatedAt}
-              </p>
-            </div>
-            <span className="rounded-sm border px-2 py-1 text-xs">
-              {summary.failed > 0 ? t("needsAttention") : t("complete")}
-            </span>
-          </div>
-          <div className="grid grid-cols-3 gap-2 border-y py-3 text-center">
-            <SummaryMetric label={t("succeeded")} value={summary.succeeded} />
-            <SummaryMetric label={t("failed")} value={summary.failed} />
-            <SummaryMetric label={t("total")} value={summary.total} />
-          </div>
-          <p className="text-sm text-muted-foreground">{summary.message}</p>
-        </div>
-      ) : (
-        <div className="grid h-48 place-items-center text-sm text-muted-foreground">
-          {t("noOperations")}
-        </div>
-      )}
+    <div className="relative h-9 w-20 max-w-full overflow-hidden">
+      <Lottie
+        animationData={ecgMonitorAnimation}
+        aria-hidden="true"
+        autoplay={!reduceMotion}
+        className="h-full w-full"
+        loop={!reduceMotion}
+        rendererSettings={{ preserveAspectRatio: "xMidYMid slice" }}
+      />
+      <span className="sr-only">{label}</span>
     </div>
   );
 }
 
-function HistoryStats({
-  available,
+function CleanupHistoryChart({
+  chartFocused,
   error,
+  language,
   loading,
+  onChartFocusChange,
   onRangeChange,
+  onSeriesToggle,
   range,
   stats,
   t,
+  visibleSeries,
 }: {
-  available: boolean;
+  chartFocused: boolean;
   error: string | null;
+  language: Language;
   loading: boolean;
+  onChartFocusChange: (focused: boolean) => void;
   onRangeChange: (range: StatsRange) => void;
+  onSeriesToggle: (series: TrendSeries) => void;
   range: StatsRange;
   stats: Stats | null;
-  t: (key: I18nKey, values?: Record<string, string | number>) => string;
+  t: Translate;
+  visibleSeries: Record<TrendSeries, boolean>;
 }) {
-  const [period, setPeriod] = useState<"daily" | "weekly">("daily");
-  const trend = period === "daily" ? stats?.daily_trend : stats?.weekly_trend;
-  const maxRuleHits = stats?.rule_hits[0]?.count ?? 0;
-
+  const trend = stats?.daily_trend ?? [];
   return (
-    <section className="px-6 pb-6" aria-labelledby="history-stats-title">
-      <h2 className="text-sm font-semibold" id="history-stats-title">
-        {t("historyStatistics")}
-      </h2>
-      {!available ? (
-        <p className="mt-3 text-sm text-muted-foreground">
-          {t("databaseUnavailable")}
-        </p>
-      ) : loading ? (
-        <p className="mt-3 text-sm text-muted-foreground">
-          {t("loadingStatistics")}
-        </p>
+    <section
+      className="min-w-0 bg-card text-card-foreground outline-none"
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          onChartFocusChange(false);
+        }
+      }}
+      onClick={() => onChartFocusChange(true)}
+      onFocusCapture={() => onChartFocusChange(true)}
+      tabIndex={0}
+    >
+      <div className="flex min-h-8 justify-end">
+        {chartFocused ? (
+          <div aria-label={t("dateRange")} className="inline-flex rounded-md border p-0.5">
+            {(["24h", "7d", "30d"] as const).map((value) => (
+              <Button
+                aria-pressed={range === value}
+                className="h-7 px-2.5"
+                key={value}
+                onClick={() => onRangeChange(value)}
+                size="sm"
+                type="button"
+                variant={range === value ? "secondary" : "ghost"}
+              >
+                {value === "24h" ? "24h" : value === "7d" ? "7D" : "30D"}
+              </Button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      {loading ? (
+        <ChartMessage>{t("loadingStatistics")}</ChartMessage>
       ) : error ? (
-        <p className="mt-3 text-sm text-destructive">{error}</p>
-      ) : stats ? (
-        <>
-          <div className="mt-4 grid gap-4 sm:grid-cols-3">
-            <CountCard label={t("totalCleaned")} value={stats.total} />
-            <CountCard label={t("recentFiles")} value={stats.recent_files} />
-            <CountCard
-              label={t("frequentFolders")}
-              value={stats.frequent_folders}
+        <ChartMessage destructive>{error}</ChartMessage>
+      ) : trend.length === 0 ? (
+        <ChartMessage>{t("noHistory")}</ChartMessage>
+      ) : (
+        <div className="h-[360px] min-w-0">
+          <ResponsiveContainer height="100%" width="100%">
+            <AreaChart data={trend} margin={{ bottom: 8, left: 0, right: 12, top: 8 }}>
+              <XAxis
+                dataKey="period"
+                minTickGap={28}
+                tickFormatter={(value) => formatChartDate(String(value), language)}
+                tickLine={false}
+              />
+              <Tooltip
+                labelFormatter={(value) => formatFullDate(String(value), language)}
+              />
+              <Area
+                dataKey="recent_files"
+                fill="#2563eb"
+                fillOpacity={0.22}
+                hide={!visibleSeries.recent_files}
+                name={t("recentFiles")}
+                stroke="#2563eb"
+                strokeWidth={2}
+                type="monotone"
+              />
+              <Area
+                dataKey="frequent_folders"
+                fill="#16a34a"
+                fillOpacity={0.18}
+                hide={!visibleSeries.frequent_folders}
+                name={t("frequentFolders")}
+                stroke="#16a34a"
+                strokeWidth={2}
+                type="monotone"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+      <div className="flex flex-wrap justify-center gap-2 pt-3">
+        {(["recent_files", "frequent_folders"] as const).map((series) => (
+          <Button
+            aria-pressed={visibleSeries[series]}
+            className="h-8 gap-2 px-3"
+            key={series}
+            onClick={() => onSeriesToggle(series)}
+            size="sm"
+            type="button"
+            variant={visibleSeries[series] ? "secondary" : "ghost"}
+          >
+            <span
+              aria-hidden="true"
+              className={`size-2 rounded-full ${
+                series === "recent_files" ? "bg-blue-600" : "bg-green-600"
+              }`}
             />
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            {t("retainedHistory")}: {stats.retained_total}
-          </p>
-          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-            <div className="min-w-0 rounded-md border bg-card p-4 text-card-foreground">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold">{t("cleaningTrend")}</h3>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div
-                    aria-label={t("dateRange")}
-                    className="inline-flex rounded-md border p-0.5"
-                    role="group"
-                  >
-                    {(["7d", "30d", "all"] as const).map((value) => {
-                      const label = t(
-                        value === "7d"
-                          ? "last7Days"
-                          : value === "30d"
-                            ? "last30Days"
-                            : "all",
-                      );
-                      return (
-                        <Button
-                          aria-label={label}
-                          aria-pressed={range === value}
-                          className="h-7 px-2.5"
-                          key={value}
-                          onClick={() => onRangeChange(value)}
-                          size="sm"
-                          title={label}
-                          type="button"
-                          variant={range === value ? "secondary" : "ghost"}
-                        >
-                          {value === "7d"
-                            ? "7D"
-                            : value === "30d"
-                              ? "30D"
-                              : t("all")}
-                        </Button>
-                      );
-                    })}
-                  </div>
-                  <div className="inline-flex rounded-md border p-0.5">
-                    {(["daily", "weekly"] as const).map((value) => (
-                      <Button
-                        aria-pressed={period === value}
-                        className="h-7 px-2.5"
-                        key={value}
-                        onClick={() => setPeriod(value)}
-                        size="sm"
-                        type="button"
-                        variant={period === value ? "secondary" : "ghost"}
-                      >
-                        {t(value)}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              {trend && trend.length > 0 ? (
-                <div className="mt-4 h-60 min-w-0">
-                  <ResponsiveContainer height="100%" width="100%">
-                    <LineChart data={trend} margin={{ left: -20, right: 8 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="period" minTickGap={24} tickLine={false} />
-                      <YAxis allowDecimals={false} tickLine={false} />
-                      <Tooltip />
-                      <Line
-                        dataKey="count"
-                        dot={false}
-                        stroke="#2563eb"
-                        strokeWidth={2}
-                        type="monotone"
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <div className="grid h-60 place-items-center text-sm text-muted-foreground">
-                  {t("noHistory")}
-                </div>
-              )}
-            </div>
-            <div className="rounded-md border bg-card p-4 text-card-foreground">
-              <h3 className="text-sm font-semibold">{t("ruleHitRanking")}</h3>
-              {stats.rule_hits.length > 0 ? (
-                <ol className="mt-5 grid gap-4">
-                  {stats.rule_hits.map((rule, index) => (
-                    <li
-                      className="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-2"
-                      key={rule.keyword}
-                    >
-                      <span className="text-xs tabular-nums text-muted-foreground">
-                        {index + 1}
-                      </span>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm" title={rule.keyword}>
-                          {rule.keyword}
-                        </div>
-                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full rounded-full bg-amber-500"
-                            style={{
-                              width: `${(rule.count / maxRuleHits) * 100}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                      <span className="text-sm font-medium tabular-nums">
-                        {rule.count}
-                      </span>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <div className="grid h-60 place-items-center text-sm text-muted-foreground">
-                  {t("noRuleHits")}
-                </div>
-              )}
-            </div>
-          </div>
-        </>
-      ) : null}
+            {series === "recent_files" ? t("recentFiles") : t("frequentFolders")}
+          </Button>
+        ))}
+      </div>
     </section>
   );
 }
 
-function SummaryMetric({ label, value }: { label: string; value: number }) {
+function ChartMessage({
+  children,
+  destructive = false,
+}: {
+  children: string;
+  destructive?: boolean;
+}) {
   return (
-    <div>
-      <p className="text-lg font-semibold tabular-nums">{value}</p>
-      <p className="mt-1 text-xs text-muted-foreground">{label}</p>
+    <div
+      className={`grid h-[360px] place-items-center text-sm ${
+        destructive ? "text-destructive" : "text-muted-foreground"
+      }`}
+    >
+      {children}
     </div>
   );
 }
 
-function SortableHeader({
-  children,
-  column,
-}: {
-  children: ReactNode;
-  column: Column<QaTableRow>;
-}) {
-  const sorted = column.getIsSorted();
-  const SortIcon =
-    sorted === "asc" ? ArrowUp : sorted === "desc" ? ArrowDown : ArrowUpDown;
-
-  return (
-    <button
-      className="flex h-8 items-center gap-1.5 rounded-sm text-left text-sm font-medium hover:text-foreground"
-      onClick={column.getToggleSortingHandler()}
-      type="button"
-    >
-      {children}
-      <SortIcon className="size-4 text-muted-foreground" />
-    </button>
-  );
-}
-
-function getHeaderClassName(columnId: string) {
-  if (columnId === "select") {
-    return "w-10";
-  }
-  if (columnId === "name") {
-    return "w-64";
-  }
-  if (columnId === "match") {
-    return "w-48";
-  }
-  if (columnId === "pinned") {
-    return "w-32";
-  }
-  if (columnId === "type") {
-    return "w-36";
-  }
-  if (columnId === "location") {
-    return "w-24 text-right";
-  }
-  return undefined;
-}
-
-function getCellClassName(columnId: string) {
-  return columnId === "location" ? "text-right" : undefined;
-}
-
-function getColumnLabel(
-  columnId: string,
-  t: (key: I18nKey, values?: Record<string, string | number>) => string,
-) {
-  const labels: Record<string, I18nKey> = {
-    location: "location",
-    last_interaction_at: "lastUsed",
-    match: "ruleMatch",
-    name: "name",
-    path: "path",
-    pinned: "pinStatus",
-    type: "type",
-  };
-  return labels[columnId] ? t(labels[columnId]) : columnId;
-}
-
-function formatRelativeTime(timestamp: number, language: string) {
-  const divisions: Array<[number, Intl.RelativeTimeFormatUnit]> = [
-    [60, "second"],
-    [60, "minute"],
-    [24, "hour"],
-    [7, "day"],
-    [4.345, "week"],
-    [12, "month"],
-    [Number.POSITIVE_INFINITY, "year"],
-  ];
-  let value = (timestamp - Date.now()) / 1_000;
-  const formatter = new Intl.RelativeTimeFormat(language, { numeric: "auto" });
-
-  for (const [amount, unit] of divisions) {
-    if (Math.abs(value) < amount) {
-      return formatter.format(Math.round(value), unit);
-    }
-    value /= amount;
-  }
-  return "";
-}
-
-function toQaType(value: unknown): QaType {
-  return value === "frequent" ? "frequent" : "recent";
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function cleanupResultMessage(
-  result: QaBatchResult,
-  t: (key: I18nKey, values?: Record<string, string | number>) => string,
-) {
-  if (result.failed.length > 0) {
-    return t("removedItemsPartial", {
-      failed: result.failed.length,
-      succeeded: result.succeeded.length,
-      total: result.total,
-    });
-  }
-  if (result.skipped_protected.length > 0) {
-    return t("cleanedItemsProtected", {
-      protected: result.skipped_protected.length,
-      succeeded: result.succeeded.length,
-    });
-  }
-  return t("removedItems", { succeeded: result.succeeded.length });
-}
-
-function showCleanupToast(
-  result: QaBatchResult,
-  t: (key: I18nKey, values?: Record<string, string | number>) => string,
-) {
-  const message = cleanupResultMessage(result, t);
-  if (
-    result.warnings.length > 0 &&
-    result.failed.length === 0 &&
-    result.skipped_protected.length === 0
-  ) {
-    toast.warning(commandIssueMessage(result.warnings[0].warning));
-  } else if (result.succeeded.length > 0) {
-    if (
-      result.failed.length > 0 ||
-      result.skipped_protected.length > 0
-    ) {
-      toast.warning(message);
-    } else {
-      toast.success(message);
-    }
-  } else if (result.failed.length > 0) {
-    toast.error(t("failedRemoveItems", { failed: result.failed.length }));
-  } else {
-    toast.info(message);
-  }
-
-  if (result.history_error) {
-    toast.warning(t("cleanupHistoryWarning"));
-  }
-}
-
-function showRestoreToast(
-  result: QaRestoreResult,
-  t: (key: I18nKey, values?: Record<string, string | number>) => string,
-) {
-  if (result.success) {
-    toast.success(t("restoredDefaults"));
-    return;
-  }
-
-  toast.warning(t("partialRestore", { failed: getRestoreFailedCount(result) }));
-}
-
-function createOperationSummary({
-  action,
-  failed,
-  message,
-  succeeded,
-  target,
-  total,
-}: Omit<OperationSummary, "updatedAt">): OperationSummary {
-  return {
-    action,
-    failed,
-    message,
-    succeeded,
-    target,
-    total,
-    updatedAt: new Date().toLocaleTimeString(),
-  };
-}
-
-function createRestoreOperationSummary(
-  result: QaRestoreResult,
-  target: string,
-  t: (key: I18nKey, values?: Record<string, string | number>) => string,
-): OperationSummary {
-  const sections = [result.recent, result.frequent].filter(
-    (section): section is QaRestoreSectionResult => section !== null,
-  );
-  const succeeded = sections.filter((section) => section.success).length;
-  const failed = sections.length - succeeded;
-  return createOperationSummary({
-    action: t("actionRestoreDefaults"),
-    failed,
-    message:
-      failed > 0
-        ? t("partialRestore", { failed })
-        : t("restoredDefaults"),
-    succeeded,
-    target,
-    total: sections.length,
-  });
-}
-
-function createFailedOperationSummary(
-  action: Exclude<PendingAction, null>,
-  target: string,
-  error: unknown,
-  t: (key: I18nKey, values?: Record<string, string | number>) => string,
-): OperationSummary {
-  return createOperationSummary({
-    action: getOperationLabel(action, t),
-    failed: 1,
-    message: errorMessage(error),
-    succeeded: 0,
-    target,
-    total: 1,
-  });
-}
-
-function getOperationLabel(
-  action: Exclude<PendingAction, null>,
-  t: (key: I18nKey, values?: Record<string, string | number>) => string,
-) {
-  if (action === "remove") {
-    return t("actionRemoveSelected");
-  }
-  if (action === "empty") {
-    return t("actionClear");
-  }
-  if (action === "smart") {
-    return t("actionSmartClean");
-  }
-  return t("actionRestoreDefaults");
-}
-
-function getRestoreFailedCount(result: QaRestoreResult) {
-  return [result.recent, result.frequent].filter(
-    (section) => section && !section.success,
-  ).length;
-}
-
-function getTableState({
+function QuickAccessDialog({
   error,
-  filteredCount,
-  itemCount,
+  items,
+  language,
   loading,
-  query,
+  onOpenChange,
+  open,
+  qaType,
   t,
 }: {
   error: string | null;
-  filteredCount: number;
-  itemCount: number;
+  items: QaItem[];
+  language: Language;
   loading: boolean;
-  query: string;
-  t: (key: I18nKey, values?: Record<string, string | number>) => string;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  qaType: QaType;
+  t: Translate;
 }) {
-  if (loading) {
-    return t("loadingItems");
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-h-[80svh] overflow-hidden sm:max-w-4xl">
+        <DialogHeader className="sr-only">
+          <DialogTitle>
+            {qaType === "recent" ? t("recentFiles") : t("frequentFolders")}
+          </DialogTitle>
+          <DialogDescription>{t("currentItems")}</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[58svh] overflow-auto rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("name")}</TableHead>
+                <TableHead>{t("path")}</TableHead>
+                <TableHead className="w-40">{t("lastUsed")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading || error || items.length === 0 ? (
+                <TableMessage colSpan={3} destructive={Boolean(error)}>
+                  {loading ? t("loadingItems") : error ?? t("noItems")}
+                </TableMessage>
+              ) : (
+                items.map((item) => (
+                  <TableRow key={item.path}>
+                    <TableCell className="max-w-56 truncate font-medium" title={item.name}>
+                      {item.name}
+                    </TableCell>
+                    <TableCell className="max-w-[420px] truncate text-muted-foreground" title={item.path}>
+                      {item.path}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {item.last_interaction_at === null
+                        ? "--"
+                        : new Date(item.last_interaction_at).toLocaleString(language)}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CleanedItemsDialog({
+  error,
+  history,
+  language,
+  loading,
+  onLoadPage,
+  onOpenChange,
+  open,
+  t,
+}: {
+  error: string | null;
+  history: CleanRecordPage | null;
+  language: Language;
+  loading: boolean;
+  onLoadPage: (page: number) => void;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  t: Translate;
+}) {
+  const page = history?.page ?? 1;
+  const pageCount = Math.max(1, Math.ceil((history?.total ?? 0) / HISTORY_PAGE_SIZE));
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-h-[80svh] overflow-hidden sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>{t("cleaned")}</DialogTitle>
+          <DialogDescription>
+            {t("retainedHistory")}: {history?.overall_total ?? "--"}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[52svh] overflow-auto rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("path")}</TableHead>
+                <TableHead className="w-40">{t("type")}</TableHead>
+                <TableHead className="w-32">{t("cleanupSource")}</TableHead>
+                <TableHead className="w-44">{t("cleanedAt")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading || error || !history || history.records.length === 0 ? (
+                <TableMessage colSpan={4} destructive={Boolean(error)}>
+                  {loading ? t("loadingHistory") : error ?? t("noHistory")}
+                </TableMessage>
+              ) : (
+                history.records.map((record) => (
+                  <TableRow key={record.id}>
+                    <TableCell className="max-w-[480px] truncate" title={record.item_path}>
+                      {record.item_path}
+                    </TableCell>
+                    <TableCell>
+                      {t(record.item_type === "recent_file" ? "recentFile" : "frequentFolder")}
+                    </TableCell>
+                    <TableCell>
+                      {t(record.source === "auto" ? "automatic" : "manualTrigger")}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {new Date(record.cleaned_at).toLocaleString(language)}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        <DialogFooter className="items-center sm:justify-between">
+          <span className="text-xs text-muted-foreground">
+            {t("pageStatus", {
+              count: history?.total ?? 0,
+              page: history?.total === 0 ? 0 : page,
+              pageCount: history?.total === 0 ? 0 : pageCount,
+            })}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              aria-label={t("previous")}
+              disabled={loading || page <= 1}
+              onClick={() => onLoadPage(page - 1)}
+              size="icon-sm"
+              title={t("previous")}
+              type="button"
+              variant="outline"
+            >
+              <ChevronLeft />
+            </Button>
+            <Button
+              aria-label={t("next")}
+              disabled={loading || page >= pageCount}
+              onClick={() => onLoadPage(page + 1)}
+              size="icon-sm"
+              title={t("next")}
+              type="button"
+              variant="outline"
+            >
+              <ChevronRight />
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AutoCleanDialog({
+  hours,
+  mode,
+  nextRun,
+  onHoursChange,
+  onModeChange,
+  onOpenChange,
+  onSave,
+  onTimeChange,
+  open,
+  saving,
+  t,
+  time,
+}: {
+  hours: string;
+  mode: AutoCleanFormMode;
+  nextRun: string | null;
+  onHoursChange: (hours: string) => void;
+  onModeChange: (mode: AutoCleanFormMode) => void;
+  onOpenChange: (open: boolean) => void;
+  onSave: () => void;
+  onTimeChange: (time: string) => void;
+  open: boolean;
+  saving: boolean;
+  t: Translate;
+  time: string;
+}) {
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("autoClean")}</DialogTitle>
+          <DialogDescription>{t("autoCleanMode")}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <label className="grid gap-2 text-sm">
+            <span className="font-medium">{t("autoCleanMode")}</span>
+            <Select
+              onValueChange={(value) => onModeChange(value as AutoCleanFormMode)}
+              value={mode}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue>{autoCleanModeLabel(mode, t)}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="disabled">{t("disabled")}</SelectItem>
+                <SelectItem value="every_hours">{t("autoCleanEveryHours")}</SelectItem>
+                <SelectItem value="daily_at">{t("autoCleanDailyAt")}</SelectItem>
+                <SelectItem value="monitor">{t("autoCleanMonitor")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          {mode === "every_hours" ? (
+            <label className="grid gap-2 text-sm">
+              <span className="font-medium">{t("autoCleanInterval")}</span>
+              <Input
+                max={168}
+                min={1}
+                onChange={(event) => onHoursChange(event.target.value)}
+                type="number"
+                value={hours}
+              />
+            </label>
+          ) : null}
+          {mode === "daily_at" ? (
+            <label className="grid gap-2 text-sm">
+              <span className="font-medium">{t("autoCleanTime")}</span>
+              <Input
+                onChange={(event) => onTimeChange(event.target.value)}
+                type="time"
+                value={time}
+              />
+            </label>
+          ) : null}
+          {nextRun ? (
+            <div className="rounded-md border bg-muted/50 px-3 py-2 text-sm">
+              {nextRun}
+            </div>
+          ) : null}
+        </div>
+        <DialogFooter>
+          <Button disabled={saving} onClick={() => onOpenChange(false)} type="button" variant="outline">
+            {t("cancel")}
+          </Button>
+          <Button disabled={saving} onClick={onSave} type="button">
+            {t("save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TableMessage({
+  children,
+  colSpan,
+  destructive = false,
+}: {
+  children: string;
+  colSpan: number;
+  destructive?: boolean;
+}) {
+  return (
+    <TableRow>
+      <TableCell
+        className={`h-40 text-center ${destructive ? "text-destructive" : "text-muted-foreground"}`}
+        colSpan={colSpan}
+      >
+        {children}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+type Translate = (
+  key: I18nKey,
+  values?: Record<string, string | number>,
+) => string;
+
+function formatAutoCleanPolicy(policy: AutoCleanPolicy, t: Translate) {
+  switch (policy.kind) {
+    case "disabled":
+      return "--";
+    case "monitor":
+      return t("autoCleanMonitor");
+    case "every_hours":
+      return `${policy.hours}h`;
+    case "daily_at":
+      return `${String(policy.hour).padStart(2, "0")}:${String(policy.minute).padStart(2, "0")}`;
   }
-  if (error) {
-    return error;
+}
+
+function autoCleanModeLabel(mode: AutoCleanFormMode, t: Translate) {
+  switch (mode) {
+    case "disabled":
+      return t("disabled");
+    case "every_hours":
+      return t("autoCleanEveryHours");
+    case "daily_at":
+      return t("autoCleanDailyAt");
+    case "monitor":
+      return t("autoCleanMonitor");
   }
-  if (itemCount === 0) {
-    return t("noItems");
+}
+
+function getNextAutoCleanTime(
+  policy: AutoCleanPolicy,
+  lastRun: string | null,
+  now = new Date(),
+) {
+  if (policy.kind === "every_hours") {
+    const lastRunTime = lastRun ? new Date(lastRun) : null;
+    const anchor =
+      lastRunTime && !Number.isNaN(lastRunTime.getTime()) ? lastRunTime : now;
+    const scheduled = new Date(anchor.getTime() + policy.hours * 3_600_000);
+    return scheduled > now ? scheduled : now;
   }
-  if (query.trim() && filteredCount === 0) {
-    return t("noMatches");
+  if (policy.kind === "daily_at") {
+    const scheduled = new Date(now);
+    scheduled.setHours(policy.hour, policy.minute, 0, 0);
+    if (scheduled <= now) {
+      scheduled.setDate(scheduled.getDate() + 1);
+    }
+    return scheduled;
   }
   return null;
+}
+
+function getDraftNextAutoCleanTime(
+  mode: AutoCleanFormMode,
+  hoursValue: string,
+  timeValue: string,
+  lastRun: string | null,
+) {
+  if (mode === "every_hours") {
+    const hours = Number(hoursValue);
+    return Number.isInteger(hours) && hours >= 1 && hours <= 168
+      ? getNextAutoCleanTime({ kind: "every_hours", hours }, lastRun)
+      : null;
+  }
+  if (mode === "daily_at") {
+    const [hour, minute] = timeValue.split(":").map(Number);
+    return Number.isInteger(hour) &&
+      Number.isInteger(minute) &&
+      hour >= 0 &&
+      hour <= 23 &&
+      minute >= 0 &&
+      minute <= 59
+      ? getNextAutoCleanTime({ kind: "daily_at", hour, minute }, lastRun)
+      : null;
+  }
+  return null;
+}
+
+function formatAutoCleanDateTime(date: Date, language: Language) {
+  return date.toLocaleString(language, {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatCountdown(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
+}
+
+function formatChartDate(value: string, language: Language) {
+  const date = new Date(`${value}T00:00:00`);
+  return date.toLocaleDateString(language, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatFullDate(value: string, language: Language) {
+  return new Date(`${value}T00:00:00`).toLocaleDateString(language, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }

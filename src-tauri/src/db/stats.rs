@@ -81,8 +81,12 @@ fn trend(
                  FROM days, bounds
                  WHERE day < end_day
              ),
-             record_days(day, count) AS (
-                 SELECT date(cleaned_at, 'localtime'), COUNT(*)
+             record_days(day, count, recent_files, frequent_folders) AS (
+                 SELECT
+                     date(cleaned_at, 'localtime'),
+                     COUNT(*),
+                     SUM(item_type = 'recent_file'),
+                     SUM(item_type = 'frequent_folder')
                  FROM clean_records
                  GROUP BY date(cleaned_at, 'localtime')
              )
@@ -91,7 +95,9 @@ fn trend(
                      WHEN ?2 = 1 THEN date(days.day, 'weekday 0', '-6 days')
                      ELSE days.day
                  END AS period,
-                 COALESCE(SUM(record_days.count), 0)
+                 COALESCE(SUM(record_days.count), 0),
+                 COALESCE(SUM(record_days.recent_files), 0),
+                 COALESCE(SUM(record_days.frequent_folders), 0)
              FROM days
              LEFT JOIN record_days ON record_days.day = days.day
              GROUP BY period
@@ -100,14 +106,24 @@ fn trend(
         .with_context(|| format!("failed to prepare {label}"))?;
     let rows = statement
         .query_map(params![range.date_modifier(), weekly], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
         })
         .with_context(|| format!("failed to query {label}"))?;
     rows.map(|row| {
-        let (period, count) = row.with_context(|| format!("failed to read {label}"))?;
+        let (period, count, recent_files, frequent_folders) =
+            row.with_context(|| format!("failed to read {label}"))?;
         Ok(StatsTrendPoint {
             period,
             count: u64::try_from(count).context("cleanup trend count is negative")?,
+            recent_files: u64::try_from(recent_files)
+                .context("cleanup recent file trend count is negative")?,
+            frequent_folders: u64::try_from(frequent_folders)
+                .context("cleanup frequent folder trend count is negative")?,
         })
     })
     .collect()
