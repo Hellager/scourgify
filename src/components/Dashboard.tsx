@@ -6,7 +6,6 @@ import {
   useState,
 } from "react";
 import { listen } from "@tauri-apps/api/event";
-import Lottie from "lottie-react";
 import { useLocation } from "react-router-dom";
 import {
   Area,
@@ -17,8 +16,8 @@ import {
 } from "recharts";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
-import ecgMonitorAnimation from "@/assets/ecg-monitor.json";
 import { useAppShell } from "@/components/AppShell";
+import { AutoCleanMonitorPulse } from "@/components/AutoCleanMonitorPulse";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -463,32 +462,6 @@ function AutoCleanCountdown({
   }, [active, target]);
 
   return <>{formatCountdown(target.getTime() - now)}</>;
-}
-
-function AutoCleanMonitorPulse({ label }: { label: string }) {
-  const [reduceMotion, setReduceMotion] = useState(false);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const updatePreference = () => setReduceMotion(mediaQuery.matches);
-    updatePreference();
-    mediaQuery.addEventListener("change", updatePreference);
-    return () => mediaQuery.removeEventListener("change", updatePreference);
-  }, []);
-
-  return (
-    <div className="relative h-9 w-20 max-w-full overflow-hidden">
-      <Lottie
-        animationData={ecgMonitorAnimation}
-        aria-hidden="true"
-        autoplay={!reduceMotion}
-        className="h-full w-full"
-        loop={!reduceMotion}
-        rendererSettings={{ preserveAspectRatio: "xMidYMid slice" }}
-      />
-      <span className="sr-only">{label}</span>
-    </div>
-  );
 }
 
 function CleanupHistoryChart({
