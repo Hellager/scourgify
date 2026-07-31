@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   Activity,
+  ChartArea,
   Dices,
   FileClock,
   FolderClock,
@@ -37,6 +38,7 @@ type MockScenario =
   | "empty"
   | "partial_failure"
   | "post_mutation_warning";
+type DestListRange = "24h" | "7d" | "30d";
 
 interface QaItem {
   path: string;
@@ -89,6 +91,12 @@ interface MockHistoryResult {
   generated: number;
 }
 
+interface DestListTrendPoint {
+  date: string;
+  recent_files: number;
+  frequent_folders: number;
+}
+
 const scenarios: Array<{ label: string; value: MockScenario }> = [
   { label: "Normal", value: "normal" },
   { label: "Empty", value: "empty" },
@@ -111,6 +119,10 @@ export function MockTestPage() {
   const [generatedHistoryCount, setGeneratedHistoryCount] = useState<
     number | null
   >(null);
+  const [destListRange, setDestListRange] = useState<DestListRange>("30d");
+  const [destListTrend, setDestListTrend] = useState<DestListTrendPoint[] | null>(
+    null,
+  );
 
   const recordEvent = useCallback((name: string, payload: unknown) => {
     setEvents((current) => [
@@ -144,6 +156,7 @@ export function MockTestPage() {
   const run = async (operation: () => Promise<MockState>) => {
     setPending(true);
     setError(null);
+    setDestListTrend(null);
     try {
       setState(await operation());
     } catch (value) {
@@ -195,6 +208,23 @@ export function MockTestPage() {
       setGeneratedHistoryCount(result.generated);
       dispatchAppEvent(REFRESH_DASHBOARD_EVENT);
     } catch (value) {
+      setError(commandErrorMessage(value));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const fetchDestListTrend = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      setDestListTrend(
+        await invokeCommand<DestListTrendPoint[]>("get_qa_activity_trend", {
+          range: destListRange,
+        }),
+      );
+    } catch (value) {
+      setDestListTrend(null);
       setError(commandErrorMessage(value));
     } finally {
       setPending(false);
@@ -359,6 +389,71 @@ export function MockTestPage() {
             </span>
           ) : null}
         </div>
+      </section>
+
+      <section className="border-b py-5">
+        <div className="mb-3">
+          <h2 className="text-sm font-semibold">Mock DestList acquisition</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Fetches the Dashboard trend through the production command and the active mock backend.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="grid w-40 gap-2 text-sm font-medium">
+            Date range
+            <Select
+              disabled={!enabled || pending}
+              onValueChange={(value) => {
+                setDestListRange(value as DestListRange);
+                setDestListTrend(null);
+              }}
+              value={destListRange}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="24h">24h</SelectItem>
+                <SelectItem value="7d">7D</SelectItem>
+                <SelectItem value="30d">30D</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <Button
+            disabled={!enabled || pending}
+            onClick={() => void fetchDestListTrend()}
+            type="button"
+          >
+            <ChartArea />
+            Fetch DestList
+          </Button>
+        </div>
+        {destListTrend ? (
+          <div className="mt-4 max-h-72 overflow-auto rounded-md border">
+            <Table>
+              <TableHeader className="sticky top-0 bg-background">
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead className="text-right">Recent files</TableHead>
+                  <TableHead className="text-right">Frequent folders</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {destListTrend.map((point) => (
+                  <TableRow key={point.date}>
+                    <TableCell>{point.date}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {point.recent_files}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {point.frequent_folders}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        ) : null}
       </section>
 
       <section className="border-b py-5">

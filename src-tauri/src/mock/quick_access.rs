@@ -196,7 +196,7 @@ impl QuickAccessBackend for MockQuickAccessBackend {
         {
             return Err(anyhow!("mock item already exists: {path}"));
         }
-        items.push(item(path, qa_type == "frequent"));
+        items.push(item(path, qa_type == "frequent", 0));
         sync_metadata(&mut data);
         data.revision = data.revision.wrapping_add(1);
         Ok(())
@@ -360,11 +360,12 @@ fn seed(scenario: MockScenario) -> MockData {
     data
 }
 
-fn item(path: &str, pinned: bool) -> QaItem {
+fn item(path: &str, pinned: bool, age_hours: u64) -> QaItem {
+    let now = u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or_default();
     QaItem {
         path: path.to_string(),
         name: path.rsplit('\\').next().unwrap_or(path).to_string(),
-        last_interaction_at: Some(random_timestamp()),
+        last_interaction_at: Some(now.saturating_sub(age_hours.saturating_mul(60 * 60 * 1_000))),
         pinned: path.contains("Folders").then_some(pinned),
     }
 }
@@ -387,16 +388,14 @@ fn metadata(item: &QaItem, index: usize) -> QaItemMetadata {
     }
 }
 
-fn random_timestamp() -> u64 {
-    let now = u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or_default();
-    let earliest = now.saturating_sub(90 * 24 * 60 * 60 * 1_000);
-    (earliest..=now).fake()
-}
-
 fn random_file(index: usize) -> QaItem {
     let generated: String = FileName().fake();
     let name = unique_component(index, &generated, "item.txt");
-    item(&format!(r"C:\Mock\Recent\{name}"), false)
+    item(
+        &format!(r"C:\Mock\Recent\{name}"),
+        false,
+        u64::try_from(index).unwrap_or_default() * 24,
+    )
 }
 
 fn random_folder(index: usize) -> QaItem {
@@ -407,7 +406,11 @@ fn random_folder(index: usize) -> QaItem {
         .unwrap_or("Folder");
     let name = unique_component(index, generated, "Folder");
     let pinned: bool = Faker.fake();
-    item(&format!(r"C:\Mock\Folders\{name}"), pinned)
+    item(
+        &format!(r"C:\Mock\Folders\{name}"),
+        pinned,
+        u64::try_from(index).unwrap_or_default() * 72,
+    )
 }
 
 fn unique_component(index: usize, generated: &str, fallback: &str) -> String {
@@ -469,6 +472,8 @@ fn warning(path: &str) -> QaBatchWarning {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{TimeZone, Utc};
+
     use super::*;
 
     #[test]
@@ -515,5 +520,40 @@ mod tests {
         assert_ne!(changed.frequent[0].path, before.frequent[0].path);
         assert_eq!(changed.revision, before.revision + 1);
         assert_eq!(changed.frequent_metadata.len(), changed.frequent.len());
+    }
+
+    #[test]
+    fn mock_destlist_metadata_feeds_both_activity_trend_series() {
+        let backend = MockQuickAccessBackend::new();
+        let now = Utc
+            .with_ymd_and_hms(2026, 7, 31, 12, 0, 0)
+            .single()
+            .unwrap();
+        let timestamp = now.timestamp_millis() as u64;
+        {
+            let mut data = backend.data.write().unwrap();
+            for item in &mut data.recent_metadata {
+                item.last_interaction_at = Some(timestamp);
+            }
+            for item in &mut data.frequent_metadata {
+                item.last_interaction_at = Some(timestamp);
+            }
+        }
+
+        let recent = backend.list_item_metadata("recent").unwrap();
+        let frequent = backend.list_item_metadata("frequent").unwrap();
+        let trend = crate::quick_access::activity_trend(
+            recent,
+            frequent,
+            crate::quick_access::QaActivityRange::Last24Hours,
+            now,
+        );
+
+        assert_eq!(trend.len(), 2);
+        assert_eq!(trend[0].recent_files, 0);
+        assert_eq!(trend[0].frequent_folders, 0);
+        assert_eq!(trend[1].date, "2026-07-31");
+        assert_eq!(trend[1].recent_files, RECENT_FILE_COUNT as u64);
+        assert_eq!(trend[1].frequent_folders, FREQUENT_FOLDER_COUNT as u64);
     }
 }

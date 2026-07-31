@@ -39,8 +39,8 @@ pub(crate) fn show_dashboard<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<()
     show_window(
         app,
         "#/",
-        LogicalSize::new(1040.0, 720.0),
-        LogicalSize::new(1040.0, 670.0),
+        LogicalSize::new(1024.0, 660.0),
+        LogicalSize::new(1024.0, 660.0),
         true,
     )
 }

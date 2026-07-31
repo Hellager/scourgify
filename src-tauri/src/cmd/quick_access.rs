@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use chrono::Local;
 use tauri::{AppHandle, State};
 
 use super::ensure_quick_access_write_allowed;
@@ -11,8 +12,8 @@ use crate::{
     },
     privacy::PrivacyManager,
     quick_access::{
-        QaCounts, QaItem, QaItemMetadata, QaMutationResult, QaRestoreResult, QaVisibility,
-        QuickAccessCache, QuickAccessError,
+        activity_trend, QaActivityRange, QaActivityTrendPoint, QaCounts, QaItem, QaItemMetadata,
+        QaMutationResult, QaRestoreResult, QaVisibility, QuickAccessCache, QuickAccessError,
     },
 };
 
@@ -52,6 +53,24 @@ pub(crate) fn list_qa_item_metadata(
         .backend()
         .and_then(|backend| backend.list_item_metadata(&qa_type))
         .map_err(|error| quick_access_error("list_qa_item_metadata", error))
+}
+
+#[tauri::command]
+pub(crate) fn get_qa_activity_trend(
+    backend: State<'_, QuickAccessBackendState>,
+    range: QaActivityRange,
+) -> CommandResult<Vec<QaActivityTrendPoint>> {
+    let backend = backend
+        .backend()
+        .map_err(|error| quick_access_error("get_qa_activity_trend", error))?;
+    let recent = backend
+        .list_item_metadata("recent")
+        .map_err(|error| quick_access_error("get_qa_activity_trend", error))?;
+    let frequent = backend
+        .list_item_metadata("frequent")
+        .map_err(|error| quick_access_error("get_qa_activity_trend", error))?;
+
+    Ok(activity_trend(recent, frequent, range, Local::now()))
 }
 
 #[tauri::command]

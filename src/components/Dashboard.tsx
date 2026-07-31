@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { listen } from "@tauri-apps/api/event";
@@ -10,15 +11,33 @@ import { useLocation } from "react-router-dom";
 import {
   Area,
   AreaChart,
+  CartesianGrid,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
 } from "recharts";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  BrushCleaning,
+  ChevronLeft,
+  ChevronRight,
+  LoaderCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useAppShell } from "@/components/AppShell";
 import { AutoCleanMonitorPulse } from "@/components/AutoCleanMonitorPulse";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -43,7 +62,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { QUICK_ACCESS_CHANGED_EVENT, REFRESH_DASHBOARD_EVENT } from "@/lib/app-events";
+import {
+  dispatchAppEvent,
+  QUICK_ACCESS_CHANGED_EVENT,
+  REFRESH_DASHBOARD_EVENT,
+  REFRESH_HISTORY_EVENT,
+} from "@/lib/app-events";
 import { invokeCommand } from "@/lib/commands";
 import {
   type AutoCleanPolicy,
@@ -55,8 +79,6 @@ import { type I18nKey, type Language, useI18n } from "@/lib/i18n";
 type QaType = "recent" | "frequent";
 type DashboardDialog = QaType | "cleaned" | "auto" | null;
 type AutoCleanFormMode = AutoCleanPolicy["kind"];
-type StatsRange = "24h" | "7d" | "30d";
-type TrendSeries = "recent_files" | "frequent_folders";
 
 interface QaCounts {
   recent: number;
@@ -105,6 +127,21 @@ interface Stats {
   rule_hits: Array<{ keyword: string; count: number }>;
 }
 
+interface QaActivityTrendPoint {
+  date: string;
+  recent_files: number;
+  frequent_folders: number;
+}
+
+interface QaBatchResult {
+  total: number;
+  succeeded: string[];
+  failed: unknown[];
+  warnings: unknown[];
+  skipped_protected: string[];
+  history_error: string | null;
+}
+
 interface QuickAccessChanged {
   qa_type: QaType;
   revision: number;
@@ -119,14 +156,9 @@ export function Dashboard() {
   const location = useLocation();
   const [counts, setCounts] = useState<QaCounts>(emptyCounts);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [range, setRange] = useState<StatsRange>("30d");
-  const [chartFocused, setChartFocused] = useState(false);
-  const [visibleSeries, setVisibleSeries] = useState<Record<TrendSeries, boolean>>({
-    recent_files: true,
-    frequent_folders: true,
-  });
-  const [overviewLoading, setOverviewLoading] = useState(true);
-  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [activityTrend, setActivityTrend] = useState<QaActivityTrendPoint[]>([]);
+  const [activityTrendLoading, setActivityTrendLoading] = useState(true);
+  const [activityTrendError, setActivityTrendError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DashboardDialog>(null);
   const [qaItems, setQaItems] = useState<QaItem[]>([]);
   const [qaLoading, setQaLoading] = useState(false);
@@ -138,18 +170,37 @@ export function Dashboard() {
   const [autoHours, setAutoHours] = useState("24");
   const [autoTime, setAutoTime] = useState("09:00");
   const [savingAutoClean, setSavingAutoClean] = useState(false);
+  const [smartCleanConfirmOpen, setSmartCleanConfirmOpen] = useState(false);
+  const [skipSmartCleanConfirm, setSkipSmartCleanConfirm] = useState(false);
+  const [smartCleaning, setSmartCleaning] = useState(false);
+  const smartCleanTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const loadCounts = useCallback(async () => {
     setCounts(await invokeCommand<QaCounts>("get_qa_counts", { fresh: false }));
   }, []);
 
   const loadStats = useCallback(async () => {
-    setStats(await invokeCommand<Stats>("get_stats", { range }));
-  }, [range]);
+    setStats(await invokeCommand<Stats>("get_stats", { range: "30d" }));
+  }, []);
+
+  const loadActivityTrend = useCallback(async () => {
+    setActivityTrendLoading(true);
+    setActivityTrendError(null);
+    try {
+      setActivityTrend(
+        await invokeCommand<QaActivityTrendPoint[]>("get_qa_activity_trend", {
+          range: "30d",
+        }),
+      );
+    } catch (error) {
+      setActivityTrend([]);
+      setActivityTrendError(errorMessage(error));
+    } finally {
+      setActivityTrendLoading(false);
+    }
+  }, []);
 
   const loadOverview = useCallback(async () => {
-    setOverviewLoading(true);
-    setOverviewError(null);
     const [countsResult, statsResult] = await Promise.allSettled([
       loadCounts(),
       loadStats(),
@@ -159,9 +210,7 @@ export function Dashboard() {
     }
     if (statsResult.status === "rejected") {
       setStats(null);
-      setOverviewError(errorMessage(statsResult.reason));
     }
-    setOverviewLoading(false);
   }, [loadCounts, loadStats]);
 
   const loadQaItems = useCallback(async (qaType: QaType) => {
@@ -213,29 +262,33 @@ export function Dashboard() {
   useEffect(() => {
     if (location.pathname === "/") {
       void loadOverview();
+      void loadActivityTrend();
     }
-  }, [loadOverview, location.pathname]);
+  }, [loadActivityTrend, loadOverview, location.pathname]);
 
   useEffect(() => {
-    const refreshDashboard = () => void loadOverview();
+    const refreshDashboard = () => {
+      void loadOverview();
+      void loadActivityTrend();
+    };
     window.addEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
     return () => window.removeEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
-  }, [loadOverview]);
+  }, [loadActivityTrend, loadOverview]);
 
   useEffect(() => {
     let timeout: number | undefined;
     const unlisten = listen<QuickAccessChanged>(QUICK_ACCESS_CHANGED_EVENT, () => {
       window.clearTimeout(timeout);
-      timeout = window.setTimeout(
-        () => void loadCounts().catch(() => setCounts(emptyCounts)),
-        100,
-      );
+      timeout = window.setTimeout(() => {
+        void loadCounts().catch(() => setCounts(emptyCounts));
+        void loadActivityTrend();
+      }, 100);
     });
     return () => {
       window.clearTimeout(timeout);
       void unlisten.then((cleanup) => cleanup());
     };
-  }, [loadCounts]);
+  }, [loadActivityTrend, loadCounts]);
 
   const openDialog = (next: Exclude<DashboardDialog, null>) => {
     setDialog(next);
@@ -304,6 +357,95 @@ export function Dashboard() {
     }
   };
 
+  const runSmartClean = async () => {
+    if (smartCleaning) {
+      return;
+    }
+    setSmartCleaning(true);
+    const results: QaBatchResult[] = [];
+    const sectionErrors: string[] = [];
+
+    for (const qaType of ["recent", "frequent"] as const) {
+      try {
+        results.push(
+          await invokeCommand<QaBatchResult>("smart_clean", { qaType }),
+        );
+      } catch (error) {
+        sectionErrors.push(errorMessage(error));
+      }
+    }
+
+    dispatchAppEvent(REFRESH_DASHBOARD_EVENT, { fresh: true });
+    dispatchAppEvent(REFRESH_HISTORY_EVENT);
+
+    const summary = results.reduce(
+      (current, result) => ({
+        total: current.total + result.total,
+        succeeded: current.succeeded + result.succeeded.length,
+        failed: current.failed + result.failed.length,
+        warnings: current.warnings + result.warnings.length,
+        historyErrors:
+          current.historyErrors + Number(result.history_error !== null),
+      }),
+      { total: 0, succeeded: 0, failed: 0, warnings: 0, historyErrors: 0 },
+    );
+
+    if (results.length === 0 && sectionErrors.length > 0) {
+      toast.error(sectionErrors.join(" "));
+    } else if (
+      summary.failed > 0 ||
+      summary.warnings > 0 ||
+      summary.historyErrors > 0 ||
+      sectionErrors.length > 0
+    ) {
+      toast.warning(
+        t("smartCleanCompletedWithIssues", {
+          succeeded: summary.succeeded,
+          failed: summary.failed,
+          warnings: summary.warnings,
+          sectionErrors: sectionErrors.length,
+          historyErrors: summary.historyErrors,
+        }),
+        sectionErrors.length > 0
+          ? { description: sectionErrors.join(" ") }
+          : undefined,
+      );
+    } else {
+      toast.success(
+        t("smartCleanCompleted", {
+          succeeded: summary.succeeded,
+          total: summary.total,
+        }),
+      );
+    }
+
+    setSmartCleaning(false);
+  };
+
+  const requestSmartClean = () => {
+    if (config.smart_clean_confirm) {
+      setSkipSmartCleanConfirm(false);
+      setSmartCleanConfirmOpen(true);
+      return;
+    }
+    void runSmartClean();
+  };
+
+  const confirmSmartClean = async () => {
+    setSmartCleanConfirmOpen(false);
+    if (skipSmartCleanConfirm) {
+      try {
+        const saved = await invokeCommand<ConfigForm>("update_config", {
+          nextConfig: { ...config, smart_clean_confirm: false },
+        });
+        setConfig(configSchema.parse(saved));
+      } catch (error) {
+        toast.error(errorMessage(error));
+      }
+    }
+    await runSmartClean();
+  };
+
   const nextAutoCleanTime = useMemo(
     () => getNextAutoCleanTime(config.auto_clean, config.auto_clean_last_run),
     [config.auto_clean, config.auto_clean_last_run],
@@ -354,20 +496,12 @@ export function Dashboard() {
         />
       </section>
 
-      <CleanupHistoryChart
-        chartFocused={chartFocused}
-        error={overviewError}
+      <QuickAccessActivityChart
+        data={activityTrend}
+        error={activityTrendError}
         language={language}
-        loading={overviewLoading}
-        onChartFocusChange={setChartFocused}
-        onRangeChange={setRange}
-        onSeriesToggle={(series) =>
-          setVisibleSeries((current) => ({ ...current, [series]: !current[series] }))
-        }
-        range={range}
-        stats={stats}
+        loading={activityTrendLoading}
         t={t}
-        visibleSeries={visibleSeries}
       />
 
       <QuickAccessDialog
@@ -404,6 +538,63 @@ export function Dashboard() {
         t={t}
         time={autoTime}
       />
+
+      <Button
+        aria-label={t("smartClean")}
+        className="fixed bottom-6 right-6 z-20 size-12 rounded-full shadow-lg"
+        disabled={smartCleaning}
+        onClick={requestSmartClean}
+        ref={smartCleanTriggerRef}
+        size="icon-lg"
+        title={t("smartClean")}
+        type="button"
+      >
+        {smartCleaning ? (
+          <LoaderCircle className="size-5 animate-spin" />
+        ) : (
+          <BrushCleaning className="size-5" />
+        )}
+      </Button>
+
+      <AlertDialog
+        open={smartCleanConfirmOpen}
+        onOpenChange={(open) => {
+          if (!smartCleaning) {
+            setSmartCleanConfirmOpen(open);
+            if (!open) {
+              setSkipSmartCleanConfirm(false);
+            }
+          }
+        }}
+      >
+        <AlertDialogContent finalFocus={() => smartCleanTriggerRef.current}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("smartCleanQuestion")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("smartCleanCurrentRulesDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <Checkbox
+              checked={skipSmartCleanConfirm}
+              onCheckedChange={(checked) =>
+                setSkipSmartCleanConfirm(Boolean(checked))
+              }
+            />
+            <span>{t("doNotAskAgain")}</span>
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void confirmSmartClean()}
+              type="button"
+            >
+              <BrushCleaning />
+              {t("smartClean")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }
@@ -464,127 +655,83 @@ function AutoCleanCountdown({
   return <>{formatCountdown(target.getTime() - now)}</>;
 }
 
-function CleanupHistoryChart({
-  chartFocused,
+function QuickAccessActivityChart({
+  data,
   error,
   language,
   loading,
-  onChartFocusChange,
-  onRangeChange,
-  onSeriesToggle,
-  range,
-  stats,
   t,
-  visibleSeries,
 }: {
-  chartFocused: boolean;
+  data: QaActivityTrendPoint[];
   error: string | null;
   language: Language;
   loading: boolean;
-  onChartFocusChange: (focused: boolean) => void;
-  onRangeChange: (range: StatsRange) => void;
-  onSeriesToggle: (series: TrendSeries) => void;
-  range: StatsRange;
-  stats: Stats | null;
   t: Translate;
-  visibleSeries: Record<TrendSeries, boolean>;
 }) {
-  const trend = stats?.daily_trend ?? [];
   return (
-    <section
-      className="min-w-0 bg-card text-card-foreground outline-none"
-      onBlurCapture={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          onChartFocusChange(false);
-        }
-      }}
-      onClick={() => onChartFocusChange(true)}
-      onFocusCapture={() => onChartFocusChange(true)}
-      tabIndex={0}
-    >
-      <div className="flex min-h-8 justify-end">
-        {chartFocused ? (
-          <div aria-label={t("dateRange")} className="inline-flex rounded-md border p-0.5">
-            {(["24h", "7d", "30d"] as const).map((value) => (
-              <Button
-                aria-pressed={range === value}
-                className="h-7 px-2.5"
-                key={value}
-                onClick={() => onRangeChange(value)}
-                size="sm"
-                type="button"
-                variant={range === value ? "secondary" : "ghost"}
-              >
-                {value === "24h" ? "24h" : value === "7d" ? "7D" : "30D"}
-              </Button>
-            ))}
-          </div>
-        ) : null}
-      </div>
+    <section className="min-w-0 bg-card text-card-foreground">
       {loading ? (
-        <ChartMessage>{t("loadingStatistics")}</ChartMessage>
+        <ChartMessage>{t("loadingItems")}</ChartMessage>
       ) : error ? (
         <ChartMessage destructive>{error}</ChartMessage>
-      ) : trend.length === 0 ? (
-        <ChartMessage>{t("noHistory")}</ChartMessage>
+      ) : data.length === 0 ? (
+        <ChartMessage>{t("noItems")}</ChartMessage>
       ) : (
         <div className="h-[360px] min-w-0">
           <ResponsiveContainer height="100%" width="100%">
-            <AreaChart data={trend} margin={{ bottom: 8, left: 0, right: 12, top: 8 }}>
+            <AreaChart
+              accessibilityLayer
+              data={data}
+              margin={{ left: 12, right: 12 }}
+            >
+              <CartesianGrid vertical={false} />
               <XAxis
-                dataKey="period"
+                axisLine={false}
+                dataKey="date"
                 minTickGap={28}
+                tickMargin={8}
                 tickFormatter={(value) => formatChartDate(String(value), language)}
                 tickLine={false}
               />
               <Tooltip
+                contentStyle={{
+                  background: "var(--popover)",
+                  borderColor: "var(--border)",
+                  borderRadius: "var(--radius-md)",
+                  color: "var(--popover-foreground)",
+                }}
+                cursor={false}
                 labelFormatter={(value) => formatFullDate(String(value), language)}
               />
               <Area
                 dataKey="recent_files"
-                fill="#2563eb"
-                fillOpacity={0.22}
-                hide={!visibleSeries.recent_files}
+                fill="var(--chart-1)"
+                fillOpacity={0.1}
                 name={t("recentFiles")}
-                stroke="#2563eb"
-                strokeWidth={2}
+                stackId="quick-access"
+                stroke="var(--chart-1)"
+                strokeWidth={1}
                 type="monotone"
               />
               <Area
                 dataKey="frequent_folders"
-                fill="#16a34a"
-                fillOpacity={0.18}
-                hide={!visibleSeries.frequent_folders}
+                fill="var(--chart-2)"
+                fillOpacity={0.15}
                 name={t("frequentFolders")}
-                stroke="#16a34a"
-                strokeWidth={2}
+                stackId="quick-access"
+                stroke="var(--chart-2)"
+                strokeWidth={1}
                 type="monotone"
+              />
+              <Legend
+                iconSize={8}
+                iconType="circle"
+                wrapperStyle={{ paddingTop: 12 }}
               />
             </AreaChart>
           </ResponsiveContainer>
         </div>
       )}
-      <div className="flex flex-wrap justify-center gap-2 pt-3">
-        {(["recent_files", "frequent_folders"] as const).map((series) => (
-          <Button
-            aria-pressed={visibleSeries[series]}
-            className="h-8 gap-2 px-3"
-            key={series}
-            onClick={() => onSeriesToggle(series)}
-            size="sm"
-            type="button"
-            variant={visibleSeries[series] ? "secondary" : "ghost"}
-          >
-            <span
-              aria-hidden="true"
-              className={`size-2 rounded-full ${
-                series === "recent_files" ? "bg-blue-600" : "bg-green-600"
-              }`}
-            />
-            {series === "recent_files" ? t("recentFiles") : t("frequentFolders")}
-          </Button>
-        ))}
-      </div>
     </section>
   );
 }
