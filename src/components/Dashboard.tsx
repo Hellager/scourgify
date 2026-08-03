@@ -7,6 +7,12 @@ import {
   useState,
 } from "react";
 import { listen } from "@tauri-apps/api/event";
+import {
+  type ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
 import { useLocation } from "react-router-dom";
 import {
   Area,
@@ -93,6 +99,12 @@ interface QaItem {
   pinned: boolean | null;
 }
 
+interface QaDialogState {
+  items: QaItem[];
+  loading: boolean;
+  error: string | null;
+}
+
 interface CleanRecord {
   id: number;
   item_path: string;
@@ -148,6 +160,7 @@ interface QuickAccessChanged {
 }
 
 const emptyCounts: QaCounts = { recent: 0, frequent: 0, all: 0 };
+const emptyCleanRecords: CleanRecord[] = [];
 const HISTORY_PAGE_SIZE = 10;
 
 export function Dashboard() {
@@ -160,9 +173,12 @@ export function Dashboard() {
   const [activityTrendLoading, setActivityTrendLoading] = useState(true);
   const [activityTrendError, setActivityTrendError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DashboardDialog>(null);
-  const [qaItems, setQaItems] = useState<QaItem[]>([]);
-  const [qaLoading, setQaLoading] = useState(false);
-  const [qaError, setQaError] = useState<string | null>(null);
+  const [qaDialogState, setQaDialogState] = useState<
+    Record<QaType, QaDialogState>
+  >({
+    recent: { items: [], loading: false, error: null },
+    frequent: { items: [], loading: false, error: null },
+  });
   const [history, setHistory] = useState<CleanRecordPage | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -214,20 +230,28 @@ export function Dashboard() {
   }, [loadCounts, loadStats]);
 
   const loadQaItems = useCallback(async (qaType: QaType) => {
-    setQaLoading(true);
-    setQaError(null);
+    setQaDialogState((current) => ({
+      ...current,
+      [qaType]: { ...current[qaType], loading: true, error: null },
+    }));
     try {
-      setQaItems(
-        await invokeCommand<QaItem[]>("list_qa_items", {
-          fresh: false,
-          qaType,
-        }),
-      );
+      const items = await invokeCommand<QaItem[]>("list_qa_items", {
+        fresh: false,
+        qaType,
+      });
+      setQaDialogState((current) => ({
+        ...current,
+        [qaType]: { items, loading: false, error: null },
+      }));
     } catch (error) {
-      setQaItems([]);
-      setQaError(errorMessage(error));
-    } finally {
-      setQaLoading(false);
+      setQaDialogState((current) => ({
+        ...current,
+        [qaType]: {
+          ...current[qaType],
+          loading: false,
+          error: errorMessage(error),
+        },
+      }));
     }
   }, []);
 
@@ -252,7 +276,6 @@ export function Dashboard() {
         }),
       );
     } catch (error) {
-      setHistory(null);
       setHistoryError(errorMessage(error));
     } finally {
       setHistoryLoading(false);
@@ -470,6 +493,8 @@ export function Dashboard() {
   const draftNextAutoCleanDetail = draftNextAutoCleanTime
     ? `${t("autoCleanNextRun")}: ${draftNextAutoCleanTime.toLocaleString(language)}`
     : null;
+  const activeQaType = dialog === "frequent" ? "frequent" : "recent";
+  const activeQaState = qaDialogState[activeQaType];
 
   return (
     <main className="mx-auto grid w-full max-w-7xl gap-6 p-6">
@@ -505,13 +530,13 @@ export function Dashboard() {
       />
 
       <QuickAccessDialog
-        items={qaItems}
+        items={activeQaState.items}
         language={language}
-        loading={qaLoading}
-        error={qaError}
+        loading={activeQaState.loading}
+        error={activeQaState.error}
         onOpenChange={(open) => !open && setDialog(null)}
         open={dialog === "recent" || dialog === "frequent"}
-        qaType={dialog === "frequent" ? "frequent" : "recent"}
+        qaType={activeQaType}
         t={t}
       />
       <CleanedItemsDialog
@@ -754,6 +779,19 @@ function ChartMessage({
   );
 }
 
+function quickAccessColumnClassName(columnId: string) {
+  switch (columnId) {
+    case "last_interaction_at":
+      return "w-40";
+    case "name":
+      return "max-w-56";
+    case "path":
+      return "max-w-[420px]";
+    default:
+      return undefined;
+  }
+}
+
 function QuickAccessDialog({
   error,
   items,
@@ -773,49 +811,122 @@ function QuickAccessDialog({
   qaType: QaType;
   t: Translate;
 }) {
+  const columns = useMemo<ColumnDef<QaItem>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: t("name"),
+        cell: ({ row }) => (
+          <span
+            className="block max-w-56 truncate font-medium"
+            title={row.original.name}
+          >
+            {row.original.name}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "path",
+        header: t("path"),
+        cell: ({ row }) => (
+          <span
+            className="block max-w-[420px] truncate text-muted-foreground"
+            title={row.original.path}
+          >
+            {row.original.path}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "last_interaction_at",
+        header: t("lastUsed"),
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {row.original.last_interaction_at === null
+              ? "--"
+              : new Date(
+                  row.original.last_interaction_at,
+                ).toLocaleString(language)}
+          </span>
+        ),
+      },
+    ],
+    [language, t],
+  );
+  const table = useReactTable({
+    columns,
+    data: items,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (item) => item.path,
+  });
+  const rows = table.getRowModel().rows;
+
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[80svh] overflow-hidden sm:max-w-4xl">
+      <DialogContent
+        className="max-h-[80svh] overflow-hidden sm:max-w-4xl"
+        showCloseButton={false}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>
             {qaType === "recent" ? t("recentFiles") : t("frequentFolders")}
           </DialogTitle>
           <DialogDescription>{t("currentItems")}</DialogDescription>
         </DialogHeader>
-        <div className="max-h-[58svh] overflow-auto rounded-md border">
+        <div
+          aria-busy={loading}
+          className="h-[58svh] overflow-auto rounded-md border"
+        >
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>{t("name")}</TableHead>
-                <TableHead>{t("path")}</TableHead>
-                <TableHead className="w-40">{t("lastUsed")}</TableHead>
-              </TableRow>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <TableHead
+                      className={quickAccessColumnClassName(header.column.id)}
+                      key={header.id}
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext(),
+                          )}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
             </TableHeader>
             <TableBody>
-              {loading || error || items.length === 0 ? (
+              {rows.length === 0 ? (
                 <TableMessage colSpan={3} destructive={Boolean(error)}>
                   {loading ? t("loadingItems") : error ?? t("noItems")}
                 </TableMessage>
               ) : (
-                items.map((item) => (
-                  <TableRow key={item.path}>
-                    <TableCell className="max-w-56 truncate font-medium" title={item.name}>
-                      {item.name}
-                    </TableCell>
-                    <TableCell className="max-w-[420px] truncate text-muted-foreground" title={item.path}>
-                      {item.path}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {item.last_interaction_at === null
-                        ? "--"
-                        : new Date(item.last_interaction_at).toLocaleString(language)}
-                    </TableCell>
+                rows.map((row) => (
+                  <TableRow key={row.id}>
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell
+                        className={quickAccessColumnClassName(cell.column.id)}
+                        key={cell.id}
+                      >
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext(),
+                        )}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))
               )}
             </TableBody>
           </Table>
         </div>
+        {error && rows.length > 0 ? (
+          <p className="text-xs text-destructive" role="status">
+            {error}
+          </p>
+        ) : null}
       </DialogContent>
     </Dialog>
   );
@@ -842,51 +953,121 @@ function CleanedItemsDialog({
 }) {
   const page = history?.page ?? 1;
   const pageCount = Math.max(1, Math.ceil((history?.total ?? 0) / HISTORY_PAGE_SIZE));
+  const columns = useMemo<ColumnDef<CleanRecord>[]>(
+    () => [
+      {
+        accessorKey: "item_path",
+        header: t("path"),
+        cell: ({ row }) => (
+          <span
+            className="block max-w-[480px] truncate"
+            title={row.original.item_path}
+          >
+            {row.original.item_path}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "item_type",
+        header: t("type"),
+        cell: ({ row }) =>
+          t(
+            row.original.item_type === "recent_file"
+              ? "recentFile"
+              : "frequentFolder",
+          ),
+      },
+      {
+        accessorKey: "source",
+        header: t("cleanupSource"),
+        cell: ({ row }) =>
+          t(row.original.source === "auto" ? "automatic" : "manualTrigger"),
+      },
+      {
+        accessorKey: "cleaned_at",
+        header: t("cleanedAt"),
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {new Date(row.original.cleaned_at).toLocaleString(language)}
+          </span>
+        ),
+      },
+    ],
+    [language, t],
+  );
+  const table = useReactTable({
+    columns,
+    data: history?.records ?? emptyCleanRecords,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (record) => String(record.id),
+    manualPagination: true,
+    pageCount,
+    state: {
+      pagination: { pageIndex: page - 1, pageSize: HISTORY_PAGE_SIZE },
+    },
+  });
+  const rows = table.getRowModel().rows;
+
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[80svh] overflow-hidden sm:max-w-5xl">
+      <DialogContent className="max-h-[80svh] overflow-hidden sm:w-[calc(100%-4rem)] sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>{t("cleaned")}</DialogTitle>
-          <DialogDescription>
-            {t("retainedHistory")}: {history?.overall_total ?? "--"}
-          </DialogDescription>
         </DialogHeader>
-        <div className="max-h-[52svh] overflow-auto rounded-md border">
+        <div
+          aria-busy={loading}
+          className="h-[52svh] overflow-auto rounded-md border"
+        >
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>{t("path")}</TableHead>
-                <TableHead className="w-40">{t("type")}</TableHead>
-                <TableHead className="w-32">{t("cleanupSource")}</TableHead>
-                <TableHead className="w-44">{t("cleanedAt")}</TableHead>
-              </TableRow>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <TableHead
+                      className={cleanedColumnClassName(header.column.id)}
+                      key={header.id}
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext(),
+                          )}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
             </TableHeader>
             <TableBody>
-              {loading || error || !history || history.records.length === 0 ? (
+              {rows.length === 0 ? (
                 <TableMessage colSpan={4} destructive={Boolean(error)}>
                   {loading ? t("loadingHistory") : error ?? t("noHistory")}
                 </TableMessage>
               ) : (
-                history.records.map((record) => (
-                  <TableRow key={record.id}>
-                    <TableCell className="max-w-[480px] truncate" title={record.item_path}>
-                      {record.item_path}
-                    </TableCell>
-                    <TableCell>
-                      {t(record.item_type === "recent_file" ? "recentFile" : "frequentFolder")}
-                    </TableCell>
-                    <TableCell>
-                      {t(record.source === "auto" ? "automatic" : "manualTrigger")}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {new Date(record.cleaned_at).toLocaleString(language)}
-                    </TableCell>
+                rows.map((row) => (
+                  <TableRow key={row.id}>
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell
+                        className={cleanedColumnClassName(cell.column.id)}
+                        key={cell.id}
+                      >
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext(),
+                        )}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))
               )}
             </TableBody>
           </Table>
         </div>
+        {error && rows.length > 0 ? (
+          <p className="text-xs text-destructive" role="status">
+            {error}
+          </p>
+        ) : null}
         <DialogFooter className="items-center sm:justify-between">
           <span className="text-xs text-muted-foreground">
             {t("pageStatus", {
@@ -898,7 +1079,7 @@ function CleanedItemsDialog({
           <div className="flex gap-2">
             <Button
               aria-label={t("previous")}
-              disabled={loading || page <= 1}
+              disabled={loading || !table.getCanPreviousPage()}
               onClick={() => onLoadPage(page - 1)}
               size="icon-sm"
               title={t("previous")}
@@ -909,7 +1090,7 @@ function CleanedItemsDialog({
             </Button>
             <Button
               aria-label={t("next")}
-              disabled={loading || page >= pageCount}
+              disabled={loading || !table.getCanNextPage()}
               onClick={() => onLoadPage(page + 1)}
               size="icon-sm"
               title={t("next")}
@@ -923,6 +1104,21 @@ function CleanedItemsDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function cleanedColumnClassName(columnId: string) {
+  switch (columnId) {
+    case "item_type":
+      return "w-40";
+    case "source":
+      return "w-32";
+    case "cleaned_at":
+      return "w-44";
+    case "item_path":
+      return "max-w-[480px]";
+    default:
+      return undefined;
+  }
 }
 
 function AutoCleanDialog({
