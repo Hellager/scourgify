@@ -15,15 +15,6 @@ import {
 } from "@tanstack/react-table";
 import { useLocation } from "react-router-dom";
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-} from "recharts";
-import {
   BrushCleaning,
   ChevronLeft,
   ChevronRight,
@@ -32,6 +23,7 @@ import {
 import { toast } from "sonner";
 import { useAppShell } from "@/components/AppShell";
 import { AutoCleanMonitorPulse } from "@/components/AutoCleanMonitorPulse";
+import { WordCloudPanel } from "@/components/dashboard/WordCloudPanel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -139,12 +131,6 @@ interface Stats {
   rule_hits: Array<{ keyword: string; count: number }>;
 }
 
-interface QaActivityTrendPoint {
-  date: string;
-  recent_files: number;
-  frequent_folders: number;
-}
-
 interface QaBatchResult {
   total: number;
   succeeded: string[];
@@ -169,9 +155,7 @@ export function Dashboard() {
   const location = useLocation();
   const [counts, setCounts] = useState<QaCounts>(emptyCounts);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [activityTrend, setActivityTrend] = useState<QaActivityTrendPoint[]>([]);
-  const [activityTrendLoading, setActivityTrendLoading] = useState(true);
-  const [activityTrendError, setActivityTrendError] = useState<string | null>(null);
+  const [dashboardRevision, setDashboardRevision] = useState(0);
   const [dialog, setDialog] = useState<DashboardDialog>(null);
   const [qaDialogState, setQaDialogState] = useState<
     Record<QaType, QaDialogState>
@@ -197,23 +181,6 @@ export function Dashboard() {
 
   const loadStats = useCallback(async () => {
     setStats(await invokeCommand<Stats>("get_stats", { range: "30d" }));
-  }, []);
-
-  const loadActivityTrend = useCallback(async () => {
-    setActivityTrendLoading(true);
-    setActivityTrendError(null);
-    try {
-      setActivityTrend(
-        await invokeCommand<QaActivityTrendPoint[]>("get_qa_activity_trend", {
-          range: "30d",
-        }),
-      );
-    } catch (error) {
-      setActivityTrend([]);
-      setActivityTrendError(errorMessage(error));
-    } finally {
-      setActivityTrendLoading(false);
-    }
   }, []);
 
   const loadOverview = useCallback(async () => {
@@ -285,18 +252,17 @@ export function Dashboard() {
   useEffect(() => {
     if (location.pathname === "/") {
       void loadOverview();
-      void loadActivityTrend();
     }
-  }, [loadActivityTrend, loadOverview, location.pathname]);
+  }, [loadOverview, location.pathname]);
 
   useEffect(() => {
     const refreshDashboard = () => {
       void loadOverview();
-      void loadActivityTrend();
+      setDashboardRevision((revision) => revision + 1);
     };
     window.addEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
     return () => window.removeEventListener(REFRESH_DASHBOARD_EVENT, refreshDashboard);
-  }, [loadActivityTrend, loadOverview]);
+  }, [loadOverview]);
 
   useEffect(() => {
     let timeout: number | undefined;
@@ -304,14 +270,14 @@ export function Dashboard() {
       window.clearTimeout(timeout);
       timeout = window.setTimeout(() => {
         void loadCounts().catch(() => setCounts(emptyCounts));
-        void loadActivityTrend();
+        setDashboardRevision((revision) => revision + 1);
       }, 100);
     });
     return () => {
       window.clearTimeout(timeout);
       void unlisten.then((cleanup) => cleanup());
     };
-  }, [loadActivityTrend, loadCounts]);
+  }, [loadCounts]);
 
   const openDialog = (next: Exclude<DashboardDialog, null>) => {
     setDialog(next);
@@ -521,11 +487,9 @@ export function Dashboard() {
         />
       </section>
 
-      <QuickAccessActivityChart
-        data={activityTrend}
-        error={activityTrendError}
-        language={language}
-        loading={activityTrendLoading}
+      <WordCloudPanel
+        blacklistTermsEnabled={config.word_cloud_show_blacklist_terms}
+        refreshKey={dashboardRevision}
         t={t}
       />
 
@@ -678,105 +642,6 @@ function AutoCleanCountdown({
   }, [active, target]);
 
   return <>{formatCountdown(target.getTime() - now)}</>;
-}
-
-function QuickAccessActivityChart({
-  data,
-  error,
-  language,
-  loading,
-  t,
-}: {
-  data: QaActivityTrendPoint[];
-  error: string | null;
-  language: Language;
-  loading: boolean;
-  t: Translate;
-}) {
-  return (
-    <section className="min-w-0 bg-card text-card-foreground">
-      {loading ? (
-        <ChartMessage>{t("loadingItems")}</ChartMessage>
-      ) : error ? (
-        <ChartMessage destructive>{error}</ChartMessage>
-      ) : data.length === 0 ? (
-        <ChartMessage>{t("noItems")}</ChartMessage>
-      ) : (
-        <div className="h-[360px] min-w-0">
-          <ResponsiveContainer height="100%" width="100%">
-            <AreaChart
-              accessibilityLayer
-              data={data}
-              margin={{ left: 12, right: 12 }}
-            >
-              <CartesianGrid vertical={false} />
-              <XAxis
-                axisLine={false}
-                dataKey="date"
-                minTickGap={28}
-                tickMargin={8}
-                tickFormatter={(value) => formatChartDate(String(value), language)}
-                tickLine={false}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: "var(--popover)",
-                  borderColor: "var(--border)",
-                  borderRadius: "var(--radius-md)",
-                  color: "var(--popover-foreground)",
-                }}
-                cursor={false}
-                labelFormatter={(value) => formatFullDate(String(value), language)}
-              />
-              <Area
-                dataKey="recent_files"
-                fill="var(--chart-1)"
-                fillOpacity={0.1}
-                name={t("recentFiles")}
-                stackId="quick-access"
-                stroke="var(--chart-1)"
-                strokeWidth={1}
-                type="monotone"
-              />
-              <Area
-                dataKey="frequent_folders"
-                fill="var(--chart-2)"
-                fillOpacity={0.15}
-                name={t("frequentFolders")}
-                stackId="quick-access"
-                stroke="var(--chart-2)"
-                strokeWidth={1}
-                type="monotone"
-              />
-              <Legend
-                iconSize={8}
-                iconType="circle"
-                wrapperStyle={{ paddingTop: 12 }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function ChartMessage({
-  children,
-  destructive = false,
-}: {
-  children: string;
-  destructive?: boolean;
-}) {
-  return (
-    <div
-      className={`grid h-[360px] place-items-center text-sm ${
-        destructive ? "text-destructive" : "text-muted-foreground"
-      }`}
-    >
-      {children}
-    </div>
-  );
 }
 
 function quickAccessColumnClassName(columnId: string) {
@@ -1332,22 +1197,6 @@ function formatCountdown(milliseconds: number) {
   return [hours, minutes, seconds]
     .map((value) => String(value).padStart(2, "0"))
     .join(":");
-}
-
-function formatChartDate(value: string, language: Language) {
-  const date = new Date(`${value}T00:00:00`);
-  return date.toLocaleDateString(language, {
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function formatFullDate(value: string, language: Language) {
-  return new Date(`${value}T00:00:00`).toLocaleDateString(language, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
 }
 
 function errorMessage(error: unknown) {

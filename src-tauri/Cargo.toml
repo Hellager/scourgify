@@ -36,6 +36,8 @@ chrono = { version = "0.4.45", features = ["clock", "serde"] }
 csv = "1.4.0"
 tempfile = "3.20"
 fake = { version = "5.1", features = ["chrono"] }
+jieba-rs = "0.10.3"
+unicode-segmentation = "1.13.3"
 
 [target.'cfg(windows)'.dependencies]
 wincent = "0.2.6"

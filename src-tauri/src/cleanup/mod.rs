@@ -19,7 +19,7 @@ use crate::{
     quick_access::{QaBatchResult, QaItem},
     rules::{Rule, RuleScope},
 };
-use matcher::{classify, MatchResult};
+pub(crate) use matcher::{classify, MatchResult};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]

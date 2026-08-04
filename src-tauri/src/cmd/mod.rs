@@ -8,6 +8,7 @@ mod privacy;
 mod quick_access;
 mod rules;
 mod status;
+mod visualization;
 
 use std::sync::Mutex;
 
@@ -70,7 +71,6 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         cleanup::list_qa_items_classified,
         quick_access::get_qa_counts,
         quick_access::list_qa_item_metadata,
-        quick_access::get_qa_activity_trend,
         quick_access::add_qa_item,
         cleanup::remove_qa_items,
         cleanup::empty_qa_items,
@@ -89,6 +89,7 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         quick_access::get_qa_visibility,
         quick_access::set_qa_visibility,
         quick_access::open_in_explorer,
+        visualization::get_dashboard_word_cloud,
     ]
 }
 
@@ -125,7 +126,6 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         cleanup::list_qa_items_classified,
         quick_access::get_qa_counts,
         quick_access::list_qa_item_metadata,
-        quick_access::get_qa_activity_trend,
         quick_access::add_qa_item,
         cleanup::remove_qa_items,
         cleanup::empty_qa_items,
@@ -144,6 +144,7 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         quick_access::get_qa_visibility,
         quick_access::set_qa_visibility,
         quick_access::open_in_explorer,
+        visualization::get_dashboard_word_cloud,
         crate::mock::commands::get_mock_state,
         crate::mock::commands::set_mock_mode,
         crate::mock::commands::set_mock_scenario,

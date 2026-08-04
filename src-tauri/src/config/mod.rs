@@ -84,6 +84,8 @@ pub struct Config {
     pub close_behavior: CloseBehavior,
     #[serde(default)]
     pub theme: ThemePreference,
+    #[serde(default)]
+    pub word_cloud_show_blacklist_terms: bool,
     #[serde(default = "default_true")]
     pub show_recent_files: bool,
     #[serde(default = "default_true")]
@@ -120,6 +122,7 @@ impl Config {
             privacy_mode_cleanup_links: true,
             close_behavior: CloseBehavior::Hide,
             theme: ThemePreference::System,
+            word_cloud_show_blacklist_terms: false,
             show_recent_files: true,
             show_frequent_folders: true,
             notifications_enabled: true,
@@ -203,6 +206,7 @@ mod tests {
         assert!(config.privacy_mode_cleanup_links);
         assert_eq!(config.close_behavior, CloseBehavior::Hide);
         assert_eq!(config.theme, ThemePreference::System);
+        assert!(!config.word_cloud_show_blacklist_terms);
         assert!(config.show_recent_files);
         assert!(config.show_frequent_folders);
         assert!(config.notifications_enabled);
@@ -308,9 +312,9 @@ mod tests {
 
     #[test]
     fn new_config_defaults_to_dashboard_mode() {
-        assert_eq!(
-            Config::new("en-US".to_string()).app_mode,
-            AppMode::Dashboard
-        );
+        let config = Config::new("en-US".to_string());
+
+        assert_eq!(config.app_mode, AppMode::Dashboard);
+        assert!(!config.word_cloud_show_blacklist_terms);
     }
 }

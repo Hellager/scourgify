@@ -67,7 +67,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { REFRESH_HISTORY_EVENT } from "@/lib/app-events";
+import {
+  dispatchAppEvent,
+  REFRESH_DASHBOARD_EVENT,
+  REFRESH_HISTORY_EVENT,
+} from "@/lib/app-events";
 import { type ActionReceipt, invokeCommand } from "@/lib/commands";
 import { useI18n } from "@/lib/i18n";
 
@@ -255,6 +259,7 @@ export function HistoryPage() {
       setOverallTotal(0);
       setHiddenTotal(0);
       setPagination((current) => ({ ...current, pageIndex: 0 }));
+      dispatchAppEvent(REFRESH_DASHBOARD_EVENT, { fresh: false });
       toast.success(t("historyCleared"));
     } catch (clearError) {
       toast.error(errorMessage(clearError));
@@ -273,6 +278,7 @@ export function HistoryPage() {
       await invokeCommand("remove_clean_record", { id: record.id });
       setPendingDelete(null);
       await loadRecords();
+      dispatchAppEvent(REFRESH_DASHBOARD_EVENT, { fresh: false });
       toast.success(t("historyRecordDeleted"));
     } catch (deleteError) {
       toast.error(errorMessage(deleteError));
@@ -290,6 +296,7 @@ export function HistoryPage() {
           visible: false,
         });
         await loadRecords();
+        dispatchAppEvent(REFRESH_DASHBOARD_EVENT, { fresh: false });
         toast.success(t("historyRecordHidden"));
       } catch (hideError) {
         toast.error(errorMessage(hideError));
@@ -307,6 +314,7 @@ export function HistoryPage() {
         "restore_hidden_clean_records",
       );
       await loadRecords();
+      dispatchAppEvent(REFRESH_DASHBOARD_EVENT, { fresh: false });
       toast.success(t("hiddenHistoryRestored", { count: result.affected }));
     } catch (restoreError) {
       toast.error(errorMessage(restoreError));

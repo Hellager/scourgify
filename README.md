@@ -13,14 +13,14 @@ Scourgify is a Windows-only tray app and dashboard for managing Windows Quick Ac
 - System notifications for operation completion and partial failures.
 - Cmd/Ctrl+K command palette and appearance drawer.
 - Dashboard table sorting, pagination, and column visibility controls.
-- Dashboard overview chart and latest operation summary.
+- Dashboard access and cleanup word clouds with local multilingual tokenization, deterministic layout, blacklist-hit marking, and the latest operation summary.
 - SQLite-backed whitelist and blacklist rules with file/folder/all scopes, filtering, pagination, cross-page selection, and protected and targeted item labels.
 - Rule JSON import/export for all rules or selected rules, with preview and batch clearing.
 - Rule-aware smart cleanup with an optional confirmation preview.
 - TanStack cleanup history with 10-row pagination, column filters, time sorting, persistent hide/restore and deletion actions, and all-record CSV export.
 - Permanent cleanup totals, retained-history trends, rule-hit rankings, and interrupted-run recovery.
 - A monitored Quick Access cache that refreshes on Windows changes and drives monitor-mode automatic cleanup.
-- Debug-only Mock Lab with isolated SQLite data, randomized Quick Access fixtures, and up to 1,000 multilingual Windows-style cleanup-history records; production builds use only the Windows backend.
+- Debug-only Mock Lab with isolated SQLite data, repeatable multilingual Quick Access word-cloud fixtures, and up to 1,000 multilingual Windows-style cleanup-history records; production builds use only the Windows backend.
 - Native localized relative times for recent-file interactions, with path-only fallback when metadata is unavailable.
 - Five-language UI: English, Simplified Chinese, Traditional Chinese, French, and Russian.
 - Runtime light/dark tray and window icons.

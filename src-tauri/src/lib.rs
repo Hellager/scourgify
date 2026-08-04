@@ -13,6 +13,7 @@ mod mock;
 mod privacy;
 mod quick_access;
 mod rules;
+mod visualization;
 
 pub fn run() {
     app::run();

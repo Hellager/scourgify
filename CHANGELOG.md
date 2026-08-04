@@ -2,6 +2,7 @@
 
 ## 0.6.4 - 2026-07-29
 
+- Replaced the Dashboard Quick Access activity trend with deterministic access and cleanup word clouds, including local multilingual tokenization, 7/30-day cleanup ranges, blacklist-hit controls, database degradation, and Mock Lab coverage.
 - Redesigned the Data Center around compact summary cards for Recent Files, Frequent Folders, cleaned items, and automatic cleanup, with table-based detail dialogs for each data set.
 - Added complete automatic-cleanup configuration for disabled, monitor, recurring-hour, and daily-time modes, including live countdowns for scheduled runs.
 - Added a compact black Lottie ECG indicator for monitor-based cleanup, with a continuous one-way pulse across multiple waves.

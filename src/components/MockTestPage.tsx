@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   Activity,
-  ChartArea,
+  Cloud,
   Dices,
   FileClock,
   FolderClock,
@@ -38,7 +38,8 @@ type MockScenario =
   | "empty"
   | "partial_failure"
   | "post_mutation_warning";
-type DestListRange = "24h" | "7d" | "30d";
+type WordCloudSource = "access" | "cleanup";
+type WordCloudRange = "last7_days" | "last30_days";
 
 interface QaItem {
   path: string;
@@ -91,10 +92,28 @@ interface MockHistoryResult {
   generated: number;
 }
 
-interface DestListTrendPoint {
-  date: string;
-  recent_files: number;
-  frequent_folders: number;
+interface WordCloudTerm {
+  text: string;
+  score: number;
+  occurrences: number;
+  recent_occurrences: number;
+  frequent_occurrences: number;
+  cleanup_occurrences: number;
+  total_access_count: number;
+  manual_cleanups: number;
+  automatic_cleanups: number;
+  pinned_items: number;
+  blacklist_hits: number;
+}
+
+interface WordCloudResult {
+  source: WordCloudSource;
+  range: WordCloudRange | null;
+  corpus_items: number;
+  truncated: boolean;
+  blacklist_terms_included: boolean;
+  blacklist_terms_available: boolean;
+  terms: WordCloudTerm[];
 }
 
 const scenarios: Array<{ label: string; value: MockScenario }> = [
@@ -119,10 +138,9 @@ export function MockTestPage() {
   const [generatedHistoryCount, setGeneratedHistoryCount] = useState<
     number | null
   >(null);
-  const [destListRange, setDestListRange] = useState<DestListRange>("30d");
-  const [destListTrend, setDestListTrend] = useState<DestListTrendPoint[] | null>(
-    null,
-  );
+  const [wordCloudSource, setWordCloudSource] = useState<WordCloudSource>("access");
+  const [wordCloudRange, setWordCloudRange] = useState<WordCloudRange>("last30_days");
+  const [wordCloudResult, setWordCloudResult] = useState<WordCloudResult | null>(null);
 
   const recordEvent = useCallback((name: string, payload: unknown) => {
     setEvents((current) => [
@@ -156,7 +174,7 @@ export function MockTestPage() {
   const run = async (operation: () => Promise<MockState>) => {
     setPending(true);
     setError(null);
-    setDestListTrend(null);
+    setWordCloudResult(null);
     try {
       setState(await operation());
     } catch (value) {
@@ -214,17 +232,18 @@ export function MockTestPage() {
     }
   };
 
-  const fetchDestListTrend = async () => {
+  const fetchWordCloud = async () => {
     setPending(true);
     setError(null);
     try {
-      setDestListTrend(
-        await invokeCommand<DestListTrendPoint[]>("get_qa_activity_trend", {
-          range: destListRange,
+      setWordCloudResult(
+        await invokeCommand<WordCloudResult>("get_dashboard_word_cloud", {
+          source: wordCloudSource,
+          range: wordCloudSource === "cleanup" ? wordCloudRange : null,
         }),
       );
     } catch (value) {
-      setDestListTrend(null);
+      setWordCloudResult(null);
       setError(commandErrorMessage(value));
     } finally {
       setPending(false);
@@ -393,61 +412,81 @@ export function MockTestPage() {
 
       <section className="border-b py-5">
         <div className="mb-3">
-          <h2 className="text-sm font-semibold">Mock DestList acquisition</h2>
+          <h2 className="text-sm font-semibold">Mock word cloud data</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Fetches the Dashboard trend through the production command and the active mock backend.
+            Fetches the Dashboard word cloud through the production command and the active mock backend.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <label className="grid w-40 gap-2 text-sm font-medium">
-            Date range
+          <label className="grid w-44 gap-2 text-sm font-medium">
+            Source
             <Select
               disabled={!enabled || pending}
               onValueChange={(value) => {
-                setDestListRange(value as DestListRange);
-                setDestListTrend(null);
+                setWordCloudSource(value as WordCloudSource);
+                setWordCloudResult(null);
               }}
-              value={destListRange}
+              value={wordCloudSource}
             >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="24h">24h</SelectItem>
-                <SelectItem value="7d">7D</SelectItem>
-                <SelectItem value="30d">30D</SelectItem>
+                <SelectItem value="access">Access hotspots</SelectItem>
+                <SelectItem value="cleanup">Cleanup hotspots</SelectItem>
               </SelectContent>
             </Select>
           </label>
+          {wordCloudSource === "cleanup" ? (
+            <label className="grid w-40 gap-2 text-sm font-medium">
+              Date range
+              <Select
+                disabled={!enabled || pending}
+                onValueChange={(value) => {
+                  setWordCloudRange(value as WordCloudRange);
+                  setWordCloudResult(null);
+                }}
+                value={wordCloudRange}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="last7_days">7 days</SelectItem>
+                  <SelectItem value="last30_days">30 days</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+          ) : null}
           <Button
             disabled={!enabled || pending}
-            onClick={() => void fetchDestListTrend()}
+            onClick={() => void fetchWordCloud()}
             type="button"
           >
-            <ChartArea />
-            Fetch DestList
+            <Cloud />
+            Fetch word cloud
           </Button>
         </div>
-        {destListTrend ? (
+        {wordCloudResult ? (
           <div className="mt-4 max-h-72 overflow-auto rounded-md border">
             <Table>
               <TableHeader className="sticky top-0 bg-background">
                 <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Recent files</TableHead>
-                  <TableHead className="text-right">Frequent folders</TableHead>
+                  <TableHead>Term</TableHead>
+                  <TableHead className="text-right">Score</TableHead>
+                  <TableHead className="text-right">Occurrences</TableHead>
+                  <TableHead className="text-right">Blacklist hits</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {destListTrend.map((point) => (
-                  <TableRow key={point.date}>
-                    <TableCell>{point.date}</TableCell>
+                {wordCloudResult.terms.map((term) => (
+                  <TableRow key={term.text}>
+                    <TableCell>{term.text}</TableCell>
+                    <TableCell className="text-right tabular-nums">{term.score.toFixed(2)}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {point.recent_files}
+                      {term.occurrences}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {point.frequent_folders}
-                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{term.blacklist_hits}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

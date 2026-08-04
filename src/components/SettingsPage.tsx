@@ -357,6 +357,17 @@ export function SettingsPage() {
           />
         </Section>
 
+        <Section title={t("visualization")}>
+          <SwitchControl
+            control={control}
+            field={{
+              label: t("wordCloudShowBlacklistTerms"),
+              name: "word_cloud_show_blacklist_terms",
+              description: t("wordCloudShowBlacklistTermsDescription"),
+            }}
+          />
+        </Section>
+
         <Section title={t("privacy")}>
           <SwitchControl
             control={control}

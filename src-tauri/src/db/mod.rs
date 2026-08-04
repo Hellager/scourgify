@@ -64,6 +64,13 @@ pub struct DbState {
 }
 
 impl DbState {
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        let mut connection = Connection::open_in_memory().expect("open test database");
+        let schema_version = migrate(&mut connection).expect("migrate test database");
+        Self::available(PathBuf::from(":memory:"), connection, schema_version)
+    }
+
     pub fn status(&self) -> DatabaseStatus {
         #[cfg(debug_assertions)]
         if self.mock_enabled.load(Ordering::Relaxed) {

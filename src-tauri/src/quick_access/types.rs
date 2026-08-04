@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::error::{CommandError, CommandWarning};
@@ -34,33 +34,6 @@ pub struct QaCounts {
     pub recent: usize,
     pub frequent: usize,
     pub all: usize,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-pub enum QaActivityRange {
-    #[serde(rename = "24h")]
-    Last24Hours,
-    #[serde(rename = "7d")]
-    Last7Days,
-    #[serde(rename = "30d")]
-    Last30Days,
-}
-
-impl QaActivityRange {
-    pub(crate) fn day_span(self) -> u64 {
-        match self {
-            Self::Last24Hours => 1,
-            Self::Last7Days => 6,
-            Self::Last30Days => 29,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct QaActivityTrendPoint {
-    pub date: String,
-    pub recent_files: u64,
-    pub frequent_folders: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
