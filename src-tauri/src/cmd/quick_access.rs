@@ -1,10 +1,11 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Mutex};
 
 use tauri::{AppHandle, State};
 
 use super::ensure_quick_access_write_allowed;
 use crate::{
     backend::{BackendMode, PathKind, QuickAccessBackendState},
+    config::Config,
     error::{
         wincent_command_error, wincent_post_mutation_warning, CommandError, CommandResult,
         ErrorCode, ValidationError,
@@ -46,8 +47,22 @@ pub(crate) fn get_qa_counts(
 #[tauri::command]
 pub(crate) fn list_qa_item_metadata(
     backend: State<'_, QuickAccessBackendState>,
+    config: State<'_, Mutex<Config>>,
     qa_type: String,
 ) -> CommandResult<Vec<QaItemMetadata>> {
+    let deep_parse_enabled = config
+        .lock()
+        .map_err(|error| super::state_error("read_visualization_config", error))?
+        .visualization_deep_parse;
+    if !deep_parse_enabled {
+        return Err(CommandError::expected(
+            "list_qa_item_metadata",
+            ErrorCode::ValidationInvalidArgument,
+            "Deep parsing is disabled in visualization preferences.",
+            false,
+            "DestList access requires visualization_deep_parse",
+        ));
+    }
     backend
         .backend()
         .and_then(|backend| backend.list_item_metadata(&qa_type))

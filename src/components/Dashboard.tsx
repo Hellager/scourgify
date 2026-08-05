@@ -8,17 +8,28 @@ import {
 } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
+  type Column,
   type ColumnDef,
+  type ColumnFiltersState,
   flexRender,
   getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
 import { useLocation } from "react-router-dom";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   BrushCleaning,
   ChevronLeft,
   ChevronRight,
+  FilterX,
+  ListFilter,
   LoaderCircle,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAppShell } from "@/components/AppShell";
@@ -45,6 +56,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -89,6 +109,14 @@ interface QaItem {
   name: string;
   last_interaction_at: number | null;
   pinned: boolean | null;
+  visible: boolean;
+}
+
+interface QaItemMetadata {
+  path: string;
+  name: string;
+  last_interaction_at: number | null;
+  pinned: boolean;
 }
 
 interface QaDialogState {
@@ -154,6 +182,10 @@ export function Dashboard() {
   const { config, setConfig } = useAppShell();
   const location = useLocation();
   const [counts, setCounts] = useState<QaCounts>(emptyCounts);
+  const [destlistCounts, setDestlistCounts] = useState<Record<QaType, number | null>>({
+    recent: null,
+    frequent: null,
+  });
   const [stats, setStats] = useState<Stats | null>(null);
   const [dashboardRevision, setDashboardRevision] = useState(0);
   const [dialog, setDialog] = useState<DashboardDialog>(null);
@@ -177,7 +209,19 @@ export function Dashboard() {
 
   const loadCounts = useCallback(async () => {
     setCounts(await invokeCommand<QaCounts>("get_qa_counts", { fresh: false }));
-  }, []);
+    if (!config.visualization_deep_parse) {
+      setDestlistCounts({ recent: null, frequent: null });
+      return;
+    }
+    const [recent, frequent] = await Promise.allSettled([
+      invokeCommand<QaItemMetadata[]>("list_qa_item_metadata", { qaType: "recent" }),
+      invokeCommand<QaItemMetadata[]>("list_qa_item_metadata", { qaType: "frequent" }),
+    ]);
+    setDestlistCounts({
+      recent: recent.status === "fulfilled" ? recent.value.length : null,
+      frequent: frequent.status === "fulfilled" ? frequent.value.length : null,
+    });
+  }, [config.visualization_deep_parse]);
 
   const loadStats = useCallback(async () => {
     setStats(await invokeCommand<Stats>("get_stats", { range: "30d" }));
@@ -202,13 +246,45 @@ export function Dashboard() {
       [qaType]: { ...current[qaType], loading: true, error: null },
     }));
     try {
-      const items = await invokeCommand<QaItem[]>("list_qa_items", {
+      const visibleItems = await invokeCommand<Omit<QaItem, "visible">[]>("list_qa_items", {
         fresh: false,
         qaType,
       });
+      let items: QaItem[] = visibleItems.map((item) => ({ ...item, visible: true }));
+      let metadataError: string | null = null;
+      if (config.visualization_deep_parse) {
+        try {
+          const metadata = await invokeCommand<QaItemMetadata[]>("list_qa_item_metadata", {
+            qaType,
+          });
+          const visibleByPath = new Map(
+            visibleItems.map((item) => [item.path.toLocaleLowerCase(), item]),
+          );
+          const metadataPaths = new Set<string>();
+          items = metadata.map((item) => {
+            const pathKey = item.path.toLocaleLowerCase();
+            metadataPaths.add(pathKey);
+            const visible = visibleByPath.get(pathKey);
+            return {
+              path: item.path,
+              name: item.name,
+              last_interaction_at: item.last_interaction_at,
+              pinned: item.pinned,
+              visible: Boolean(visible),
+            };
+          });
+          for (const visible of visibleItems) {
+            if (!metadataPaths.has(visible.path.toLocaleLowerCase())) {
+              items.push({ ...visible, visible: true });
+            }
+          }
+        } catch (error) {
+          metadataError = errorMessage(error);
+        }
+      }
       setQaDialogState((current) => ({
         ...current,
-        [qaType]: { items, loading: false, error: null },
+        [qaType]: { items, loading: false, error: metadataError },
       }));
     } catch (error) {
       setQaDialogState((current) => ({
@@ -220,7 +296,7 @@ export function Dashboard() {
         },
       }));
     }
-  }, []);
+  }, [config.visualization_deep_parse]);
 
   const loadHistory = useCallback(async (page: number) => {
     setHistoryLoading(true);
@@ -468,12 +544,20 @@ export function Dashboard() {
         <SummaryCard
           onOpen={() => openDialog("recent")}
           title={t("recentFiles")}
-          value={counts.recent}
+          value={
+            config.visualization_deep_parse
+              ? `${counts.recent}/${destlistCounts.recent ?? "--"}`
+              : counts.recent
+          }
         />
         <SummaryCard
           onOpen={() => openDialog("frequent")}
           title={t("frequentFolders")}
-          value={counts.frequent}
+          value={
+            config.visualization_deep_parse
+              ? `${counts.frequent}/${destlistCounts.frequent ?? "--"}`
+              : counts.frequent
+          }
         />
         <SummaryCard
           onOpen={() => openDialog("cleaned")}
@@ -489,12 +573,16 @@ export function Dashboard() {
 
       <WordCloudPanel
         blacklistTermsEnabled={config.word_cloud_show_blacklist_terms}
+        dataRange={config.visualization_data_range}
+        dataSource={config.visualization_data_source}
+        deepParseEnabled={config.visualization_deep_parse}
         refreshKey={dashboardRevision}
         t={t}
       />
 
       <QuickAccessDialog
         items={activeQaState.items}
+        deepParseEnabled={config.visualization_deep_parse}
         language={language}
         loading={activeQaState.loading}
         error={activeQaState.error}
@@ -646,6 +734,8 @@ function AutoCleanCountdown({
 
 function quickAccessColumnClassName(columnId: string) {
   switch (columnId) {
+    case "visible":
+      return "w-28";
     case "last_interaction_at":
       return "w-40";
     case "name":
@@ -658,6 +748,7 @@ function quickAccessColumnClassName(columnId: string) {
 }
 
 function QuickAccessDialog({
+  deepParseEnabled,
   error,
   items,
   language,
@@ -667,6 +758,7 @@ function QuickAccessDialog({
   qaType,
   t,
 }: {
+  deepParseEnabled: boolean;
   error: string | null;
   items: QaItem[];
   language: Language;
@@ -676,11 +768,29 @@ function QuickAccessDialog({
   qaType: QaType;
   t: Translate;
 }) {
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [sorting, setSorting] = useState<SortingState>([
+    { id: "last_interaction_at", desc: true },
+  ]);
+  useEffect(() => {
+    if (!open) {
+      setColumnFilters([]);
+      setSorting([{ id: "last_interaction_at", desc: true }]);
+    }
+  }, [open]);
   const columns = useMemo<ColumnDef<QaItem>[]>(
     () => [
       {
         accessorKey: "name",
-        header: t("name"),
+        enableSorting: false,
+        header: ({ column }) => (
+          <QuickAccessKeywordFilterHeader
+            clearLabel={t("clearQuickAccessNameFilter")}
+            column={column}
+            filterLabel={t("filterQuickAccessName")}
+            label={t("name")}
+          />
+        ),
         cell: ({ row }) => (
           <span
             className="block max-w-56 truncate font-medium"
@@ -692,7 +802,15 @@ function QuickAccessDialog({
       },
       {
         accessorKey: "path",
-        header: t("path"),
+        enableSorting: false,
+        header: ({ column }) => (
+          <QuickAccessKeywordFilterHeader
+            clearLabel={t("clearQuickAccessPathFilter")}
+            column={column}
+            filterLabel={t("filterQuickAccessPath")}
+            label={t("path")}
+          />
+        ),
         cell: ({ row }) => (
           <span
             className="block max-w-[420px] truncate text-muted-foreground"
@@ -704,7 +822,12 @@ function QuickAccessDialog({
       },
       {
         accessorKey: "last_interaction_at",
-        header: t("lastUsed"),
+        sortUndefined: "last",
+        header: ({ column }) => (
+          <QuickAccessSortableHeader column={column}>
+            {t("lastUsed")}
+          </QuickAccessSortableHeader>
+        ),
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {row.original.last_interaction_at === null
@@ -715,14 +838,43 @@ function QuickAccessDialog({
           </span>
         ),
       },
+      ...(deepParseEnabled
+        ? [
+            {
+              accessorKey: "visible",
+              enableSorting: false,
+              filterFn: (row, _columnId, value) =>
+                value === "visible" ? row.original.visible : !row.original.visible,
+              header: ({ column }) => (
+                <QuickAccessEnumFilterHeader
+                  column={column}
+                  label={t("visible")}
+                  options={[
+                    { label: t("allVisibility"), value: "all" },
+                    { label: t("visibleOnly"), value: "visible" },
+                    { label: t("hiddenOnly"), value: "hidden" },
+                  ]}
+                />
+              ),
+              cell: ({ row }: { row: { original: QaItem } }) =>
+                row.original.visible ? t("yes") : t("no"),
+            } satisfies ColumnDef<QaItem>,
+          ]
+        : []),
     ],
-    [language, t],
+    [deepParseEnabled, language, t],
   );
   const table = useReactTable({
     columns,
     data: items,
     getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     getRowId: (item) => item.path,
+    getSortedRowModel: getSortedRowModel(),
+    enableMultiSort: false,
+    onColumnFiltersChange: setColumnFilters,
+    onSortingChange: setSorting,
+    state: { columnFilters, sorting },
   });
   const rows = table.getRowModel().rows;
 
@@ -764,8 +916,11 @@ function QuickAccessDialog({
             </TableHeader>
             <TableBody>
               {rows.length === 0 ? (
-                <TableMessage colSpan={3} destructive={Boolean(error)}>
-                  {loading ? t("loadingItems") : error ?? t("noItems")}
+                <TableMessage colSpan={deepParseEnabled ? 4 : 3} destructive={Boolean(error)}>
+                  {loading
+                    ? t("loadingItems")
+                    : error ??
+                      (columnFilters.length > 0 ? t("noMatches") : t("noItems"))}
                 </TableMessage>
               ) : (
                 rows.map((row) => (
@@ -794,6 +949,152 @@ function QuickAccessDialog({
         ) : null}
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface QuickAccessFilterOption {
+  label: string;
+  value: string;
+}
+
+function QuickAccessSortableHeader({
+  children,
+  column,
+}: {
+  children: ReactNode;
+  column: Column<QaItem>;
+}) {
+  const sorted = column.getIsSorted();
+  const SortIcon =
+    sorted === "asc" ? ArrowUp : sorted === "desc" ? ArrowDown : ArrowUpDown;
+  return (
+    <button
+      className="flex h-8 w-full items-center justify-between gap-1.5 text-left text-sm font-medium"
+      onClick={column.getToggleSortingHandler()}
+      type="button"
+    >
+      {children}
+      <SortIcon
+        className={
+          sorted ? "size-4 text-primary" : "size-4 text-muted-foreground"
+        }
+      />
+    </button>
+  );
+}
+
+function QuickAccessKeywordFilterHeader({
+  clearLabel,
+  column,
+  filterLabel,
+  label,
+}: {
+  clearLabel: string;
+  column: Column<QaItem, unknown>;
+  filterLabel: string;
+  label: string;
+}) {
+  const value = (column.getFilterValue() as string | undefined) ?? "";
+  const active = column.getIsFiltered();
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span>{label}</span>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              aria-label={filterLabel}
+              className={
+                active
+                  ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                  : "text-muted-foreground"
+              }
+              size="icon-xs"
+              title={filterLabel}
+              type="button"
+              variant="ghost"
+            >
+              <Search />
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end" className="w-64">
+          <div className="px-2 py-1">
+            <Input
+              aria-label={filterLabel}
+              autoFocus
+              onChange={(event) =>
+                column.setFilterValue(event.target.value || undefined)
+              }
+              onKeyDown={(event) => event.stopPropagation()}
+              placeholder={filterLabel}
+              type="search"
+              value={value}
+            />
+          </div>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={!active}
+            onClick={() => column.setFilterValue(undefined)}
+          >
+            <FilterX />
+            {clearLabel}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+function QuickAccessEnumFilterHeader({
+  column,
+  label,
+  options,
+}: {
+  column: Column<QaItem, unknown>;
+  label: string;
+  options: QuickAccessFilterOption[];
+}) {
+  const active = column.getIsFiltered();
+  const value = (column.getFilterValue() as string | undefined) ?? "all";
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span>{label}</span>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              aria-label={label}
+              className={
+                active
+                  ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                  : "text-muted-foreground"
+              }
+              size="icon-xs"
+              title={label}
+              type="button"
+              variant="ghost"
+            >
+              <ListFilter />
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuRadioGroup
+            onValueChange={(nextValue) =>
+              column.setFilterValue(nextValue === "all" ? undefined : nextValue)
+            }
+            value={value}
+          >
+            {options.map((option) => (
+              <DropdownMenuRadioItem key={option.value} value={option.value}>
+                {option.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }
 

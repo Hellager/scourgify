@@ -6,12 +6,11 @@ import {
   useState,
 } from "react";
 import { Wordcloud } from "@visx/wordcloud";
-import { LoaderCircle } from "lucide-react";
 import { invokeCommand } from "@/lib/commands";
 import type { I18nKey } from "@/lib/i18n";
 
 type WordCloudSource = "access" | "cleanup";
-type WordCloudRange = "last7_days" | "last30_days";
+type WordCloudRange = "last7_days" | "last30_days" | "all_time";
 
 interface WordCloudTerm {
   text: string;
@@ -59,6 +58,9 @@ interface PositionedWord {
 
 interface WordCloudPanelProps {
   blacklistTermsEnabled: boolean;
+  dataRange: WordCloudRange;
+  dataSource: "recent_access" | "recent_cleanup";
+  deepParseEnabled: boolean;
   refreshKey: number;
   t: Translate;
 }
@@ -74,11 +76,14 @@ const FONT_STACK =
 
 export function WordCloudPanel({
   blacklistTermsEnabled,
+  dataRange,
+  dataSource,
+  deepParseEnabled,
   refreshKey,
   t,
 }: WordCloudPanelProps) {
-  const [source, setSource] = useState<WordCloudSource>("access");
-  const [range, setRange] = useState<WordCloudRange>("last30_days");
+  const source: WordCloudSource =
+    dataSource === "recent_cleanup" ? "cleanup" : "access";
   const [result, setResult] = useState<WordCloudResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +127,7 @@ export function WordCloudPanel({
 
   const load = useCallback(async () => {
     const currentRequest = ++requestId.current;
-    const key = `${source}:${source === "cleanup" ? range : "all"}:${blacklistTermsEnabled}:${refreshKey}`;
+    const key = `${source}:${dataRange}:${deepParseEnabled}:${blacklistTermsEnabled}:${refreshKey}`;
     const cached = cache.current.get(key);
     if (cached) {
       setResult(cached);
@@ -134,13 +139,7 @@ export function WordCloudPanel({
     setLoading(true);
     setError(null);
     try {
-      const loaded = await invokeCommand<WordCloudResult>(
-        "get_dashboard_word_cloud",
-        {
-          source,
-          range: source === "cleanup" ? range : null,
-        },
-      );
+      const loaded = await invokeCommand<WordCloudResult>("get_dashboard_word_cloud");
       if (currentRequest !== requestId.current) {
         return;
       }
@@ -155,7 +154,7 @@ export function WordCloudPanel({
         setLoading(false);
       }
     }
-  }, [blacklistTermsEnabled, range, refreshKey, source]);
+  }, [blacklistTermsEnabled, dataRange, deepParseEnabled, refreshKey, source]);
 
   useEffect(() => {
     void load();
@@ -210,16 +209,6 @@ export function WordCloudPanel({
     [],
   );
 
-  const selectSource = (next: WordCloudSource) => {
-    setSource(next);
-    setFocusedTerm(null);
-  };
-
-  const selectRange = (next: WordCloudRange) => {
-    setRange(next);
-    setFocusedTerm(null);
-  };
-
   const showTerms = cloudWidth > 0 && terms.length > 0;
   const warning = result?.warnings.find(
     (item) => item.code === "blacklist_terms_unavailable",
@@ -230,44 +219,6 @@ export function WordCloudPanel({
 
   return (
     <section className="min-w-0 bg-card text-card-foreground">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <div aria-label={t("wordCloudSource")} className="flex rounded-md bg-muted p-1" role="tablist">
-            <SegmentButton
-              active={source === "access"}
-              label={t("wordCloudAccess")}
-              onClick={() => selectSource("access")}
-              role="tab"
-            />
-            <SegmentButton
-              active={source === "cleanup"}
-              label={t("wordCloudCleanup")}
-              onClick={() => selectSource("cleanup")}
-              role="tab"
-            />
-          </div>
-          {source === "cleanup" ? (
-            <div aria-label={t("dateRange")} className="flex rounded-md bg-muted p-1" role="tablist">
-              <SegmentButton
-                active={range === "last7_days"}
-                label={t("last7Days")}
-                onClick={() => selectRange("last7_days")}
-                role="tab"
-              />
-              <SegmentButton
-                active={range === "last30_days"}
-                label={t("last30Days")}
-                onClick={() => selectRange("last30_days")}
-                role="tab"
-              />
-            </div>
-          ) : null}
-        </div>
-        {loading ? (
-          <LoaderCircle aria-label={t("wordCloudLoading")} className="size-4 animate-spin text-muted-foreground" />
-        ) : null}
-      </div>
-
       <div aria-live="polite" aria-busy={loading} className="relative" ref={panelRef}>
         {showTerms ? (
           <div className="relative h-[360px] overflow-hidden px-2" onMouseLeave={() => setFocusedTerm(null)}>
@@ -358,32 +309,6 @@ export function WordCloudPanel({
         </p>
       ) : null}
     </section>
-  );
-}
-
-function SegmentButton({
-  active,
-  label,
-  onClick,
-  role,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-  role: "tab";
-}) {
-  return (
-    <button
-      aria-selected={active}
-      className={`rounded-sm px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-        active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-      }`}
-      onClick={onClick}
-      role={role}
-      type="button"
-    >
-      {label}
-    </button>
   );
 }
 

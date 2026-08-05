@@ -36,6 +36,23 @@ pub enum ThemePreference {
     Dark,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VisualizationDataSource {
+    #[default]
+    RecentAccess,
+    RecentCleanup,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VisualizationDataRange {
+    Last7Days,
+    Last30Days,
+    #[default]
+    AllTime,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AutoCleanPolicy {
@@ -85,6 +102,12 @@ pub struct Config {
     #[serde(default)]
     pub theme: ThemePreference,
     #[serde(default)]
+    pub visualization_deep_parse: bool,
+    #[serde(default)]
+    pub visualization_data_source: VisualizationDataSource,
+    #[serde(default)]
+    pub visualization_data_range: VisualizationDataRange,
+    #[serde(default)]
     pub word_cloud_show_blacklist_terms: bool,
     #[serde(default = "default_true")]
     pub show_recent_files: bool,
@@ -122,6 +145,9 @@ impl Config {
             privacy_mode_cleanup_links: true,
             close_behavior: CloseBehavior::Hide,
             theme: ThemePreference::System,
+            visualization_deep_parse: false,
+            visualization_data_source: VisualizationDataSource::RecentAccess,
+            visualization_data_range: VisualizationDataRange::AllTime,
             word_cloud_show_blacklist_terms: false,
             show_recent_files: true,
             show_frequent_folders: true,
@@ -206,6 +232,15 @@ mod tests {
         assert!(config.privacy_mode_cleanup_links);
         assert_eq!(config.close_behavior, CloseBehavior::Hide);
         assert_eq!(config.theme, ThemePreference::System);
+        assert!(!config.visualization_deep_parse);
+        assert_eq!(
+            config.visualization_data_source,
+            VisualizationDataSource::RecentAccess
+        );
+        assert_eq!(
+            config.visualization_data_range,
+            VisualizationDataRange::AllTime
+        );
         assert!(!config.word_cloud_show_blacklist_terms);
         assert!(config.show_recent_files);
         assert!(config.show_frequent_folders);
@@ -307,6 +342,14 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&ThemePreference::System).unwrap(),
             r#""system""#
+        );
+        assert_eq!(
+            serde_json::to_string(&VisualizationDataSource::RecentCleanup).unwrap(),
+            r#""recent_cleanup""#
+        );
+        assert_eq!(
+            serde_json::to_string(&VisualizationDataRange::AllTime).unwrap(),
+            r#""all_time""#
         );
     }
 

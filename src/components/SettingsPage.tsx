@@ -361,6 +361,36 @@ export function SettingsPage() {
           <SwitchControl
             control={control}
             field={{
+              label: t("deepParse"),
+              name: "visualization_deep_parse",
+            }}
+          />
+          <SelectControl
+            control={control}
+            field={{
+              label: t("visualizationDataSource"),
+              name: "visualization_data_source",
+              options: [
+                { label: t("recentAccess"), value: "recent_access" },
+                { label: t("recentCleanup"), value: "recent_cleanup" },
+              ],
+            }}
+          />
+          <SelectControl
+            control={control}
+            field={{
+              label: t("visualizationDataRange"),
+              name: "visualization_data_range",
+              options: [
+                { label: t("last7Days"), value: "last7_days" },
+                { label: t("last30Days"), value: "last30_days" },
+                { label: t("allTime"), value: "all_time" },
+              ],
+            }}
+          />
+          <SwitchControl
+            control={control}
+            field={{
               label: t("wordCloudShowBlacklistTerms"),
               name: "word_cloud_show_blacklist_terms",
               description: t("wordCloudShowBlacklistTermsDescription"),

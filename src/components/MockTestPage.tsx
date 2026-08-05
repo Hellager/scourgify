@@ -239,7 +239,7 @@ export function MockTestPage() {
       setWordCloudResult(
         await invokeCommand<WordCloudResult>("get_dashboard_word_cloud", {
           source: wordCloudSource,
-          range: wordCloudSource === "cleanup" ? wordCloudRange : null,
+          range: wordCloudRange,
         }),
       );
     } catch (value) {

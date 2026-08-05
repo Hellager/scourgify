@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     backend::QuickAccessBackendState,
     cleanup::{classify, MatchResult},
-    config::Config,
+    config::{Config, VisualizationDataRange},
     db::{rules, DbState},
     quick_access::QaItemMetadata,
     rules::{Rule, RuleScope},
@@ -33,6 +33,7 @@ pub(crate) enum WordCloudSource {
 pub(crate) enum WordCloudRange {
     Last7Days,
     Last30Days,
+    AllTime,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -99,28 +100,19 @@ struct CleanupRow {
 
 pub(crate) fn build_word_cloud(
     source: WordCloudSource,
-    range: Option<WordCloudRange>,
+    range: WordCloudRange,
     backend: &QuickAccessBackendState,
     database: &DbState,
     config: &Config,
 ) -> Result<WordCloudResult> {
     match source {
-        WordCloudSource::Access => {
-            if range.is_some() {
-                anyhow::bail!("access word cloud does not accept a date range")
-            }
-            build_access_word_cloud(backend, database, config)
-        }
-        WordCloudSource::Cleanup => {
-            let Some(range) = range else {
-                anyhow::bail!("cleanup word cloud requires a date range")
-            };
-            build_cleanup_word_cloud(range, database, config)
-        }
+        WordCloudSource::Access => build_access_word_cloud(range, backend, database, config),
+        WordCloudSource::Cleanup => build_cleanup_word_cloud(range, database, config),
     }
 }
 
 fn build_access_word_cloud(
+    range: WordCloudRange,
     backend_state: &QuickAccessBackendState,
     database: &DbState,
     config: &Config,
@@ -137,8 +129,33 @@ fn build_access_word_cloud(
         ("recent", true, 1.0, RuleScope::Files),
         ("frequent", false, 1.15, RuleScope::Folders),
     ] {
-        match backend.list_item_metadata(qa_type) {
+        let items = if config.visualization_deep_parse {
+            backend.list_item_metadata(qa_type)
+        } else {
+            backend.list_items(qa_type).map(|items| {
+                items
+                    .into_iter()
+                    .map(|item| QaItemMetadata {
+                        path: item.path,
+                        name: item.name,
+                        last_interaction_at: item.last_interaction_at,
+                        access_count: 0,
+                        score: None,
+                        recent_rank: 0,
+                        mru_position: 0,
+                        pinned: item.pinned.unwrap_or(false),
+                        pin_order: None,
+                        warning_count: 0,
+                    })
+                    .collect()
+            })
+        };
+        match items {
             Ok(items) => {
+                let items = items
+                    .into_iter()
+                    .filter(|item| access_item_in_range(item, range, now))
+                    .collect::<Vec<_>>();
                 loaded_sections += 1;
                 corpus_items += items.len() as u64;
                 aggregate_access_items(
@@ -165,7 +182,7 @@ fn build_access_word_cloud(
 
     Ok(WordCloudResult {
         source: WordCloudSource::Access,
-        range: None,
+        range: Some(range),
         corpus_items,
         truncated: false,
         blacklist_terms_included: config.word_cloud_show_blacklist_terms,
@@ -181,8 +198,9 @@ fn build_cleanup_word_cloud(
     config: &Config,
 ) -> Result<WordCloudResult> {
     let (modifier, now) = match range {
-        WordCloudRange::Last7Days => ("-7 days", Utc::now()),
-        WordCloudRange::Last30Days => ("-30 days", Utc::now()),
+        WordCloudRange::Last7Days => (Some("-7 days"), Utc::now()),
+        WordCloudRange::Last30Days => (Some("-30 days"), Utc::now()),
+        WordCloudRange::AllTime => (None, Utc::now()),
     };
     let include_blacklist_terms = config.word_cloud_show_blacklist_terms;
     let (accumulator, corpus_items, truncated) = database.with_connection(|connection| {
@@ -191,7 +209,7 @@ fn build_cleanup_word_cloud(
                 "SELECT item_path, item_type, rule_keyword, source, cleaned_at
                  FROM clean_records
                  WHERE visible = 1
-                   AND cleaned_at >= datetime('now', 'localtime', 'start of day', ?1, 'utc')
+                   AND (?1 IS NULL OR cleaned_at >= datetime('now', 'localtime', 'start of day', ?1, 'utc'))
                  ORDER BY cleaned_at DESC, id DESC
                  LIMIT ?2",
             )
@@ -398,6 +416,30 @@ fn recency_factor(timestamp: Option<u64>, now: DateTime<Utc>, half_life_days: f6
     }
     let age_days = (now - timestamp).num_seconds() as f64 / 86_400.0;
     0.5 + 0.5 * 2_f64.powf(-age_days / half_life_days)
+}
+
+fn access_item_in_range(item: &QaItemMetadata, range: WordCloudRange, now: DateTime<Utc>) -> bool {
+    let days = match range {
+        WordCloudRange::Last7Days => 7,
+        WordCloudRange::Last30Days => 30,
+        WordCloudRange::AllTime => return true,
+    };
+    item.last_interaction_at
+        .and_then(|value| i64::try_from(value).ok())
+        .and_then(DateTime::from_timestamp_millis)
+        .is_some_and(|timestamp| {
+            timestamp <= now && timestamp >= now - chrono::Duration::days(days)
+        })
+}
+
+impl From<VisualizationDataRange> for WordCloudRange {
+    fn from(value: VisualizationDataRange) -> Self {
+        match value {
+            VisualizationDataRange::Last7Days => Self::Last7Days,
+            VisualizationDataRange::Last30Days => Self::Last30Days,
+            VisualizationDataRange::AllTime => Self::AllTime,
+        }
+    }
 }
 
 fn unique_tokens(tokens: Vec<Token>) -> Vec<Token> {
@@ -790,6 +832,44 @@ mod tests {
     }
 
     #[test]
+    fn access_ranges_filter_by_last_interaction_time() {
+        let now = fixed_now();
+        let item_at = |days_ago| {
+            metadata(
+                "Alpha",
+                1,
+                Some((now - Duration::days(days_ago)).timestamp_millis() as u64),
+            )
+        };
+
+        assert!(access_item_in_range(
+            &item_at(6),
+            WordCloudRange::Last7Days,
+            now
+        ));
+        assert!(!access_item_in_range(
+            &item_at(8),
+            WordCloudRange::Last7Days,
+            now
+        ));
+        assert!(access_item_in_range(
+            &item_at(29),
+            WordCloudRange::Last30Days,
+            now
+        ));
+        assert!(access_item_in_range(
+            &metadata("Alpha", 1, None),
+            WordCloudRange::AllTime,
+            now
+        ));
+        assert!(!access_item_in_range(
+            &metadata("Alpha", 1, None),
+            WordCloudRange::Last30Days,
+            now
+        ));
+    }
+
+    #[test]
     fn whitelist_priority_prevents_blacklist_marking() {
         let now = fixed_now();
         let item = metadata(
@@ -1020,15 +1100,20 @@ mod tests {
             build_cleanup_word_cloud(WordCloudRange::Last7Days, &database, &config).unwrap();
         let last_thirty =
             build_cleanup_word_cloud(WordCloudRange::Last30Days, &database, &config).unwrap();
+        let all_time =
+            build_cleanup_word_cloud(WordCloudRange::AllTime, &database, &config).unwrap();
 
         assert_eq!(last_seven.corpus_items, 1);
         assert_eq!(last_thirty.corpus_items, 2);
+        assert_eq!(all_time.corpus_items, 3);
         assert!(last_seven.terms.iter().any(|term| term.text == "report"));
         assert!(last_thirty.terms.iter().any(|term| term.text == "项目"));
         assert!(last_thirty
             .terms
             .iter()
             .all(|term| !matches!(term.text.as_str(), "ancient" | "secret")));
+        assert!(all_time.terms.iter().any(|term| term.text == "ancient"));
+        assert!(all_time.terms.iter().all(|term| term.text != "secret"));
     }
 
     #[test]
