@@ -55,6 +55,13 @@ interface QaVisibility {
   start_recommended: boolean;
 }
 
+interface QaVisibilityMutationResult {
+  target: VisibilityQaType;
+  requested_visible: boolean;
+  visibility: QaVisibility | null;
+  warnings: Array<{ message: string }>;
+}
+
 type ClearTarget = "logs" | "history";
 
 export function SettingsPage() {
@@ -119,6 +126,37 @@ export function SettingsPage() {
     };
   }, [reset]);
 
+  const applyActualVisibility = (actual: QaVisibility) => {
+    originalVisibility.current = actual;
+    setValue("show_recent_files", actual.recent, { shouldValidate: true });
+    setValue("show_frequent_folders", actual.frequent, {
+      shouldValidate: true,
+    });
+    setStartRecommendedVisible(actual.start_recommended);
+  };
+
+  const applyRequestedVisibility = (
+    target: VisibilityQaType,
+    visible: boolean,
+  ) => {
+    if (target === "recent") {
+      setValue("show_recent_files", visible, { shouldValidate: true });
+    } else if (target === "frequent") {
+      setValue("show_frequent_folders", visible, { shouldValidate: true });
+    } else {
+      setStartRecommendedVisible(visible);
+    }
+    originalVisibility.current = {
+      recent: target === "recent" ? visible : originalVisibility.current?.recent ?? true,
+      frequent:
+        target === "frequent" ? visible : originalVisibility.current?.frequent ?? true,
+      start_recommended:
+        target === "start_recommended"
+          ? visible
+          : originalVisibility.current?.start_recommended ?? startRecommendedVisible,
+    };
+  };
+
   const updateVisibility = async (qaType: VisibilityQaType, visible: boolean) => {
     const fieldName =
       qaType === "recent"
@@ -139,11 +177,16 @@ export function SettingsPage() {
 
     setUpdatingVisibility(qaType);
     try {
-      const actual = await invokeCommand<QaVisibility>("set_qa_visibility", {
+      const result = await invokeCommand<QaVisibilityMutationResult>("set_qa_visibility", {
         qaType,
         visible,
       });
-      applyActualVisibility(actual);
+      if (result.visibility) {
+        applyActualVisibility(result.visibility);
+      } else {
+        applyRequestedVisibility(result.target, result.requested_visible);
+      }
+      result.warnings.forEach((warning) => toast.warning(warning.message));
       toast.success(t("quickAccessVisibilityUpdated"));
     } catch (error) {
       try {
@@ -170,14 +213,6 @@ export function SettingsPage() {
       }
     }
 
-    function applyActualVisibility(actual: QaVisibility) {
-      originalVisibility.current = actual;
-      setValue("show_recent_files", actual.recent, { shouldValidate: true });
-      setValue("show_frequent_folders", actual.frequent, {
-        shouldValidate: true,
-      });
-      setStartRecommendedVisible(actual.start_recommended);
-    }
   };
 
   const clearSelectedData = async () => {
@@ -215,20 +250,53 @@ export function SettingsPage() {
         toast.warning(t("privacyWriteDisabled"));
         return;
       }
+      const changes: Array<{ qaType: "recent" | "frequent"; visible: boolean }> = [];
       if (originalVisibility.current?.recent !== values.show_recent_files) {
-        await invokeCommand("set_qa_visibility", {
+        changes.push({
           qaType: "recent",
           visible: values.show_recent_files,
         });
       }
       if (originalVisibility.current?.frequent !== values.show_frequent_folders) {
-        await invokeCommand("set_qa_visibility", {
+        changes.push({
           qaType: "frequent",
           visible: values.show_frequent_folders,
         });
       }
+      const failedChanges: string[] = [];
+      for (const change of changes) {
+        try {
+          const result = await invokeCommand<QaVisibilityMutationResult>(
+            "set_qa_visibility",
+            change,
+          );
+          if (result.visibility) {
+            applyActualVisibility(result.visibility);
+          } else {
+            applyRequestedVisibility(result.target, result.requested_visible);
+          }
+          result.warnings.forEach((warning) => toast.warning(warning.message));
+        } catch (error) {
+          failedChanges.push(change.qaType);
+          toast.error(errorMessage(error));
+        }
+      }
+      if (changes.length > 0) {
+        try {
+          applyActualVisibility(await invokeCommand<QaVisibility>("get_qa_visibility"));
+        } catch (error) {
+          toast.error(errorMessage(error));
+        }
+      }
+      const persistedValues = {
+        ...values,
+        show_recent_files:
+          originalVisibility.current?.recent ?? values.show_recent_files,
+        show_frequent_folders:
+          originalVisibility.current?.frequent ?? values.show_frequent_folders,
+      };
       const saved = await invokeCommand<ConfigForm>("update_config", {
-        nextConfig: values,
+        nextConfig: persistedValues,
       });
       const parsed = configSchema.parse(saved);
       lastSavedConfig.current = parsed;
@@ -241,13 +309,13 @@ export function SettingsPage() {
       }
       setShellConfig(parsed);
       originalVisibility.current = {
-        recent: values.show_recent_files,
-        frequent: values.show_frequent_folders,
+        recent: persistedValues.show_recent_files,
+        frequent: persistedValues.show_frequent_folders,
         start_recommended:
           originalVisibility.current?.start_recommended ??
           startRecommendedVisible,
       };
-      if (visibilityChanged) {
+      if (visibilityChanged && failedChanges.length === 0) {
         toast.success(t("quickAccessVisibilityUpdated"));
       }
       if (

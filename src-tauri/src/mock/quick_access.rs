@@ -9,7 +9,7 @@ use crate::{
     quick_access::{
         QaBatchFailure, QaBatchResult, QaBatchWarning, QaItem, QaItemMetadata,
         QaRawPathCleanupResult, QaRestoreResult, QaRestoreSectionResult, QaVisibility,
-        QuickAccessError,
+        QaVisibilityMutationResult, QuickAccessError,
     },
 };
 
@@ -314,7 +314,7 @@ impl QuickAccessBackend for MockQuickAccessBackend {
         Ok(data.visibility)
     }
 
-    fn set_visibility(&self, qa_type: &str, visible: bool) -> Result<QaVisibility> {
+    fn set_visibility(&self, qa_type: &str, visible: bool) -> Result<QaVisibilityMutationResult> {
         let mut data = self
             .data
             .write()
@@ -328,7 +328,12 @@ impl QuickAccessBackend for MockQuickAccessBackend {
             }
         }
         data.revision = data.revision.wrapping_add(1);
-        Ok(data.visibility)
+        Ok(QaVisibilityMutationResult {
+            target: qa_type.to_string(),
+            requested_visible: visible,
+            visibility: Some(data.visibility),
+            warnings: Vec::new(),
+        })
     }
 
     fn path_kind(&self, path: &str) -> PathKind {

@@ -115,3 +115,36 @@ pub struct QaVisibility {
     pub frequent: bool,
     pub start_recommended: bool,
 }
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct QaVisibilityMutationResult {
+    pub(crate) target: String,
+    pub(crate) requested_visible: bool,
+    pub(crate) visibility: Option<QaVisibility>,
+    pub(crate) warnings: Vec<CommandWarning>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_visibility_mutation_with_unavailable_readback() {
+        let result = QaVisibilityMutationResult {
+            target: "recent".to_string(),
+            requested_visible: false,
+            visibility: None,
+            warnings: Vec::new(),
+        };
+
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            serde_json::json!({
+                "target": "recent",
+                "requested_visible": false,
+                "visibility": null,
+                "warnings": []
+            })
+        );
+    }
+}

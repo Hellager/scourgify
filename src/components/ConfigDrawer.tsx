@@ -26,6 +26,14 @@ type VisibilityQaType = "recent" | "frequent";
 interface QaVisibility {
   recent: boolean;
   frequent: boolean;
+  start_recommended?: boolean;
+}
+
+interface QaVisibilityMutationResult {
+  target: VisibilityQaType;
+  requested_visible: boolean;
+  visibility: QaVisibility | null;
+  warnings: Array<{ message: string }>;
 }
 
 interface ConfigDrawerProps {
@@ -101,16 +109,43 @@ export function ConfigDrawer({
 
     updateDraft(fieldName, visible);
     try {
-      await invokeCommand("set_qa_visibility", { qaType, visible });
-      originalVisibility.current = {
-        recent: originalVisibility.current?.recent ?? true,
-        frequent: originalVisibility.current?.frequent ?? true,
-        [qaType]: visible,
-      };
+      const result = await invokeCommand<QaVisibilityMutationResult>(
+        "set_qa_visibility",
+        { qaType, visible },
+      );
+      if (result.visibility) {
+        applyActualVisibility(result.visibility);
+      } else {
+        updateDraft(fieldName, result.requested_visible);
+        originalVisibility.current = {
+          recent:
+            qaType === "recent"
+              ? result.requested_visible
+              : originalVisibility.current?.recent ?? true,
+          frequent:
+            qaType === "frequent"
+              ? result.requested_visible
+              : originalVisibility.current?.frequent ?? true,
+        };
+      }
+      result.warnings.forEach((warning) => toast.warning(warning.message));
       toast.success(t("quickAccessVisibilityUpdated"));
     } catch (error) {
-      updateDraft(fieldName, originalVisibility.current?.[qaType] ?? !visible);
+      try {
+        applyActualVisibility(await invokeCommand<QaVisibility>("get_qa_visibility"));
+      } catch {
+        updateDraft(fieldName, originalVisibility.current?.[qaType] ?? !visible);
+      }
       toast.error(errorMessage(error));
+    }
+
+    function applyActualVisibility(actual: QaVisibility) {
+      originalVisibility.current = {
+        recent: actual.recent,
+        frequent: actual.frequent,
+      };
+      updateDraft("show_recent_files", actual.recent);
+      updateDraft("show_frequent_folders", actual.frequent);
     }
   };
 

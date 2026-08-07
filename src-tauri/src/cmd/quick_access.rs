@@ -13,7 +13,7 @@ use crate::{
     privacy::PrivacyManager,
     quick_access::{
         QaCounts, QaItem, QaItemMetadata, QaMutationResult, QaRestoreResult, QaVisibility,
-        QuickAccessCache, QuickAccessError,
+        QaVisibilityMutationResult, QuickAccessCache, QuickAccessError,
     },
 };
 
@@ -137,7 +137,7 @@ pub(crate) fn set_qa_visibility(
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
     visible: bool,
-) -> CommandResult<QaVisibility> {
+) -> CommandResult<QaVisibilityMutationResult> {
     let _write_permit = begin_quick_access_write(privacy.inner())?;
     let result = backend
         .backend()

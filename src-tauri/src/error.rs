@@ -150,6 +150,26 @@ pub(crate) fn wincent_post_mutation_warning(
     })
 }
 
+pub(crate) fn wincent_visibility_post_mutation_warning(
+    operation: &str,
+    error: &WincentError,
+) -> Option<CommandWarning> {
+    let WincentError::VisibilityPostMutationFailure { step, .. } = error else {
+        return None;
+    };
+    let step_name = match step {
+        QuickAccessPostMutationStep::RefreshExplorer => "refresh_explorer",
+        _ => "unknown",
+    };
+    Some(command_warning(
+        operation,
+        "quick_access_visibility_post_mutation_failed",
+        step_name,
+        "The Quick Access visibility change completed, but a follow-up step failed.",
+        error,
+    ))
+}
+
 pub(crate) fn command_warning(
     operation: &str,
     code: &'static str,
@@ -306,6 +326,12 @@ fn classify_wincent_error(error: &WincentError) -> (ErrorCode, &'static str, boo
         WincentError::PostMutationFailure { .. } => (
             ErrorCode::QuickAccessOperationFailed,
             "The Quick Access operation completed with a follow-up failure.",
+            false,
+            true,
+        ),
+        WincentError::VisibilityPostMutationFailure { .. } => (
+            ErrorCode::QuickAccessOperationFailed,
+            "The Quick Access visibility change completed with a follow-up failure.",
             false,
             true,
         ),

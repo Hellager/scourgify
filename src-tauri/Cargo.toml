@@ -40,5 +40,5 @@ jieba-rs = "0.10.3"
 unicode-segmentation = "1.13.3"
 
 [target.'cfg(windows)'.dependencies]
-wincent = { git = "https://github.com/Hellager/wincent-rs.git", rev = "69e2d7cacbfb818ca52f6f5dd5eb0a6cd47643ad" }
+wincent = { git = "https://github.com/Hellager/wincent-rs.git", rev = "cd7e7289b4b12bbfb744624125a8c7639d4e3482" }
 winreg = "0.56.0"

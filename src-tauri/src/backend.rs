@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::quick_access::{
     operations, QaBatchResult, QaItem, QaItemMetadata, QaRestoreResult, QaVisibility,
+    QaVisibilityMutationResult,
 };
 
 #[cfg(debug_assertions)]
@@ -29,7 +30,7 @@ pub(crate) trait QuickAccessBackend: Send + Sync {
     fn remove_items(&self, qa_type: &str, paths: Vec<String>) -> Result<QaBatchResult>;
     fn restore_defaults(&self, qa_type: &str) -> Result<QaRestoreResult>;
     fn get_visibility(&self) -> Result<QaVisibility>;
-    fn set_visibility(&self, qa_type: &str, visible: bool) -> Result<QaVisibility>;
+    fn set_visibility(&self, qa_type: &str, visible: bool) -> Result<QaVisibilityMutationResult>;
     fn path_kind(&self, path: &str) -> PathKind;
 }
 
@@ -60,7 +61,7 @@ impl QuickAccessBackend for RealQuickAccessBackend {
         operations::get_visibility()
     }
 
-    fn set_visibility(&self, qa_type: &str, visible: bool) -> Result<QaVisibility> {
+    fn set_visibility(&self, qa_type: &str, visible: bool) -> Result<QaVisibilityMutationResult> {
         operations::set_visibility(qa_type, visible)
     }
 

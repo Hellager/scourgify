@@ -9,11 +9,15 @@ use wincent::prelude::{
     RemoveOptions, RestoreDefaultsOptions, RestoreDefaultsReport, VisibilityOptions, WincentError,
 };
 
-use crate::error::{wincent_command_error_ref, wincent_post_mutation_warning};
+use crate::error::{
+    command_warning, wincent_command_error_ref, wincent_post_mutation_warning,
+    wincent_visibility_post_mutation_warning,
+};
 
 use super::types::{
     QaBatchFailure, QaBatchResult, QaBatchWarning, QaItem, QaItemMetadata, QaRawPathCleanupResult,
-    QaRestoreResult, QaRestoreSectionResult, QaVisibility, QuickAccessError,
+    QaRestoreResult, QaRestoreSectionResult, QaVisibility, QaVisibilityMutationResult,
+    QuickAccessError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,7 +251,7 @@ pub fn get_visibility() -> Result<QaVisibility> {
     })
 }
 
-pub fn set_visibility(qa_type: &str, visible: bool) -> Result<QaVisibility> {
+pub fn set_visibility(qa_type: &str, visible: bool) -> Result<QaVisibilityMutationResult> {
     let target = parse_visibility_qa_type(qa_type)?;
     log::info!(
         "Quick Access visibility update started qa_type={} visible={visible}",
@@ -267,22 +271,48 @@ pub fn set_visibility(qa_type: &str, visible: bool) -> Result<QaVisibility> {
             manager.set_start_recommended_section_visible_with_options(visible, options)
         }
     };
+    let mut warnings = Vec::new();
     match result {
-        Ok(()) => {
-            log::info!(
-                "Quick Access visibility update succeeded qa_type={} visible={visible}",
-                visibility_name(target)
-            );
-            get_visibility()
-        }
+        Ok(()) => {}
         Err(error) => {
-            log::error!(
-                "Quick Access visibility update failed qa_type={} visible={visible} error={error}",
-                visibility_name(target)
-            );
-            Err(error.into())
+            if let Some(warning) =
+                wincent_visibility_post_mutation_warning("set_qa_visibility", &error)
+            {
+                warnings.push(warning);
+            } else {
+                log::error!(
+                    "Quick Access visibility update failed qa_type={} visible={visible} error={error}",
+                    visibility_name(target)
+                );
+                return Err(error.into());
+            }
         }
     }
+    let visibility = match get_visibility() {
+        Ok(value) => Some(value),
+        Err(error) => {
+            warnings.push(command_warning(
+                "set_qa_visibility",
+                "quick_access_visibility_readback_failed",
+                "readback",
+                "The Quick Access visibility changed, but the resulting state could not be read.",
+                &error,
+            ));
+            None
+        }
+    };
+    if warnings.is_empty() {
+        log::info!(
+            "Quick Access visibility update succeeded qa_type={} visible={visible}",
+            visibility_name(target)
+        );
+    }
+    Ok(QaVisibilityMutationResult {
+        target: qa_type.to_string(),
+        requested_visible: visible,
+        visibility,
+        warnings,
+    })
 }
 
 pub(crate) fn parse_qa_type(qa_type: &str) -> Result<QuickAccess> {
