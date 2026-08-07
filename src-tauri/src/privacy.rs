@@ -29,11 +29,6 @@ enum PrivacyLockState {
     },
 }
 
-// ponytail: QuickAccessLock only owns Windows HANDLEs; access is serialized and
-// Windows handles may be closed from any thread. Remove this if wincent exposes
-// a Send lock wrapper later.
-unsafe impl Send for PrivacyLockState {}
-
 pub struct PrivacyManager {
     manager: QuickAccessManager,
     state: Mutex<PrivacyLockState>,
