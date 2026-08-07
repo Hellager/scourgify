@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
@@ -14,17 +15,19 @@ pub fn notify_partial_failure<R: Runtime>(app: &AppHandle<R>, config: &Config, b
         return;
     }
 
-    show(app, body);
+    if let Err(error) = show(app, body) {
+        log::warn!("failed to send partial-failure notification: {error:#}");
+    }
 }
 
 pub fn notify_auto_clean<R: Runtime>(
     app: &AppHandle<R>,
     config: &Config,
     result: &AutoCleanResult,
-) {
+) -> Result<()> {
     let Some(notification) = auto_clean_notification(config, result, main_window_is_inactive(app))
     else {
-        return;
+        return Ok(());
     };
     let body = match notification {
         AutoCleanNotification::Complete => format!(
@@ -32,15 +35,16 @@ pub fn notify_auto_clean<R: Runtime>(
             result.succeeded, result.total
         ),
         AutoCleanNotification::PartialFailure => format!(
-            "Auto-clean completed with issues: {} removed, {} item failures, {} warnings, {} section failures, {} history failures.",
+            "Auto-clean completed with issues: {} removed, {} item failures, {} warnings, {} section failures, {} history failures, {} follow-up warnings.",
             result.succeeded,
             result.failed,
             result.warnings,
             result.section_errors,
-            result.history_errors
+            result.history_errors,
+            result.post_process_warnings.len()
         ),
     };
-    show(app, &body);
+    show(app, &body)
 }
 
 fn auto_clean_notification(
@@ -74,16 +78,13 @@ fn main_window_is_inactive<R: Runtime>(app: &AppHandle<R>) -> bool {
     !window.is_visible().unwrap_or(false) || !window.is_focused().unwrap_or(false)
 }
 
-fn show<R: Runtime>(app: &AppHandle<R>, body: &str) {
-    if let Err(error) = app
-        .notification()
+fn show<R: Runtime>(app: &AppHandle<R>, body: &str) -> Result<()> {
+    app.notification()
         .builder()
         .title("Scourgify")
         .body(body)
         .show()
-    {
-        log::warn!("failed to send system notification: {error}");
-    }
+        .context("failed to send system notification")
 }
 
 #[cfg(test)]
@@ -129,6 +130,8 @@ mod tests {
             skipped_protected: 0,
             section_errors: 0,
             history_errors: 0,
+            post_process_warnings: Vec::new(),
+            last_run_persisted: false,
         }
     }
 }

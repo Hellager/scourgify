@@ -352,6 +352,8 @@ pub(crate) fn trigger_mock_event(
                     warnings: 0,
                     section_errors: 0,
                     history_errors: 0,
+                    post_process_warnings: Vec::new(),
+                    last_run_persisted: true,
                 },
             )
             .map_err(|error| mock_error("trigger_mock_event", error))?;

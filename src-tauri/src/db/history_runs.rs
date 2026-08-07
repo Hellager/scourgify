@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::history::HistoryError;
@@ -232,6 +233,34 @@ pub fn finish(
     transaction
         .commit()
         .context("failed to commit cleanup run completion")
+}
+
+pub(crate) fn latest_terminal_auto_clean_completion(
+    connection: &Connection,
+    trigger: CleanupTrigger,
+) -> Result<Option<DateTime<Utc>>> {
+    let completed_at = connection
+        .query_row(
+            "SELECT completed_at
+             FROM cleanup_runs
+             WHERE action = 'auto_clean'
+               AND trigger = ?1
+               AND status IN ('success', 'partial', 'failed', 'noop')
+               AND completed_at IS NOT NULL
+             ORDER BY completed_at DESC, id DESC
+             LIMIT 1",
+            [trigger.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .context("failed to read latest completed auto-clean run")?;
+    completed_at
+        .map(|value| {
+            NaiveDateTime::parse_from_str(&value, "%Y-%m-%d %H:%M:%S%.f")
+                .map(|value| value.and_utc())
+                .with_context(|| format!("invalid auto-clean completion timestamp: {value}"))
+        })
+        .transpose()
 }
 
 pub fn list(connection: &Connection, query: CleanupRunQuery) -> Result<CleanupRunPage> {
@@ -598,10 +627,79 @@ mod tests {
             },
         )
         .unwrap();
-
         assert_eq!(mark_interrupted(&connection).unwrap(), 1);
         let totals = lifetime_totals(&connection).unwrap();
         assert_eq!(totals.interrupted_runs, 1);
         assert_eq!(totals.cleanup_runs_total, 1);
+    }
+
+    #[test]
+    fn latest_terminal_auto_clean_completion_uses_only_matching_terminal_runs() {
+        let mut connection = connection();
+        let scheduled = begin(
+            &connection,
+            NewCleanupRun {
+                action: CleanupAction::AutoClean,
+                trigger: CleanupTrigger::Scheduled,
+                qa_type: "all",
+            },
+        )
+        .unwrap();
+        finish(
+            &mut connection,
+            scheduled,
+            &RunCompletion {
+                succeeded: 1,
+                ..RunCompletion::default()
+            },
+            0,
+        )
+        .unwrap();
+        let interrupted = begin(
+            &connection,
+            NewCleanupRun {
+                action: CleanupAction::AutoClean,
+                trigger: CleanupTrigger::Scheduled,
+                qa_type: "all",
+            },
+        )
+        .unwrap();
+        assert_eq!(mark_interrupted(&connection).unwrap(), 1);
+        connection
+            .execute(
+                "UPDATE cleanup_runs SET completed_at = '2099-01-01 00:00:00.000' WHERE id = ?1",
+                [interrupted],
+            )
+            .unwrap();
+        let monitor = begin(
+            &connection,
+            NewCleanupRun {
+                action: CleanupAction::AutoClean,
+                trigger: CleanupTrigger::Monitor,
+                qa_type: "all",
+            },
+        )
+        .unwrap();
+        finish(
+            &mut connection,
+            monitor,
+            &RunCompletion {
+                succeeded: 1,
+                ..RunCompletion::default()
+            },
+            0,
+        )
+        .unwrap();
+
+        let completion =
+            latest_terminal_auto_clean_completion(&connection, CleanupTrigger::Scheduled)
+                .unwrap()
+                .unwrap();
+        assert!(completion < DateTime::parse_from_rfc3339("2099-01-01T00:00:00Z").unwrap());
+        assert!(
+            latest_terminal_auto_clean_completion(&connection, CleanupTrigger::Manual)
+                .unwrap()
+                .is_none()
+        );
     }
 }

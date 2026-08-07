@@ -111,10 +111,15 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
     const unlisten = listen<AutoCleanFinished>(
       AUTO_CLEAN_FINISHED_EVENT,
       ({ payload }) => {
-        setConfig((current) => ({
-          ...current,
-          auto_clean_last_run: payload.completed_at,
-        }));
+        if (payload.last_run_persisted) {
+          setConfig((current) => ({
+            ...current,
+            auto_clean_last_run: payload.completed_at,
+          }));
+        }
+        payload.post_process_warnings.forEach((warning) =>
+          toast.warning(warning.message),
+        );
         dispatchAppEvent(AUTO_CLEAN_UPDATED_EVENT, payload);
         dispatchAppEvent(REFRESH_DASHBOARD_EVENT, { fresh: false });
         dispatchAppEvent(REFRESH_HISTORY_EVENT);

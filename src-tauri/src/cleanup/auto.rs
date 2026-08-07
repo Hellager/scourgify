@@ -12,6 +12,7 @@ use crate::{
         history_runs::{self, CleanupAction, CleanupTrigger, NewCleanupRun, RunCompletion},
         DbState,
     },
+    error::CommandWarning,
     privacy::{PrivacyAccessError, PrivacyManager},
     quick_access::QaBatchResult,
 };
@@ -68,6 +69,8 @@ pub(crate) struct AutoCleanResult {
     pub skipped_protected: usize,
     pub section_errors: usize,
     pub history_errors: usize,
+    pub post_process_warnings: Vec<CommandWarning>,
+    pub last_run_persisted: bool,
 }
 
 impl AutoCleanResult {
@@ -76,7 +79,7 @@ impl AutoCleanResult {
     }
 
     pub(crate) fn has_issues(&self) -> bool {
-        self.has_failures() || self.warnings > 0
+        self.has_failures() || self.warnings > 0 || !self.post_process_warnings.is_empty()
     }
 
     fn from_sections(recent: AutoCleanSectionResult, frequent: AutoCleanSectionResult) -> Self {
@@ -90,6 +93,8 @@ impl AutoCleanResult {
             skipped_protected: 0,
             section_errors: 0,
             history_errors: 0,
+            post_process_warnings: Vec::new(),
+            last_run_persisted: false,
         };
 
         for section in [&aggregate.recent, &aggregate.frequent] {
@@ -306,5 +311,19 @@ mod tests {
         assert!(matches!(state.begin(), Err(AutoCleanError::AlreadyRunning)));
         drop(first);
         assert!(state.begin().is_ok());
+    }
+
+    #[test]
+    fn post_process_warning_marks_completed_result_as_issues() {
+        let mut result = run_sections(|_, _| Ok(QaBatchResult::default()));
+        result.post_process_warnings.push(CommandWarning {
+            code: "auto_clean_last_run_persist_failed",
+            step: "config",
+            message: "completion warning".to_string(),
+            incident_id: "incident-1".to_string(),
+        });
+
+        assert!(result.has_issues());
+        assert!(!result.has_failures());
     }
 }

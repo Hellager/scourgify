@@ -16,7 +16,7 @@ use crate::{
     cleanup::{self, AutoCleanError, AutoCleanResult, AutoCleanState},
     config::{self, AutoCleanPolicy, Config},
     db::{history_runs::CleanupTrigger, DbState},
-    error::report_background_error,
+    error::{command_warning, report_background_error, CommandWarning},
     privacy::PrivacyManager,
     quick_access::QuickAccessCache,
 };
@@ -104,12 +104,14 @@ pub struct AutoCleanFinished {
     pub warnings: usize,
     pub section_errors: usize,
     pub history_errors: usize,
+    pub post_process_warnings: Vec<CommandWarning>,
+    pub last_run_persisted: bool,
 }
 
 pub fn run_now<R: Runtime>(app: &AppHandle<R>) -> Result<AutoCleanResult> {
     let config = config_snapshot(app)?;
-    let result = execute(app, &config, CleanupTrigger::Manual)?;
-    finish(app, &config, &result)?;
+    let mut result = execute(app, &config, CleanupTrigger::Manual)?;
+    finish(app, &config, &mut result);
     Ok(result)
 }
 
@@ -136,10 +138,48 @@ fn execute<R: Runtime>(
     Ok(result)
 }
 
-fn finish<R: Runtime>(app: &AppHandle<R>, config: &Config, result: &AutoCleanResult) -> Result<()> {
-    super::notifier::notify_auto_clean(app, config, result);
-    record_completion(app, result)?;
-    Ok(())
+fn finish<R: Runtime>(app: &AppHandle<R>, config: &Config, result: &mut AutoCleanResult) {
+    let completed_at = Utc::now();
+    match persist_last_run(app, completed_at) {
+        Ok(()) => result.last_run_persisted = true,
+        Err(error) => record_post_process_warning(
+            result,
+            "auto_clean_last_run_persist_failed",
+            "config",
+            "Automatic cleanup completed, but its last-run time could not be saved.",
+            error,
+        ),
+    }
+    if let Err(error) = super::notifier::notify_auto_clean(app, config, result) {
+        record_post_process_warning(
+            result,
+            "auto_clean_completion_notification_failed",
+            "notification",
+            "Automatic cleanup completed, but its system notification could not be sent.",
+            error,
+        );
+    }
+    if let Some(scheduler) = app.try_state::<AutoCleanScheduler>() {
+        if let Err(error) = scheduler.reschedule() {
+            record_post_process_warning(
+                result,
+                "auto_clean_reschedule_failed",
+                "reschedule",
+                "Automatic cleanup completed, but its schedule could not be recalculated.",
+                error,
+            );
+        }
+    }
+    let event = completion_event(completed_at, result);
+    if let Err(error) = app.emit(AUTO_CLEAN_FINISHED_EVENT, event) {
+        record_post_process_warning(
+            result,
+            "auto_clean_completion_event_failed",
+            "event",
+            "Automatic cleanup completed, but its completion event could not be delivered.",
+            error,
+        );
+    }
 }
 
 fn run_monitor_worker<R: Runtime>(app: AppHandle<R>, receiver: Receiver<()>) {
@@ -171,9 +211,9 @@ fn run_monitor_once<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
     if config.auto_clean != AutoCleanPolicy::Monitor {
         return Ok(());
     }
-    let result = execute(app, &config, CleanupTrigger::Monitor)?;
+    let mut result = execute(app, &config, CleanupTrigger::Monitor)?;
     if result.total > 0 || result.has_issues() {
-        finish(app, &config, &result)?;
+        finish(app, &config, &mut result);
     }
     Ok(())
 }
@@ -192,9 +232,17 @@ fn run_worker<R: Runtime>(app: AppHandle<R>, receiver: Receiver<SchedulerMessage
                 }
             }
         };
+        let last_run = match config.auto_clean {
+            AutoCleanPolicy::EveryHours { .. } => {
+                effective_scheduled_last_run(&app, config.auto_clean_last_run)
+            }
+            AutoCleanPolicy::Disabled
+            | AutoCleanPolicy::Monitor
+            | AutoCleanPolicy::DailyAt { .. } => config.auto_clean_last_run,
+        };
         let delay = match next_delay(
             &config.auto_clean,
-            config.auto_clean_last_run,
+            last_run,
             last_interval_attempt,
             Utc::now(),
         ) {
@@ -240,8 +288,8 @@ fn run_worker<R: Runtime>(app: AppHandle<R>, receiver: Receiver<SchedulerMessage
 
 fn run_scheduled<R: Runtime>(app: &AppHandle<R>) -> Result<AutoCleanResult> {
     let config = config_snapshot(app)?;
-    let result = execute(app, &config, CleanupTrigger::Scheduled)?;
-    finish(app, &config, &result)?;
+    let mut result = execute(app, &config, CleanupTrigger::Scheduled)?;
+    finish(app, &config, &mut result);
     Ok(result)
 }
 
@@ -275,6 +323,30 @@ fn next_interval_run(
         return now + ChronoDuration::hours(i64::from(hours));
     };
     (anchor + ChronoDuration::hours(i64::from(hours))).max(now)
+}
+
+fn effective_scheduled_last_run<R: Runtime>(
+    app: &AppHandle<R>,
+    config_last_run: Option<DateTime<Utc>>,
+) -> Option<DateTime<Utc>> {
+    let database = app.state::<DbState>();
+    let history_last_run = database
+        .with_connection(|connection| {
+            crate::db::history_runs::latest_terminal_auto_clean_completion(
+                connection,
+                CleanupTrigger::Scheduled,
+            )
+        })
+        .map_err(|error| {
+            let incident_id = report_background_error("scheduler_read_last_run", &error);
+            log::warn!("using configured auto-clean last-run time incident_id={incident_id}");
+        })
+        .ok()
+        .flatten();
+    [config_last_run, history_last_run]
+        .into_iter()
+        .flatten()
+        .max()
 }
 
 fn next_daily_run<Tz: TimeZone>(now: &DateTime<Tz>, hour: u8, minute: u8) -> Result<DateTime<Utc>> {
@@ -327,8 +399,7 @@ fn wait_for_next(receiver: &Receiver<SchedulerMessage>, delay: Option<Duration>)
     }
 }
 
-fn record_completion<R: Runtime>(app: &AppHandle<R>, result: &AutoCleanResult) -> Result<()> {
-    let completed_at = Utc::now();
+fn persist_last_run<R: Runtime>(app: &AppHandle<R>, completed_at: DateTime<Utc>) -> Result<()> {
     {
         let state = app.state::<Mutex<Config>>();
         let mut current = state
@@ -340,7 +411,11 @@ fn record_completion<R: Runtime>(app: &AppHandle<R>, result: &AutoCleanResult) -
         *current = next;
     }
 
-    let event = AutoCleanFinished {
+    Ok(())
+}
+
+fn completion_event(completed_at: DateTime<Utc>, result: &AutoCleanResult) -> AutoCleanFinished {
+    AutoCleanFinished {
         completed_at,
         total: result.total,
         succeeded: result.succeeded,
@@ -348,16 +423,25 @@ fn record_completion<R: Runtime>(app: &AppHandle<R>, result: &AutoCleanResult) -
         warnings: result.warnings,
         section_errors: result.section_errors,
         history_errors: result.history_errors,
-    };
-    if let Err(error) = app.emit(AUTO_CLEAN_FINISHED_EVENT, event) {
-        log::warn!("failed to emit auto-clean completion: {error}");
+        post_process_warnings: result.post_process_warnings.clone(),
+        last_run_persisted: result.last_run_persisted,
     }
-    if let Some(scheduler) = app.try_state::<AutoCleanScheduler>() {
-        if let Err(error) = scheduler.reschedule() {
-            log::warn!("failed to reschedule auto-clean after completion: {error:#}");
-        }
-    }
-    Ok(())
+}
+
+fn record_post_process_warning(
+    result: &mut AutoCleanResult,
+    code: &'static str,
+    step: &'static str,
+    message: &'static str,
+    error: impl std::fmt::Display,
+) {
+    result.post_process_warnings.push(command_warning(
+        "finish_auto_clean",
+        code,
+        step,
+        message,
+        error,
+    ));
 }
 
 fn config_snapshot<R: Runtime>(app: &AppHandle<R>) -> Result<Config> {
@@ -446,5 +530,77 @@ mod tests {
             wait_for_next(&receiver, Some(Duration::from_secs(60))),
             WaitOutcome::Reschedule
         );
+    }
+
+    #[test]
+    fn completion_event_preserves_post_process_state() {
+        let completed_at = Utc.with_ymd_and_hms(2026, 8, 7, 12, 0, 0).unwrap();
+        let result = AutoCleanResult {
+            recent: crate::cleanup::AutoCleanSectionResult {
+                result: None,
+                error: None,
+            },
+            frequent: crate::cleanup::AutoCleanSectionResult {
+                result: None,
+                error: None,
+            },
+            total: 2,
+            succeeded: 2,
+            failed: 0,
+            warnings: 0,
+            skipped_protected: 0,
+            section_errors: 0,
+            history_errors: 0,
+            post_process_warnings: vec![CommandWarning {
+                code: "auto_clean_last_run_persist_failed",
+                step: "config",
+                message: "completion warning".to_string(),
+                incident_id: "incident-1".to_string(),
+            }],
+            last_run_persisted: false,
+        };
+
+        let event = completion_event(completed_at, &result);
+
+        assert_eq!(event.completed_at, completed_at);
+        assert_eq!(event.succeeded, 2);
+        assert!(!event.last_run_persisted);
+        assert_eq!(event.post_process_warnings, result.post_process_warnings);
+    }
+
+    #[test]
+    fn post_process_failure_preserves_main_cleanup_summary() {
+        let mut result = AutoCleanResult {
+            recent: crate::cleanup::AutoCleanSectionResult {
+                result: None,
+                error: None,
+            },
+            frequent: crate::cleanup::AutoCleanSectionResult {
+                result: None,
+                error: None,
+            },
+            total: 3,
+            succeeded: 2,
+            failed: 1,
+            warnings: 0,
+            skipped_protected: 0,
+            section_errors: 0,
+            history_errors: 0,
+            post_process_warnings: Vec::new(),
+            last_run_persisted: false,
+        };
+
+        record_post_process_warning(
+            &mut result,
+            "auto_clean_last_run_persist_failed",
+            "config",
+            "completion warning",
+            "save failed",
+        );
+
+        assert_eq!(result.total, 3);
+        assert_eq!(result.succeeded, 2);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.post_process_warnings.len(), 1);
     }
 }
