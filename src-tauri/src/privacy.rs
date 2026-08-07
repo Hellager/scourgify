@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use thiserror::Error;
 use wincent::prelude::{
-    QuickAccessLock, QuickAccessManager, QuickAccessUnlockOptions, QuickAccessUnlockReport,
+    QuickAccessLock, QuickAccessLockTarget, QuickAccessManager, QuickAccessUnlockOptions,
+    QuickAccessUnlockReport,
 };
 
 pub(crate) const PRIVACY_STATE_CHANGED_EVENT: &str = "privacy-state-changed";
@@ -25,11 +26,24 @@ pub enum PrivacyModeState {
 
 enum PrivacyLockState {
     Inactive,
+    Exiting(PrivacyModeState),
     ActiveFull(QuickAccessLock),
     ActivePartial {
         recent: Option<QuickAccessLock>,
         frequent: Option<QuickAccessLock>,
     },
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct PrivacyExitOutcome {
+    pub(crate) reports: Vec<QuickAccessUnlockReport>,
+    pub(crate) failures: Vec<PrivacyExitFailure>,
+}
+
+#[derive(Debug)]
+pub(crate) struct PrivacyExitFailure {
+    pub(crate) target: &'static str,
+    pub(crate) error: anyhow::Error,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -123,6 +137,7 @@ impl PrivacyManager {
             if !matches!(*state, PrivacyLockState::Inactive) {
                 return Ok(match &*state {
                     PrivacyLockState::Inactive => unreachable!(),
+                    PrivacyLockState::Exiting(state) => lock_result(*state),
                     PrivacyLockState::ActiveFull(_) => LockResult::Full,
                     PrivacyLockState::ActivePartial { .. } => LockResult::Partial,
                 });
@@ -152,7 +167,7 @@ impl PrivacyManager {
         Ok(LockResult::Partial)
     }
 
-    pub fn exit(&self) -> Result<Vec<QuickAccessUnlockReport>> {
+    pub(crate) fn exit(&self) -> Result<PrivacyExitOutcome> {
         let _operation = self
             .operation_gate
             .lock()
@@ -164,30 +179,36 @@ impl PrivacyManager {
                 .mock_state
                 .lock()
                 .expect("mock privacy state mutex poisoned") = PrivacyModeState::Inactive;
-            return Ok(Vec::new());
+            return Ok(PrivacyExitOutcome::default());
         }
 
-        let state = std::mem::replace(
-            &mut *self.state.lock().expect("privacy state mutex poisoned"),
-            PrivacyLockState::Inactive,
-        );
+        let state = {
+            let mut state = self.state.lock().expect("privacy state mutex poisoned");
+            if matches!(*state, PrivacyLockState::Inactive) {
+                return Ok(PrivacyExitOutcome::default());
+            }
+            let visible_state = privacy_state(&state);
+            std::mem::replace(&mut *state, PrivacyLockState::Exiting(visible_state))
+        };
         let options = self.unlock_options();
-        let mut reports = Vec::new();
+        let mut outcome = PrivacyExitOutcome::default();
 
         match state {
             PrivacyLockState::Inactive => {}
-            PrivacyLockState::ActiveFull(lock) => reports.push(lock.unlock(options)?),
+            PrivacyLockState::Exiting(_) => unreachable!("exit owns the operation gate"),
+            PrivacyLockState::ActiveFull(lock) => unlock_lock(&mut outcome, lock, options),
             PrivacyLockState::ActivePartial { recent, frequent } => {
                 if let Some(lock) = recent {
-                    reports.push(lock.unlock(options)?);
+                    unlock_lock(&mut outcome, lock, options);
                 }
                 if let Some(lock) = frequent {
-                    reports.push(lock.unlock(options)?);
+                    unlock_lock(&mut outcome, lock, options);
                 }
             }
         }
 
-        Ok(reports)
+        *self.state.lock().expect("privacy state mutex poisoned") = PrivacyLockState::Inactive;
+        Ok(outcome)
     }
 
     pub fn state(&self) -> PrivacyModeState {
@@ -199,16 +220,7 @@ impl PrivacyManager {
                 .expect("mock privacy state mutex poisoned");
         }
 
-        match &*self.state.lock().expect("privacy state mutex poisoned") {
-            PrivacyLockState::Inactive => PrivacyModeState::Inactive,
-            PrivacyLockState::ActiveFull(_) => PrivacyModeState::ActiveFull,
-            PrivacyLockState::ActivePartial { recent, frequent } => {
-                PrivacyModeState::ActivePartial {
-                    recent: recent.is_some(),
-                    frequent: frequent.is_some(),
-                }
-            }
-        }
+        privacy_state(&self.state.lock().expect("privacy state mutex poisoned"))
     }
 
     fn unlock_options(&self) -> QuickAccessUnlockOptions {
@@ -236,6 +248,58 @@ impl PrivacyManager {
             .lock()
             .expect("mock privacy state mutex poisoned") = PrivacyModeState::Inactive;
         Ok(())
+    }
+}
+
+fn privacy_state(state: &PrivacyLockState) -> PrivacyModeState {
+    match state {
+        PrivacyLockState::Inactive => PrivacyModeState::Inactive,
+        PrivacyLockState::Exiting(state) => *state,
+        PrivacyLockState::ActiveFull(_) => PrivacyModeState::ActiveFull,
+        PrivacyLockState::ActivePartial { recent, frequent } => PrivacyModeState::ActivePartial {
+            recent: recent.is_some(),
+            frequent: frequent.is_some(),
+        },
+    }
+}
+
+fn lock_result(state: PrivacyModeState) -> LockResult {
+    match state {
+        PrivacyModeState::ActivePartial { .. } => LockResult::Partial,
+        PrivacyModeState::Inactive | PrivacyModeState::ActiveFull => LockResult::Full,
+    }
+}
+
+fn unlock_lock(
+    outcome: &mut PrivacyExitOutcome,
+    lock: QuickAccessLock,
+    options: QuickAccessUnlockOptions,
+) {
+    let target = lock_target_name(lock.target());
+    record_unlock_result(
+        outcome,
+        target,
+        lock.unlock(options).map_err(anyhow::Error::from),
+    );
+}
+
+fn record_unlock_result(
+    outcome: &mut PrivacyExitOutcome,
+    target: &'static str,
+    result: Result<QuickAccessUnlockReport>,
+) {
+    match result {
+        Ok(report) => outcome.reports.push(report),
+        Err(error) => outcome.failures.push(PrivacyExitFailure { target, error }),
+    }
+}
+
+fn lock_target_name(target: QuickAccessLockTarget) -> &'static str {
+    match target {
+        QuickAccessLockTarget::RecentFiles => "recent_files",
+        QuickAccessLockTarget::FrequentFolders => "frequent_folders",
+        QuickAccessLockTarget::All => "all",
+        _ => "unknown",
     }
 }
 
@@ -271,7 +335,9 @@ mod tests {
 
         assert_eq!(manager.enter().unwrap(), LockResult::Full);
         assert_eq!(manager.state(), PrivacyModeState::ActiveFull);
-        assert!(manager.exit().unwrap().is_empty());
+        let outcome = manager.exit().unwrap();
+        assert!(outcome.reports.is_empty());
+        assert!(outcome.failures.is_empty());
         assert_eq!(manager.state(), PrivacyModeState::Inactive);
     }
 
@@ -327,5 +393,46 @@ mod tests {
             manager.begin_quick_access_write(),
             Err(PrivacyAccessError::Active)
         ));
+    }
+
+    #[test]
+    fn exiting_state_remains_fail_closed_until_release_completes() {
+        let manager = PrivacyManager::new(true);
+        *manager.state.lock().unwrap() =
+            PrivacyLockState::Exiting(PrivacyModeState::ActivePartial {
+                recent: true,
+                frequent: false,
+            });
+
+        assert_eq!(
+            manager.state(),
+            PrivacyModeState::ActivePartial {
+                recent: true,
+                frequent: false,
+            }
+        );
+        assert!(matches!(
+            manager.begin_quick_access_write(),
+            Err(PrivacyAccessError::Active)
+        ));
+    }
+
+    #[test]
+    fn collects_unlock_report_failures_without_aborting_exit() {
+        let mut outcome = PrivacyExitOutcome::default();
+
+        record_unlock_result(
+            &mut outcome,
+            "recent_files",
+            Err(anyhow!("Recent shortcut snapshot is unavailable")),
+        );
+
+        assert!(outcome.reports.is_empty());
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].target, "recent_files");
+        assert_eq!(
+            outcome.failures[0].error.to_string(),
+            "Recent shortcut snapshot is unavailable"
+        );
     }
 }

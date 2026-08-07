@@ -150,6 +150,24 @@ pub(crate) fn wincent_post_mutation_warning(
     })
 }
 
+pub(crate) fn command_warning(
+    operation: &str,
+    code: &'static str,
+    step: &'static str,
+    message: impl Into<String>,
+    error: impl Display,
+) -> CommandWarning {
+    let incident_id = next_incident_id();
+    let record = format_log_record(operation, code, &incident_id, error);
+    log::warn!("{record}");
+    CommandWarning {
+        code,
+        step,
+        message: message.into(),
+        incident_id,
+    }
+}
+
 fn command_error(
     operation: &str,
     code: ErrorCode,

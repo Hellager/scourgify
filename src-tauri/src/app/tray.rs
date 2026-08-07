@@ -11,7 +11,10 @@ use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use super::{alert, i18n, scheduler::AutoCleanMonitor, settings, theme, window};
 use crate::{
     config::{AppMode, Config},
-    privacy::{LockResult, PrivacyManager, PrivacyModeState, PRIVACY_STATE_CHANGED_EVENT},
+    privacy::{
+        LockResult, PrivacyExitOutcome, PrivacyManager, PrivacyModeState,
+        PRIVACY_STATE_CHANGED_EVENT,
+    },
 };
 
 const OPEN_DASHBOARD_ID: &str = "open-dashboard";
@@ -272,15 +275,8 @@ fn toggle_privacy_mode<R: Runtime>(app: &AppHandle<R>) {
         });
 
     let result = if requested {
-        privacy.exit().map(|reports| {
-            for report in reports {
-                log::debug!(
-                    "privacy unlock report: new={}, deleted={}, failed={}",
-                    report.new_lnk_paths().len(),
-                    report.deleted_lnk_paths().len(),
-                    report.failed_lnk_deletions().len()
-                );
-            }
+        privacy.exit().map(|outcome| {
+            log_privacy_exit_outcome(outcome);
             LockResult::Full
         })
     } else {
@@ -355,7 +351,8 @@ fn refresh_menu<R: Runtime>(app: &AppHandle<R>) {
 fn quit_app<R: Runtime>(app: &AppHandle<R>) {
     if let Some(privacy) = app.try_state::<PrivacyManager>() {
         match privacy.exit() {
-            Ok(_) => {
+            Ok(outcome) => {
+                log_privacy_exit_outcome(outcome);
                 if let Some(config) = app.try_state::<Mutex<Config>>() {
                     if let Err(error) = settings::persist_privacy_mode(app, config.inner(), false) {
                         log::error!("failed to persist privacy mode before quit: {error}");
@@ -367,6 +364,27 @@ fn quit_app<R: Runtime>(app: &AppHandle<R>) {
     }
 
     app.exit(0);
+}
+
+fn log_privacy_exit_outcome(outcome: PrivacyExitOutcome) {
+    for report in outcome.reports {
+        log::debug!(
+            "privacy unlock report: new={}, deleted={}, failed={}",
+            report.new_lnk_paths().len(),
+            report.deleted_lnk_paths().len(),
+            report.failed_lnk_deletions().len()
+        );
+    }
+    for failure in outcome.failures {
+        let incident_id = crate::error::report_background_error(
+            "privacy_exit_report",
+            format!("target={} error={:#}", failure.target, failure.error),
+        );
+        log::warn!(
+            "privacy mode was disabled, but its unlock report failed target={} incident_id={incident_id}",
+            failure.target
+        );
+    }
 }
 
 fn handle_left_click<R: Runtime>(app: &AppHandle<R>) {
