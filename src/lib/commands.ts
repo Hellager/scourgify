@@ -14,6 +14,11 @@ export interface CommandWarningPayload {
   incident_id: string;
 }
 
+export interface CommandOutcome<T> {
+  value: T;
+  warnings: CommandWarningPayload[];
+}
+
 export interface ActionReceipt {
   action: string;
   target: string;

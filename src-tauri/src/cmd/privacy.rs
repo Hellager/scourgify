@@ -43,18 +43,7 @@ pub(crate) fn privacy_enter(
     })?;
     let state = privacy.state();
     emit_privacy_state(&app, state);
-    if backend.mode() == BackendMode::Real {
-        settings::persist_privacy_mode(&app, config.inner(), true).map_err(|error| {
-            CommandError::unexpected(
-                "privacy_enter",
-                ErrorCode::ConfigPersistenceFailed,
-                "Privacy mode was enabled, but the preference could not be saved.",
-                true,
-                error,
-            )
-        })?;
-    }
-    Ok(PrivacyTransition {
+    let mut transition = PrivacyTransition {
         state,
         lock_result: Some(result),
         reports: 0,
@@ -62,7 +51,19 @@ pub(crate) fn privacy_enter(
         deleted_links: 0,
         failed_link_deletions: 0,
         warnings: Vec::new(),
-    })
+    };
+    if backend.mode() == BackendMode::Real {
+        if let Err(error) = settings::persist_privacy_mode(&app, config.inner(), true) {
+            transition.warnings.push(command_warning(
+                "privacy_enter",
+                "privacy_enter_preference_not_saved",
+                "persist_preference",
+                "Privacy mode was enabled, but the preference could not be saved.",
+                error,
+            ));
+        }
+    }
+    Ok(transition)
 }
 
 #[tauri::command]

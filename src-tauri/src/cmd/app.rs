@@ -25,7 +25,7 @@ pub(crate) fn update_config(
     config: State<'_, Mutex<Config>>,
     database: State<'_, DbState>,
     next_config: Config,
-) -> CommandResult<Config> {
+) -> CommandResult<settings::SettingsUpdate<Config>> {
     settings::update(&app, database.inner(), config.inner(), next_config).map_err(|error| {
         CommandError::unexpected(
             "update_config",
@@ -50,7 +50,7 @@ pub(crate) fn set_app_mode(
     app: tauri::AppHandle,
     config: State<'_, Mutex<Config>>,
     mode: AppMode,
-) -> CommandResult<AppMode> {
+) -> CommandResult<settings::SettingsUpdate<AppMode>> {
     settings::set_app_mode(&app, config.inner(), mode).map_err(|error| {
         CommandError::unexpected(
             "set_app_mode",

@@ -33,7 +33,7 @@ import {
 import { configSchema, defaultConfig, type ConfigForm } from "@/lib/config";
 import { useI18n } from "@/lib/i18n";
 import { requestNotificationPermission } from "@/lib/notifications";
-import { invokeCommand } from "@/lib/commands";
+import { type CommandOutcome, invokeCommand } from "@/lib/commands";
 
 const GITHUB_URL = "https://github.com/hellager/scourgify";
 
@@ -295,10 +295,11 @@ export function SettingsPage() {
         show_frequent_folders:
           originalVisibility.current?.frequent ?? values.show_frequent_folders,
       };
-      const saved = await invokeCommand<ConfigForm>("update_config", {
+      const result = await invokeCommand<CommandOutcome<ConfigForm>>("update_config", {
         nextConfig: persistedValues,
       });
-      const parsed = configSchema.parse(saved);
+      result.warnings.forEach((warning) => toast.warning(warning.message));
+      const parsed = configSchema.parse(result.value);
       lastSavedConfig.current = parsed;
       if (JSON.stringify(getValues()) === JSON.stringify(values)) {
         reset(parsed);

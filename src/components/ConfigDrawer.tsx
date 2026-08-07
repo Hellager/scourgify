@@ -19,7 +19,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { configSchema, type ConfigForm } from "@/lib/config";
 import { useI18n } from "@/lib/i18n";
-import { invokeCommand } from "@/lib/commands";
+import { type CommandOutcome, invokeCommand } from "@/lib/commands";
 
 type VisibilityQaType = "recent" | "frequent";
 
@@ -152,11 +152,11 @@ export function ConfigDrawer({
   const save = async () => {
     setSaving(true);
     try {
-      const saved = configSchema.parse(
-        await invokeCommand<ConfigForm>("update_config", {
+      const result = await invokeCommand<CommandOutcome<ConfigForm>>("update_config", {
           nextConfig: draft,
-        }),
-      );
+      });
+      result.warnings.forEach((warning) => toast.warning(warning.message));
+      const saved = configSchema.parse(result.value);
       setDraft(saved);
       onConfigSaved(saved);
       toast.success(t("appearanceSaved"));

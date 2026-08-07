@@ -4,7 +4,11 @@ import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { commandErrorMessage, invokeCommand } from "@/lib/commands";
+import {
+  commandErrorMessage,
+  type CommandOutcome,
+  invokeCommand,
+} from "@/lib/commands";
 import { cn } from "@/lib/utils";
 import darkIcon from "../../src-tauri/icons/dark/incognito-svgrepo-com.svg";
 import lightIcon from "../../src-tauri/icons/light/incognito-svgrepo-com.svg";
@@ -31,9 +35,10 @@ export function TitleBar({
   const titleBarIcon = resolvedTheme === "dark" ? darkIcon : lightIcon;
   const switchMode = async () => {
     try {
-      await invokeCommand("set_app_mode", {
+      const result = await invokeCommand<CommandOutcome<string>>("set_app_mode", {
         mode: dashboard ? "grid" : "dashboard",
       });
+      result.warnings.forEach((warning) => toast.warning(warning.message));
     } catch (error) {
       toast.error(commandErrorMessage(error));
     }

@@ -86,7 +86,7 @@ import {
   REFRESH_DASHBOARD_EVENT,
   REFRESH_HISTORY_EVENT,
 } from "@/lib/app-events";
-import { invokeCommand } from "@/lib/commands";
+import { type CommandOutcome, invokeCommand } from "@/lib/commands";
 import {
   type AutoCleanPolicy,
   configSchema,
@@ -409,10 +409,11 @@ export function Dashboard() {
     setSavingAutoClean(true);
     try {
       const nextConfig: ConfigForm = { ...config, auto_clean: autoClean };
-      const saved = await invokeCommand<ConfigForm>("update_config", {
+      const result = await invokeCommand<CommandOutcome<ConfigForm>>("update_config", {
         nextConfig,
       });
-      setConfig(configSchema.parse(saved));
+      result.warnings.forEach((warning) => toast.warning(warning.message));
+      setConfig(configSchema.parse(result.value));
       setDialog(null);
       toast.success(t("settingsSaved"));
     } catch (error) {
@@ -507,10 +508,11 @@ export function Dashboard() {
     setSmartCleanConfirmOpen(false);
     if (skipSmartCleanConfirm) {
       try {
-        const saved = await invokeCommand<ConfigForm>("update_config", {
+        const result = await invokeCommand<CommandOutcome<ConfigForm>>("update_config", {
           nextConfig: { ...config, smart_clean_confirm: false },
         });
-        setConfig(configSchema.parse(saved));
+        result.warnings.forEach((warning) => toast.warning(warning.message));
+        setConfig(configSchema.parse(result.value));
       } catch (error) {
         toast.error(errorMessage(error));
       }
