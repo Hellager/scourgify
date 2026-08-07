@@ -2,10 +2,13 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 #[cfg(debug_assertions)]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
+use thiserror::Error;
 use wincent::prelude::{
     QuickAccessLock, QuickAccessManager, QuickAccessUnlockOptions, QuickAccessUnlockReport,
 };
+
+pub(crate) const PRIVACY_STATE_CHANGED_EVENT: &str = "privacy-state-changed";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum LockResult {
@@ -29,7 +32,22 @@ enum PrivacyLockState {
     },
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub(crate) enum PrivacyAccessError {
+    #[error("privacy mode is active")]
+    Active,
+    #[error("privacy operation state is unavailable")]
+    StateUnavailable,
+}
+
+#[must_use = "the permit must be held for the complete Quick Access write"]
+#[derive(Debug)]
+pub(crate) struct QuickAccessWritePermit<'a> {
+    _guard: MutexGuard<'a, ()>,
+}
+
 pub struct PrivacyManager {
+    operation_gate: Mutex<()>,
     manager: QuickAccessManager,
     state: Mutex<PrivacyLockState>,
     cleanup_links: bool,
@@ -42,6 +60,7 @@ pub struct PrivacyManager {
 impl PrivacyManager {
     pub fn new(cleanup_links: bool) -> Self {
         Self {
+            operation_gate: Mutex::new(()),
             manager: QuickAccessManager::new(),
             state: Mutex::new(PrivacyLockState::Inactive),
             cleanup_links,
@@ -52,7 +71,44 @@ impl PrivacyManager {
         }
     }
 
+    pub(crate) fn begin_quick_access_write(
+        &self,
+    ) -> Result<QuickAccessWritePermit<'_>, PrivacyAccessError> {
+        let guard = self
+            .operation_gate
+            .lock()
+            .map_err(|_| PrivacyAccessError::StateUnavailable)?;
+
+        #[cfg(debug_assertions)]
+        if self.mock_mode.load(Ordering::Relaxed) {
+            let state = self
+                .mock_state
+                .lock()
+                .map_err(|_| PrivacyAccessError::StateUnavailable)?;
+            if *state != PrivacyModeState::Inactive {
+                return Err(PrivacyAccessError::Active);
+            }
+            return Ok(QuickAccessWritePermit { _guard: guard });
+        }
+
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| PrivacyAccessError::StateUnavailable)?;
+        if !matches!(*state, PrivacyLockState::Inactive) {
+            return Err(PrivacyAccessError::Active);
+        }
+        drop(state);
+
+        Ok(QuickAccessWritePermit { _guard: guard })
+    }
+
     pub fn enter(&self) -> Result<LockResult> {
+        let _operation = self
+            .operation_gate
+            .lock()
+            .map_err(|_| anyhow!("privacy operation gate mutex poisoned"))?;
+
         #[cfg(debug_assertions)]
         if self.mock_mode.load(Ordering::Relaxed) {
             *self
@@ -62,18 +118,21 @@ impl PrivacyManager {
             return Ok(LockResult::Full);
         }
 
-        let mut state = self.state.lock().expect("privacy state mutex poisoned");
-        if !matches!(*state, PrivacyLockState::Inactive) {
-            return Ok(match &*state {
-                PrivacyLockState::Inactive => unreachable!(),
-                PrivacyLockState::ActiveFull(_) => LockResult::Full,
-                PrivacyLockState::ActivePartial { .. } => LockResult::Partial,
-            });
+        {
+            let state = self.state.lock().expect("privacy state mutex poisoned");
+            if !matches!(*state, PrivacyLockState::Inactive) {
+                return Ok(match &*state {
+                    PrivacyLockState::Inactive => unreachable!(),
+                    PrivacyLockState::ActiveFull(_) => LockResult::Full,
+                    PrivacyLockState::ActivePartial { .. } => LockResult::Partial,
+                });
+            }
         }
 
         match self.manager.lock_quick_access() {
             Ok(lock) => {
-                *state = PrivacyLockState::ActiveFull(lock);
+                *self.state.lock().expect("privacy state mutex poisoned") =
+                    PrivacyLockState::ActiveFull(lock);
                 return Ok(LockResult::Full);
             }
             Err(error) => {
@@ -88,11 +147,17 @@ impl PrivacyManager {
             return Err(anyhow!("failed to lock any Quick Access target"));
         }
 
-        *state = PrivacyLockState::ActivePartial { recent, frequent };
+        *self.state.lock().expect("privacy state mutex poisoned") =
+            PrivacyLockState::ActivePartial { recent, frequent };
         Ok(LockResult::Partial)
     }
 
     pub fn exit(&self) -> Result<Vec<QuickAccessUnlockReport>> {
+        let _operation = self
+            .operation_gate
+            .lock()
+            .map_err(|_| anyhow!("privacy operation gate mutex poisoned"))?;
+
         #[cfg(debug_assertions)]
         if self.mock_mode.load(Ordering::Relaxed) {
             *self
@@ -156,6 +221,10 @@ impl PrivacyManager {
 
     #[cfg(debug_assertions)]
     pub(crate) fn set_mock_mode(&self, enabled: bool) -> Result<()> {
+        let _operation = self
+            .operation_gate
+            .lock()
+            .map_err(|_| anyhow!("privacy operation gate mutex poisoned"))?;
         if enabled && !matches!(self.state(), PrivacyModeState::Inactive) {
             return Err(anyhow!(
                 "privacy mode must be inactive before enabling mock mode"
@@ -173,6 +242,11 @@ impl PrivacyManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        sync::{mpsc, Arc},
+        thread,
+        time::Duration,
+    };
 
     #[test]
     fn starts_inactive() {
@@ -199,5 +273,59 @@ mod tests {
         assert_eq!(manager.state(), PrivacyModeState::ActiveFull);
         assert!(manager.exit().unwrap().is_empty());
         assert_eq!(manager.state(), PrivacyModeState::Inactive);
+    }
+
+    #[test]
+    fn active_privacy_rejects_quick_access_writes() {
+        let manager = PrivacyManager::new(true);
+        manager.set_mock_mode(true).unwrap();
+        manager.enter().unwrap();
+
+        assert!(matches!(
+            manager.begin_quick_access_write(),
+            Err(PrivacyAccessError::Active)
+        ));
+    }
+
+    #[test]
+    fn rejected_write_releases_operation_gate() {
+        let manager = PrivacyManager::new(true);
+        manager.set_mock_mode(true).unwrap();
+        manager.enter().unwrap();
+
+        assert!(manager.begin_quick_access_write().is_err());
+        assert!(manager.exit().is_ok());
+    }
+
+    #[test]
+    fn write_permit_blocks_privacy_transition_until_dropped() {
+        let manager = Arc::new(PrivacyManager::new(true));
+        manager.set_mock_mode(true).unwrap();
+        let permit = manager.begin_quick_access_write().unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let worker = Arc::clone(&manager);
+
+        let handle = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let result = worker.enter();
+            finished_tx.send(result).unwrap();
+        });
+
+        started_rx.recv().unwrap();
+        assert!(finished_rx.recv_timeout(Duration::from_millis(50)).is_err());
+        drop(permit);
+        assert_eq!(
+            finished_rx
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap()
+                .unwrap(),
+            LockResult::Full
+        );
+        handle.join().unwrap();
+        assert!(matches!(
+            manager.begin_quick_access_write(),
+            Err(PrivacyAccessError::Active)
+        ));
     }
 }

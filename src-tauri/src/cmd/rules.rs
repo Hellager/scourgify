@@ -1,6 +1,3 @@
-use tauri::{AppHandle, Manager, State};
-
-use super::ensure_quick_access_write_allowed;
 use crate::{
     app::scheduler::AutoCleanMonitor,
     db::{
@@ -12,9 +9,9 @@ use crate::{
         DatabaseStateError, DbState,
     },
     error::{CommandError, CommandResult, ErrorCode},
-    privacy::PrivacyManager,
     rules::{NewRule, Rule},
 };
+use tauri::{AppHandle, Manager, State};
 
 use super::ActionReceipt;
 
@@ -29,10 +26,8 @@ pub(crate) fn get_rules(database: State<'_, DbState>) -> CommandResult<Vec<Rule>
 pub(crate) fn add_rule(
     app: AppHandle,
     database: State<'_, DbState>,
-    privacy: State<'_, PrivacyManager>,
     rule: NewRule,
 ) -> CommandResult<Rule> {
-    ensure_quick_access_write_allowed(privacy.state())?;
     let result = database
         .with_connection(|connection| rules::add(connection, rule))
         .map_err(|error| database_error("add_rule", error))?;
@@ -44,11 +39,9 @@ pub(crate) fn add_rule(
 pub(crate) fn update_rule(
     app: AppHandle,
     database: State<'_, DbState>,
-    privacy: State<'_, PrivacyManager>,
     id: i64,
     rule: NewRule,
 ) -> CommandResult<Rule> {
-    ensure_quick_access_write_allowed(privacy.state())?;
     let result = database
         .with_connection(|connection| rules::update(connection, id, rule))
         .map_err(|error| database_error("update_rule", error))?;
@@ -60,10 +53,8 @@ pub(crate) fn update_rule(
 pub(crate) fn remove_rule(
     app: AppHandle,
     database: State<'_, DbState>,
-    privacy: State<'_, PrivacyManager>,
     id: i64,
 ) -> CommandResult<ActionReceipt> {
-    ensure_quick_access_write_allowed(privacy.state())?;
     database
         .with_connection(|connection| rules::remove(connection, id))
         .map_err(|error| database_error("remove_rule", error))?;
@@ -75,10 +66,8 @@ pub(crate) fn remove_rule(
 pub(crate) fn clear_rules(
     app: AppHandle,
     database: State<'_, DbState>,
-    privacy: State<'_, PrivacyManager>,
     ids: Option<Vec<i64>>,
 ) -> CommandResult<ActionReceipt> {
-    ensure_quick_access_write_allowed(privacy.state())?;
     let affected = database
         .with_connection(|connection| rules::clear(connection, ids.as_deref()))
         .map_err(|error| database_error("clear_rules", error))?;
@@ -94,11 +83,9 @@ pub(crate) fn clear_rules(
 pub(crate) fn toggle_rule(
     app: AppHandle,
     database: State<'_, DbState>,
-    privacy: State<'_, PrivacyManager>,
     id: i64,
     enabled: bool,
 ) -> CommandResult<Rule> {
-    ensure_quick_access_write_allowed(privacy.state())?;
     let result = database
         .with_connection(|connection| rules::toggle(connection, id, enabled))
         .map_err(|error| database_error("toggle_rule", error))?;
@@ -127,11 +114,9 @@ pub(crate) fn preview_rules_import(path: String) -> CommandResult<RuleImportPrev
 pub(crate) fn import_rules(
     app: AppHandle,
     database: State<'_, DbState>,
-    privacy: State<'_, PrivacyManager>,
     path: String,
     indices: Option<Vec<usize>>,
 ) -> CommandResult<RuleImportResult> {
-    ensure_quick_access_write_allowed(privacy.state())?;
     let result = database
         .with_connection(|connection| rules_transfer::import(connection, &path, indices.as_deref()))
         .map_err(|error| database_error("import_rules", error))?;

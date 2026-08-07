@@ -3,6 +3,7 @@ export const REFRESH_DASHBOARD_EVENT = "scourgify:refresh-dashboard";
 export const REFRESH_HISTORY_EVENT = "scourgify:refresh-history";
 export const AUTO_CLEAN_UPDATED_EVENT = "scourgify:auto-clean-updated";
 export const QUICK_ACCESS_CHANGED_EVENT = "quick-access-changed";
+export const PRIVACY_STATE_CHANGED_EVENT = "privacy-state-changed";
 
 export interface AutoCleanFinished {
   completed_at: string;

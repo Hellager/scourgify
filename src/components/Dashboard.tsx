@@ -179,7 +179,7 @@ const HISTORY_PAGE_SIZE = 10;
 
 export function Dashboard() {
   const { language, t } = useI18n();
-  const { config, setConfig } = useAppShell();
+  const { config, privacyActive, setConfig } = useAppShell();
   const location = useLocation();
   const [counts, setCounts] = useState<QaCounts>(emptyCounts);
   const [destlistCounts, setDestlistCounts] = useState<Record<QaType, number | null>>({
@@ -423,7 +423,10 @@ export function Dashboard() {
   };
 
   const runSmartClean = async () => {
-    if (smartCleaning) {
+    if (smartCleaning || privacyActive) {
+      if (privacyActive) {
+        toast.warning(t("privacyWriteDisabled"));
+      }
       return;
     }
     setSmartCleaning(true);
@@ -488,6 +491,10 @@ export function Dashboard() {
   };
 
   const requestSmartClean = () => {
+    if (privacyActive) {
+      toast.warning(t("privacyWriteDisabled"));
+      return;
+    }
     if (config.smart_clean_confirm) {
       setSkipSmartCleanConfirm(false);
       setSmartCleanConfirmOpen(true);
@@ -619,11 +626,11 @@ export function Dashboard() {
       <Button
         aria-label={t("smartClean")}
         className="fixed bottom-6 right-6 z-20 size-12 rounded-full shadow-lg"
-        disabled={smartCleaning}
+        disabled={smartCleaning || privacyActive}
         onClick={requestSmartClean}
         ref={smartCleanTriggerRef}
         size="icon-lg"
-        title={t("smartClean")}
+        title={privacyActive ? t("privacyWriteDisabled") : t("smartClean")}
         type="button"
       >
         {smartCleaning ? (
@@ -663,6 +670,7 @@ export function Dashboard() {
           <AlertDialogFooter>
             <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
+              disabled={smartCleaning || privacyActive}
               onClick={() => void confirmSmartClean()}
               type="button"
             >

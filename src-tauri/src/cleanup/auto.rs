@@ -12,7 +12,7 @@ use crate::{
         history_runs::{self, CleanupAction, CleanupTrigger, NewCleanupRun, RunCompletion},
         DbState,
     },
-    privacy::{PrivacyManager, PrivacyModeState},
+    privacy::{PrivacyAccessError, PrivacyManager},
     quick_access::QaBatchResult,
 };
 
@@ -115,8 +115,11 @@ pub(crate) fn run(
     state: &AutoCleanState,
     trigger: CleanupTrigger,
 ) -> Result<AutoCleanResult> {
-    ensure_allowed(database.status().available, privacy.state())?;
     let _running = state.begin()?;
+    ensure_database_available(database.status().available)?;
+    let _write_permit = privacy
+        .begin_quick_access_write()
+        .map_err(auto_clean_privacy_error)?;
     let run_id = database.with_connection(|connection| {
         history_runs::begin(
             connection,
@@ -191,17 +194,18 @@ fn completion_from_result(result: &AutoCleanResult) -> RunCompletion {
     }
 }
 
-fn ensure_allowed(
-    database_available: bool,
-    privacy_state: PrivacyModeState,
-) -> Result<(), AutoCleanError> {
+fn ensure_database_available(database_available: bool) -> Result<(), AutoCleanError> {
     if !database_available {
         return Err(AutoCleanError::DatabaseUnavailable);
     }
-    if privacy_state != PrivacyModeState::Inactive {
-        return Err(AutoCleanError::PrivacyModeActive);
-    }
     Ok(())
+}
+
+fn auto_clean_privacy_error(error: PrivacyAccessError) -> AutoCleanError {
+    match error {
+        PrivacyAccessError::Active => AutoCleanError::PrivacyModeActive,
+        PrivacyAccessError::StateUnavailable => AutoCleanError::StateUnavailable,
+    }
 }
 
 fn run_sections(
@@ -276,14 +280,22 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unavailable_database_and_active_privacy() {
+    fn rejects_unavailable_database() {
         assert_eq!(
-            ensure_allowed(false, PrivacyModeState::Inactive),
+            ensure_database_available(false),
             Err(AutoCleanError::DatabaseUnavailable)
         );
+    }
+
+    #[test]
+    fn maps_privacy_write_permit_errors() {
         assert_eq!(
-            ensure_allowed(true, PrivacyModeState::ActiveFull),
-            Err(AutoCleanError::PrivacyModeActive)
+            auto_clean_privacy_error(PrivacyAccessError::Active),
+            AutoCleanError::PrivacyModeActive
+        );
+        assert_eq!(
+            auto_clean_privacy_error(PrivacyAccessError::StateUnavailable),
+            AutoCleanError::StateUnavailable
         );
     }
 

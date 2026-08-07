@@ -3,6 +3,7 @@ import {
   type Dispatch,
   type ReactNode,
   type SetStateAction,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -41,6 +42,7 @@ import {
   AUTO_CLEAN_UPDATED_EVENT,
   dispatchAppEvent,
   OPEN_CONFIG_DRAWER_EVENT,
+  PRIVACY_STATE_CHANGED_EVENT,
   REFRESH_DASHBOARD_EVENT,
   REFRESH_HISTORY_EVENT,
 } from "@/lib/app-events";
@@ -50,6 +52,8 @@ import { invokeCommand } from "@/lib/commands";
 
 interface AppShellContextValue {
   config: ConfigForm;
+  privacyActive: boolean;
+  refreshPrivacyState: () => Promise<void>;
   setConfig: Dispatch<SetStateAction<ConfigForm>>;
 }
 
@@ -68,9 +72,18 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
   const location = useLocation();
   const [config, setConfig] = useState<ConfigForm>(defaultConfig);
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
-  const [privacyActive, setPrivacyActive] = useState(false);
+  const [privacyActive, setPrivacyActive] = useState(true);
   const onDashboard = location.pathname === "/";
   const onRules = location.pathname === "/rules";
+  const refreshPrivacyState = useCallback(async () => {
+    try {
+      const state = await invokeCommand<PrivacyState>("privacy_state");
+      setPrivacyActive(state !== "Inactive");
+    } catch {
+      // Fail closed in the UI when the write-barrier state is unavailable.
+      setPrivacyActive(true);
+    }
+  }, []);
 
   useEffect(() => {
     invokeCommand<ConfigForm>("get_config")
@@ -83,6 +96,16 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
   useEffect(() => {
     setTheme(config.theme);
   }, [config.theme, setTheme]);
+
+  useEffect(() => {
+    void refreshPrivacyState();
+  }, [location.pathname, refreshPrivacyState]);
+
+  useEffect(() => {
+    const refreshOnFocus = () => void refreshPrivacyState();
+    window.addEventListener("focus", refreshOnFocus);
+    return () => window.removeEventListener("focus", refreshOnFocus);
+  }, [refreshPrivacyState]);
 
   useEffect(() => {
     const unlisten = listen<AutoCleanFinished>(
@@ -104,19 +127,30 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const unlisten = listen<PrivacyState>(
+      PRIVACY_STATE_CHANGED_EVENT,
+      ({ payload }) => setPrivacyActive(payload !== "Inactive"),
+    );
+    return () => {
+      unlisten.then((cleanup) => cleanup());
+    };
+  }, []);
+
+  useEffect(() => {
     const openConfigDrawer = () => {
       setConfigDrawerOpen(true);
-      void invokeCommand<PrivacyState>("privacy_state")
-        .then((state) => setPrivacyActive(state !== "Inactive"))
-        .catch(() => setPrivacyActive(false));
+      void refreshPrivacyState();
     };
 
     window.addEventListener(OPEN_CONFIG_DRAWER_EVENT, openConfigDrawer);
     return () =>
       window.removeEventListener(OPEN_CONFIG_DRAWER_EVENT, openConfigDrawer);
-  }, []);
+  }, [refreshPrivacyState]);
 
-  const context = useMemo(() => ({ config, setConfig }), [config]);
+  const context = useMemo(
+    () => ({ config, privacyActive, refreshPrivacyState, setConfig }),
+    [config, privacyActive, refreshPrivacyState],
+  );
   const navigation = [
     { icon: Gauge, label: t("dataCenter"), path: "/" },
     { icon: ShieldCheck, label: t("rules"), path: "/rules" },

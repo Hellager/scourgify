@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use tauri::{AppHandle, State};
 
-use super::{ensure_quick_access_write_allowed, history_retention};
+use super::{begin_quick_access_write, history_retention};
 use crate::{
     app::scheduler,
     backend::QuickAccessBackendState,
@@ -44,7 +44,7 @@ pub(crate) fn remove_qa_items(
     qa_type: String,
     paths: Vec<String>,
 ) -> CommandResult<QaBatchResult> {
-    ensure_quick_access_write_allowed(privacy.state())?;
+    let _write_permit = begin_quick_access_write(privacy.inner())?;
     let result = cleanup::remove_selected(
         database.inner(),
         backend.inner(),
@@ -67,7 +67,7 @@ pub(crate) fn empty_qa_items(
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
 ) -> CommandResult<QaBatchResult> {
-    ensure_quick_access_write_allowed(privacy.state())?;
+    let _write_permit = begin_quick_access_write(privacy.inner())?;
     let result = cleanup::empty_current(
         database.inner(),
         backend.inner(),
@@ -89,7 +89,7 @@ pub(crate) fn smart_clean(
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
 ) -> CommandResult<QaBatchResult> {
-    ensure_quick_access_write_allowed(privacy.state())?;
+    let _write_permit = begin_quick_access_write(privacy.inner())?;
     let result = cleanup::smart_clean(
         database.inner(),
         backend.inner(),

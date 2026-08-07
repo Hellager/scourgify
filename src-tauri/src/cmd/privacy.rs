@@ -1,14 +1,14 @@
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::{
     app::{scheduler::AutoCleanMonitor, settings},
     backend::{BackendMode, QuickAccessBackendState},
     config::Config,
     error::{CommandError, CommandResult, ErrorCode},
-    privacy::{LockResult, PrivacyManager, PrivacyModeState},
+    privacy::{LockResult, PrivacyManager, PrivacyModeState, PRIVACY_STATE_CHANGED_EVENT},
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -37,6 +37,8 @@ pub(crate) fn privacy_enter(
             error,
         )
     })?;
+    let state = privacy.state();
+    emit_privacy_state(&app, state);
     if backend.mode() == BackendMode::Real {
         settings::persist_privacy_mode(&app, config.inner(), true).map_err(|error| {
             CommandError::unexpected(
@@ -49,7 +51,7 @@ pub(crate) fn privacy_enter(
         })?;
     }
     Ok(PrivacyTransition {
-        state: privacy.state(),
+        state,
         lock_result: Some(result),
         reports: 0,
         new_links: 0,
@@ -74,8 +76,10 @@ pub(crate) fn privacy_exit(
             error,
         )
     })?;
+    let state = privacy.state();
+    emit_privacy_state(&app, state);
     let mut transition = PrivacyTransition {
-        state: privacy.state(),
+        state,
         lock_result: None,
         reports: reports.len(),
         new_links: 0,
@@ -115,4 +119,10 @@ pub(crate) fn privacy_exit(
 #[tauri::command]
 pub(crate) fn privacy_state(privacy: State<'_, PrivacyManager>) -> CommandResult<PrivacyModeState> {
     Ok(privacy.state())
+}
+
+fn emit_privacy_state(app: &tauri::AppHandle, state: PrivacyModeState) {
+    if let Err(error) = app.emit(PRIVACY_STATE_CHANGED_EVENT, state) {
+        log::warn!("failed to emit privacy state change: {error}");
+    }
 }

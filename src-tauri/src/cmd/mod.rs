@@ -18,7 +18,7 @@ use tauri::State;
 use crate::{
     config::Config,
     error::{CommandError, CommandGuardError, CommandResult, ErrorCode},
-    privacy::PrivacyModeState,
+    privacy::{PrivacyAccessError, PrivacyManager, QuickAccessWritePermit},
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -156,18 +156,23 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
     ]
 }
 
-fn ensure_quick_access_write_allowed(state: PrivacyModeState) -> CommandResult<()> {
-    if matches!(state, PrivacyModeState::Inactive) {
-        Ok(())
-    } else {
-        let error = CommandGuardError::PrivacyWriteBlocked;
-        Err(CommandError::expected(
+fn begin_quick_access_write(privacy: &PrivacyManager) -> CommandResult<QuickAccessWritePermit<'_>> {
+    match privacy.begin_quick_access_write() {
+        Ok(permit) => Ok(permit),
+        Err(PrivacyAccessError::Active) => Err(CommandError::expected(
             "quick_access_write_guard",
             ErrorCode::PrivacyWriteBlocked,
             "The operation is unavailable while privacy mode is active.",
             true,
-            error,
-        ))
+            CommandGuardError::PrivacyWriteBlocked,
+        )),
+        Err(PrivacyAccessError::StateUnavailable) => Err(CommandError::unexpected(
+            "quick_access_write_guard",
+            ErrorCode::InternalUnexpected,
+            "Application state is temporarily unavailable.",
+            true,
+            PrivacyAccessError::StateUnavailable,
+        )),
     }
 }
 
@@ -194,12 +199,15 @@ mod tests {
 
     #[test]
     fn allows_writes_when_privacy_is_inactive() {
-        assert!(ensure_quick_access_write_allowed(PrivacyModeState::Inactive).is_ok());
+        assert!(begin_quick_access_write(&PrivacyManager::new(true)).is_ok());
     }
 
     #[test]
     fn rejects_writes_when_privacy_is_active() {
-        let error = ensure_quick_access_write_allowed(PrivacyModeState::ActiveFull).unwrap_err();
+        let manager = PrivacyManager::new(true);
+        manager.set_mock_mode(true).unwrap();
+        manager.enter().unwrap();
+        let error = begin_quick_access_write(&manager).unwrap_err();
 
         assert_eq!(error.code, ErrorCode::PrivacyWriteBlocked);
         assert!(error.retryable);

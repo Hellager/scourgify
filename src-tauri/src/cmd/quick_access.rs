@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Mutex};
 
 use tauri::{AppHandle, State};
 
-use super::ensure_quick_access_write_allowed;
+use super::begin_quick_access_write;
 use crate::{
     backend::{BackendMode, PathKind, QuickAccessBackendState},
     config::Config,
@@ -78,7 +78,7 @@ pub(crate) fn add_qa_item(
     qa_type: String,
     path: String,
 ) -> CommandResult<QaMutationResult> {
-    ensure_quick_access_write_allowed(privacy.state())?;
+    let _write_permit = begin_quick_access_write(privacy.inner())?;
     let mut warnings = Vec::new();
     if let Err(error) = backend
         .backend()
@@ -110,7 +110,7 @@ pub(crate) fn restore_qa_defaults(
     privacy: State<'_, PrivacyManager>,
     qa_type: String,
 ) -> CommandResult<QaRestoreResult> {
-    ensure_quick_access_write_allowed(privacy.state())?;
+    let _write_permit = begin_quick_access_write(privacy.inner())?;
     let result = backend
         .backend()
         .and_then(|backend| backend.restore_defaults(&qa_type))
@@ -138,7 +138,7 @@ pub(crate) fn set_qa_visibility(
     qa_type: String,
     visible: bool,
 ) -> CommandResult<QaVisibility> {
-    ensure_quick_access_write_allowed(privacy.state())?;
+    let _write_permit = begin_quick_access_write(privacy.inner())?;
     let result = backend
         .backend()
         .and_then(|backend| backend.set_visibility(&qa_type, visible))

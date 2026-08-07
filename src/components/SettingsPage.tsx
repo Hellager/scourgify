@@ -55,18 +55,12 @@ interface QaVisibility {
   start_recommended: boolean;
 }
 
-type PrivacyState =
-  | "Inactive"
-  | "ActiveFull"
-  | { ActivePartial: { recent: boolean; frequent: boolean } };
-
 type ClearTarget = "logs" | "history";
 
 export function SettingsPage() {
   const { t } = useI18n();
-  const { setConfig: setShellConfig } = useAppShell();
+  const { privacyActive, setConfig: setShellConfig } = useAppShell();
   const [loading, setLoading] = useState(true);
-  const [privacyActive, setPrivacyActive] = useState(false);
   const [clearTarget, setClearTarget] = useState<ClearTarget | null>(null);
   const [clearing, setClearing] = useState(false);
   const [startRecommendedVisible, setStartRecommendedVisible] = useState(true);
@@ -98,12 +92,10 @@ export function SettingsPage() {
     Promise.all([
       invokeCommand<ConfigForm>("get_config"),
       invokeCommand<QaVisibility>("get_qa_visibility"),
-      invokeCommand<PrivacyState>("privacy_state"),
     ])
-      .then(([config, visibility, privacyState]) => {
+      .then(([config, visibility]) => {
         if (active) {
           originalVisibility.current = visibility;
-          setPrivacyActive(privacyState !== "Inactive");
           setStartRecommendedVisible(visibility.start_recommended);
           const parsed = configSchema.parse({
             ...config,

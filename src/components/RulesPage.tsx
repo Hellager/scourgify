@@ -128,11 +128,6 @@ interface PendingRuleImport {
 
 type ClearTarget = "all" | "selected";
 
-type PrivacyState =
-  | "Inactive"
-  | "ActiveFull"
-  | { ActivePartial: { recent: boolean; frequent: boolean } };
-
 const emptyRule: RuleForm = {
   keyword: "",
   rule_type: "whitelist",
@@ -146,7 +141,6 @@ export function RulesPage() {
   const { t } = useI18n();
   const [rules, setRules] = useState<Rule[]>([]);
   const [database, setDatabase] = useState<DatabaseStatus | null>(null);
-  const [privacyActive, setPrivacyActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -187,12 +181,9 @@ export function RulesPage() {
     setLoading(true);
     setError(null);
     try {
-      const [databaseStatus, privacyState] = await Promise.all([
-        invokeCommand<DatabaseStatus>("get_database_status"),
-        invokeCommand<PrivacyState>("privacy_state"),
-      ]);
+      const databaseStatus =
+        await invokeCommand<DatabaseStatus>("get_database_status");
       setDatabase(databaseStatus);
-      setPrivacyActive(privacyState !== "Inactive");
       setRules(
         databaseStatus.available ? await invokeCommand<Rule[]>("get_rules") : [],
       );
@@ -209,8 +200,7 @@ export function RulesPage() {
     void loadRules();
   }, [loadRules]);
 
-  const writesDisabled =
-    loading || database?.available !== true || privacyActive;
+  const writesDisabled = loading || database?.available !== true;
   const importDisabled = writesDisabled || transferring !== null;
   const exportDisabled =
     loading ||
@@ -805,15 +795,6 @@ export function RulesPage() {
             onStatusChange={setDatabase}
             status={database}
           />
-        ) : null}
-
-        {privacyActive ? (
-          <section className="border-l-2 border-border px-4 py-2">
-            <h2 className="text-sm font-semibold">{t("privacyActive")}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("privacyWriteDisabled")}
-            </p>
-          </section>
         ) : null}
 
         {error ? (

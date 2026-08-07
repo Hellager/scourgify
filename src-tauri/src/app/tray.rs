@@ -4,14 +4,14 @@ use anyhow::Result;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, Runtime,
+    AppHandle, Emitter, Manager, Runtime,
 };
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
 use super::{alert, i18n, scheduler::AutoCleanMonitor, settings, theme, window};
 use crate::{
     config::{AppMode, Config},
-    privacy::{LockResult, PrivacyManager, PrivacyModeState},
+    privacy::{LockResult, PrivacyManager, PrivacyModeState, PRIVACY_STATE_CHANGED_EVENT},
 };
 
 const OPEN_DASHBOARD_ID: &str = "open-dashboard";
@@ -299,6 +299,9 @@ fn toggle_privacy_mode<R: Runtime>(app: &AppHandle<R>) {
     match result {
         Ok(_) => {
             let enabled = !requested;
+            if let Err(error) = app.emit(PRIVACY_STATE_CHANGED_EVENT, privacy.state()) {
+                log::warn!("failed to emit privacy state change: {error}");
+            }
             if let Err(error) = settings::persist_privacy_mode(app, config.inner(), enabled) {
                 log::error!("failed to persist privacy mode: {error}");
             }
