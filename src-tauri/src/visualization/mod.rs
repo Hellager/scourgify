@@ -98,6 +98,16 @@ struct CleanupRow {
     cleaned_at: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct AccessAggregationContext<'a> {
+    recent_file: bool,
+    source_factor: f64,
+    scope: RuleScope,
+    rules: Option<&'a [Rule]>,
+    include_blacklist_terms: bool,
+    now: DateTime<Utc>,
+}
+
 pub(crate) fn build_word_cloud(
     source: WordCloudSource,
     range: WordCloudRange,
@@ -160,12 +170,14 @@ fn build_access_word_cloud(
                 corpus_items += items.len() as u64;
                 aggregate_access_items(
                     &items,
-                    recent_file,
-                    source_factor,
-                    scope,
-                    rules.as_deref(),
-                    config.word_cloud_show_blacklist_terms,
-                    now,
+                    AccessAggregationContext {
+                        recent_file,
+                        source_factor,
+                        scope,
+                        rules: rules.as_deref(),
+                        include_blacklist_terms: config.word_cloud_show_blacklist_terms,
+                        now,
+                    },
                     &mut accumulator,
                 );
             }
@@ -268,17 +280,13 @@ fn load_rules(database: &DbState, warnings: &mut Vec<WordCloudWarning>) -> Optio
 
 fn aggregate_access_items(
     items: &[QaItemMetadata],
-    recent_file: bool,
-    source_factor: f64,
-    scope: RuleScope,
-    rules: Option<&[Rule]>,
-    include_blacklist_terms: bool,
-    now: DateTime<Utc>,
+    context: AccessAggregationContext<'_>,
     accumulator: &mut TermAccumulator,
 ) {
     for item in items {
-        let blacklist_tokens = rules
-            .and_then(|rules| match classify(&item.path, scope, rules) {
+        let blacklist_tokens = context
+            .rules
+            .and_then(|rules| match classify(&item.path, context.scope, rules) {
                 MatchResult::Targeted { keyword, .. } => Some(
                     tokenize_text(&keyword)
                         .into_iter()
@@ -288,8 +296,8 @@ fn aggregate_access_items(
                 _ => None,
             })
             .unwrap_or_default();
-        let contribution = access_contribution(item, source_factor, now);
-        let mut tokens = tokenize_path(&item.path, recent_file);
+        let contribution = access_contribution(item, context.source_factor, context.now);
+        let mut tokens = tokenize_path(&item.path, context.recent_file);
         if tokens.is_empty() {
             tokens = tokenize_name(&item.name);
         }
@@ -301,20 +309,20 @@ fn aggregate_access_items(
 
         for token in &tokens {
             let blacklist_hit = blacklist_tokens.contains(&token.key);
-            if blacklist_hit && !include_blacklist_terms {
+            if blacklist_hit && !context.include_blacklist_terms {
                 continue;
             }
             accumulator.add_access(
                 token,
                 contribution,
-                recent_file,
+                context.recent_file,
                 item.access_count as u64,
                 item.pinned,
                 blacklist_hit,
             );
         }
 
-        if include_blacklist_terms {
+        if context.include_blacklist_terms {
             for key in blacklist_tokens {
                 if token_keys.contains(key.as_str()) {
                     continue;
@@ -325,7 +333,7 @@ fn aggregate_access_items(
                         display: key,
                     },
                     contribution,
-                    recent_file,
+                    context.recent_file,
                     item.access_count as u64,
                     item.pinned,
                     true,
@@ -585,6 +593,24 @@ mod tests {
             .with_timezone(&Utc)
     }
 
+    fn access_context<'a>(
+        recent_file: bool,
+        source_factor: f64,
+        scope: RuleScope,
+        rules: Option<&'a [Rule]>,
+        include_blacklist_terms: bool,
+        now: DateTime<Utc>,
+    ) -> AccessAggregationContext<'a> {
+        AccessAggregationContext {
+            recent_file,
+            source_factor,
+            scope,
+            rules,
+            include_blacklist_terms,
+            now,
+        }
+    }
+
     #[test]
     fn access_aggregation_weights_recent_and_frequent_items() {
         let now = fixed_now();
@@ -592,22 +618,12 @@ mod tests {
         let mut accumulator = TermAccumulator::default();
         aggregate_access_items(
             &[metadata(r"C:\Projects\Alpha.txt", 10, timestamp)],
-            true,
-            1.0,
-            RuleScope::Files,
-            Some(&[]),
-            false,
-            now,
+            access_context(true, 1.0, RuleScope::Files, Some(&[]), false, now),
             &mut accumulator,
         );
         aggregate_access_items(
             &[metadata(r"C:\Projects\Alpha", 10, timestamp)],
-            false,
-            1.15,
-            RuleScope::Folders,
-            Some(&[]),
-            false,
-            now,
+            access_context(false, 1.15, RuleScope::Folders, Some(&[]), false, now),
             &mut accumulator,
         );
 
@@ -638,13 +654,8 @@ mod tests {
 
         let mut hidden = TermAccumulator::default();
         aggregate_access_items(
-            &[item.clone()],
-            true,
-            1.0,
-            RuleScope::Files,
-            Some(&rules),
-            false,
-            now,
+            std::slice::from_ref(&item),
+            access_context(true, 1.0, RuleScope::Files, Some(&rules), false, now),
             &mut hidden,
         );
         let hidden = hidden.finish();
@@ -654,12 +665,7 @@ mod tests {
         let mut shown = TermAccumulator::default();
         aggregate_access_items(
             &[item],
-            true,
-            1.0,
-            RuleScope::Files,
-            Some(&rules),
-            true,
-            now,
+            access_context(true, 1.0, RuleScope::Files, Some(&rules), true, now),
             &mut shown,
         );
         let archive = shown
@@ -761,12 +767,7 @@ mod tests {
 
         aggregate_access_items(
             &[item],
-            true,
-            1.0,
-            RuleScope::Files,
-            Some(&[]),
-            false,
-            now,
+            access_context(true, 1.0, RuleScope::Files, Some(&[]), false, now),
             &mut accumulator,
         );
 
@@ -790,12 +791,7 @@ mod tests {
 
         aggregate_access_items(
             &[item],
-            true,
-            1.0,
-            RuleScope::Files,
-            Some(&[]),
-            false,
-            now,
+            access_context(true, 1.0, RuleScope::Files, Some(&[]), false, now),
             &mut accumulator,
         );
 
@@ -899,12 +895,7 @@ mod tests {
 
         aggregate_access_items(
             &[item],
-            true,
-            1.0,
-            RuleScope::Files,
-            Some(&rules),
-            true,
-            now,
+            access_context(true, 1.0, RuleScope::Files, Some(&rules), true, now),
             &mut accumulator,
         );
 
@@ -933,12 +924,7 @@ mod tests {
 
         aggregate_access_items(
             &[item],
-            true,
-            1.0,
-            RuleScope::Files,
-            Some(&rules),
-            true,
-            now,
+            access_context(true, 1.0, RuleScope::Files, Some(&rules), true, now),
             &mut accumulator,
         );
 

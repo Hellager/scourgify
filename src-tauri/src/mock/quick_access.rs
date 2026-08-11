@@ -430,7 +430,7 @@ fn random_folder(index: usize) -> QaItem {
     );
     item(
         &format!(r"C:\{name}"),
-        Some(index % 3 == 0),
+        Some(index.is_multiple_of(3)),
         u64::try_from(index).unwrap_or_default() * 72,
     )
 }
