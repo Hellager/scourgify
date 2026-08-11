@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 - 2026-08-11
 
 - Documented the Rust crate entry point, Windows platform requirements, side
   effects, blocking behavior, and fatal initialization failures, with missing
