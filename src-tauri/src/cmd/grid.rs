@@ -1,5 +1,5 @@
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager};
 
 use crate::{
     backend::QuickAccessBackendState,
@@ -9,6 +9,8 @@ use crate::{
     quick_access::{QaItem, QuickAccessCache},
     rules::{RuleScope, RuleType},
 };
+
+use super::run_blocking;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct GridSummary {
@@ -27,54 +29,59 @@ pub(crate) struct GridSummary {
 }
 
 #[tauri::command]
-pub(crate) fn get_grid_summary(
-    app: AppHandle,
-    cache: State<'_, QuickAccessCache>,
-    backend: State<'_, QuickAccessBackendState>,
-    database: State<'_, DbState>,
-) -> CommandResult<GridSummary> {
-    let recent = load_items(&app, &cache, &backend, "recent")?;
-    let frequent = load_items(&app, &cache, &backend, "frequent")?;
-    let mut summary = empty_database_summary(&recent, &frequent);
+pub(crate) async fn get_grid_summary(app: AppHandle) -> CommandResult<GridSummary> {
+    run_blocking("get_grid_summary", move || {
+        let cache = app.state::<QuickAccessCache>();
+        let backend = app.state::<QuickAccessBackendState>();
+        let database = app.state::<DbState>();
+        let recent = load_items(&app, &cache, &backend, "recent")?;
+        let frequent = load_items(&app, &cache, &backend, "frequent")?;
+        let mut summary = empty_database_summary(&recent, &frequent);
 
-    let database_values = database
-        .with_connection(|connection| Ok((rules::list(connection)?, history::totals(connection)?)));
-    let (rules, stats) = match database_values {
-        Ok(values) => values,
-        Err(error) if error.downcast_ref::<DatabaseStateError>().is_some() => return Ok(summary),
-        Err(error) => {
-            return Err(CommandError::unexpected(
-                "get_grid_summary",
-                ErrorCode::InternalUnexpected,
-                "The grid summary could not be loaded.",
-                true,
-                error,
-            ));
-        }
-    };
+        let database_values = database.with_connection(|connection| {
+            Ok((rules::list(connection)?, history::totals(connection)?))
+        });
+        let (rules, stats) = match database_values {
+            Ok(values) => values,
+            Err(error) if error.downcast_ref::<DatabaseStateError>().is_some() => {
+                return Ok(summary)
+            }
+            Err(error) => {
+                return Err(CommandError::unexpected(
+                    "get_grid_summary",
+                    ErrorCode::InternalUnexpected,
+                    "The grid summary could not be loaded.",
+                    true,
+                    error,
+                ));
+            }
+        };
 
-    let recent_matches = cleanup::count_classifications(&recent, RuleScope::Files, &rules);
-    let frequent_matches = cleanup::count_classifications(&frequent, RuleScope::Folders, &rules);
-    summary.blacklist_rules = Some(
-        rules
-            .iter()
-            .filter(|rule| rule.enabled && rule.rule_type == RuleType::Blacklist)
-            .count(),
-    );
-    summary.whitelist_rules = Some(
-        rules
-            .iter()
-            .filter(|rule| rule.enabled && rule.rule_type == RuleType::Whitelist)
-            .count(),
-    );
-    summary.to_clean_recent = Some(recent_matches.targeted);
-    summary.to_clean_frequent = Some(frequent_matches.targeted);
-    summary.to_clean = Some(recent_matches.targeted + frequent_matches.targeted);
-    summary.protected_items = Some(recent_matches.protected + frequent_matches.protected);
-    summary.cleaned_files = Some(stats.recent_files);
-    summary.cleaned_total = Some(stats.total);
-    summary.cleaned_folders = Some(stats.frequent_folders);
-    Ok(summary)
+        let recent_matches = cleanup::count_classifications(&recent, RuleScope::Files, &rules);
+        let frequent_matches =
+            cleanup::count_classifications(&frequent, RuleScope::Folders, &rules);
+        summary.blacklist_rules = Some(
+            rules
+                .iter()
+                .filter(|rule| rule.enabled && rule.rule_type == RuleType::Blacklist)
+                .count(),
+        );
+        summary.whitelist_rules = Some(
+            rules
+                .iter()
+                .filter(|rule| rule.enabled && rule.rule_type == RuleType::Whitelist)
+                .count(),
+        );
+        summary.to_clean_recent = Some(recent_matches.targeted);
+        summary.to_clean_frequent = Some(frequent_matches.targeted);
+        summary.to_clean = Some(recent_matches.targeted + frequent_matches.targeted);
+        summary.protected_items = Some(recent_matches.protected + frequent_matches.protected);
+        summary.cleaned_files = Some(stats.recent_files);
+        summary.cleaned_total = Some(stats.total);
+        summary.cleaned_folders = Some(stats.frequent_folders);
+        Ok(summary)
+    })
+    .await
 }
 
 fn load_items(

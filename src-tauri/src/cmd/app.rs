@@ -9,7 +9,7 @@ use crate::{
     error::{CommandError, CommandResult, ErrorCode},
 };
 
-use super::{state_error, ActionReceipt};
+use super::{run_blocking, state_error, ActionReceipt};
 
 #[tauri::command]
 pub(crate) fn get_config(config: State<'_, Mutex<Config>>) -> CommandResult<Config> {
@@ -20,21 +20,24 @@ pub(crate) fn get_config(config: State<'_, Mutex<Config>>) -> CommandResult<Conf
 }
 
 #[tauri::command]
-pub(crate) fn update_config(
+pub(crate) async fn update_config(
     app: tauri::AppHandle,
-    config: State<'_, Mutex<Config>>,
-    database: State<'_, DbState>,
     next_config: Config,
 ) -> CommandResult<settings::SettingsUpdate<Config>> {
-    settings::update(&app, database.inner(), config.inner(), next_config).map_err(|error| {
-        CommandError::unexpected(
-            "update_config",
-            ErrorCode::ConfigPersistenceFailed,
-            "The application settings could not be saved.",
-            true,
-            error,
-        )
+    run_blocking("update_config", move || {
+        let config = app.state::<Mutex<Config>>();
+        let database = app.state::<DbState>();
+        settings::update(&app, database.inner(), config.inner(), next_config).map_err(|error| {
+            CommandError::unexpected(
+                "update_config",
+                ErrorCode::ConfigPersistenceFailed,
+                "The application settings could not be saved.",
+                true,
+                error,
+            )
+        })
     })
+    .await
 }
 
 #[tauri::command]
@@ -46,20 +49,23 @@ pub(crate) fn get_app_mode(config: State<'_, Mutex<Config>>) -> CommandResult<Ap
 }
 
 #[tauri::command]
-pub(crate) fn set_app_mode(
+pub(crate) async fn set_app_mode(
     app: tauri::AppHandle,
-    config: State<'_, Mutex<Config>>,
     mode: AppMode,
 ) -> CommandResult<settings::SettingsUpdate<AppMode>> {
-    settings::set_app_mode(&app, config.inner(), mode).map_err(|error| {
-        CommandError::unexpected(
-            "set_app_mode",
-            ErrorCode::ConfigPersistenceFailed,
-            "The application mode could not be changed.",
-            true,
-            error,
-        )
+    run_blocking("set_app_mode", move || {
+        let config = app.state::<Mutex<Config>>();
+        settings::set_app_mode(&app, config.inner(), mode).map_err(|error| {
+            CommandError::unexpected(
+                "set_app_mode",
+                ErrorCode::ConfigPersistenceFailed,
+                "The application mode could not be changed.",
+                true,
+                error,
+            )
+        })
     })
+    .await
 }
 
 #[tauri::command]

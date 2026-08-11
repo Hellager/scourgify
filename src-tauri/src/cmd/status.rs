@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Manager};
 
 use crate::{
     app::scheduler::{AutoCleanMonitor, AutoCleanScheduler},
@@ -19,6 +19,8 @@ use crate::{
     privacy::{PrivacyManager, PrivacyModeState},
     quick_access::{QuickAccessWatcherStatus, QuickAccessWatchers},
 };
+
+use super::run_blocking;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -68,80 +70,81 @@ pub(crate) struct RuntimeStatusSnapshot {
 }
 
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn get_runtime_status(
-    config: State<'_, Mutex<Config>>,
-    database: State<'_, DbState>,
-    backend: State<'_, QuickAccessBackendState>,
-    watchers: State<'_, QuickAccessWatchers>,
-    scheduler: State<'_, AutoCleanScheduler>,
-    monitor: State<'_, AutoCleanMonitor>,
-    auto_clean: State<'_, AutoCleanState>,
-    privacy: State<'_, PrivacyManager>,
-) -> CommandResult<RuntimeStatusSnapshot> {
-    let database_state = if database.status().available {
-        RuntimeState::Healthy
-    } else {
-        RuntimeState::Error
-    };
-    let qa_monitoring = quick_access_status(backend.mode(), watchers.status().ok());
-    let rules = database
-        .with_connection(|connection| database_rules::list(connection))
-        .map(|rules| {
-            let enabled = rules.iter().filter(|rule| rule.enabled).count();
-            RulesRuntimeStatus {
-                state: if enabled == 0 {
-                    RuntimeState::Inactive
-                } else {
-                    RuntimeState::Healthy
-                },
-                total: rules.len(),
-                enabled,
-            }
-        })
-        .unwrap_or(RulesRuntimeStatus {
-            state: RuntimeState::Error,
-            total: 0,
-            enabled: 0,
-        });
-    let policy = config
-        .lock()
-        .map(|config| config.auto_clean.clone())
-        .unwrap_or(AutoCleanPolicy::Disabled);
-    let running = auto_clean.is_running().ok();
-    let last_run = latest_auto_clean_run(database.inner(), &policy)
-        .ok()
-        .flatten();
-    let auto_clean_state = auto_clean_state(
-        &policy,
-        running,
-        last_run,
-        privacy.state(),
-        database_state,
-        rules.state,
-        qa_monitoring.state,
-        scheduler.is_alive(),
-        monitor.is_alive(),
-    );
-    let states = [
-        database_state,
-        qa_monitoring.state,
-        auto_clean_state,
-        rules.state,
-    ];
+pub(crate) async fn get_runtime_status(app: AppHandle) -> CommandResult<RuntimeStatusSnapshot> {
+    run_blocking("get_runtime_status", move || {
+        let config = app.state::<Mutex<Config>>();
+        let database = app.state::<DbState>();
+        let backend = app.state::<QuickAccessBackendState>();
+        let watchers = app.state::<QuickAccessWatchers>();
+        let scheduler = app.state::<AutoCleanScheduler>();
+        let monitor = app.state::<AutoCleanMonitor>();
+        let auto_clean = app.state::<AutoCleanState>();
+        let privacy = app.state::<PrivacyManager>();
+        let database_state = if database.status().available {
+            RuntimeState::Healthy
+        } else {
+            RuntimeState::Error
+        };
+        let qa_monitoring = quick_access_status(backend.mode(), watchers.status().ok());
+        let rules = database
+            .with_connection(|connection| database_rules::list(connection))
+            .map(|rules| {
+                let enabled = rules.iter().filter(|rule| rule.enabled).count();
+                RulesRuntimeStatus {
+                    state: if enabled == 0 {
+                        RuntimeState::Inactive
+                    } else {
+                        RuntimeState::Healthy
+                    },
+                    total: rules.len(),
+                    enabled,
+                }
+            })
+            .unwrap_or(RulesRuntimeStatus {
+                state: RuntimeState::Error,
+                total: 0,
+                enabled: 0,
+            });
+        let policy = config
+            .lock()
+            .map(|config| config.auto_clean.clone())
+            .unwrap_or(AutoCleanPolicy::Disabled);
+        let running = auto_clean.is_running().ok();
+        let last_run = latest_auto_clean_run(database.inner(), &policy)
+            .ok()
+            .flatten();
+        let auto_clean_state = auto_clean_state(
+            &policy,
+            running,
+            last_run,
+            privacy.state(),
+            database_state,
+            rules.state,
+            qa_monitoring.state,
+            scheduler.is_alive(),
+            monitor.is_alive(),
+        );
+        let states = [
+            database_state,
+            qa_monitoring.state,
+            auto_clean_state,
+            rules.state,
+        ];
 
-    Ok(RuntimeStatusSnapshot {
-        overall: overall_state(&states),
-        database: RuntimeStatusItem {
-            state: database_state,
-        },
-        qa_monitoring,
-        auto_clean: AutoCleanRuntimeStatus {
-            state: auto_clean_state,
-            policy: policy_name(&policy),
-        },
-        rules,
+        Ok(RuntimeStatusSnapshot {
+            overall: overall_state(&states),
+            database: RuntimeStatusItem {
+                state: database_state,
+            },
+            qa_monitoring,
+            auto_clean: AutoCleanRuntimeStatus {
+                state: auto_clean_state,
+                policy: policy_name(&policy),
+            },
+            rules,
+        })
     })
+    .await
 }
 
 fn quick_access_status(

@@ -10,13 +10,9 @@ mod rules;
 mod status;
 mod visualization;
 
-use std::sync::Mutex;
-
 use serde::Serialize;
-use tauri::State;
 
 use crate::{
-    config::Config,
     error::{CommandError, CommandGuardError, CommandResult, ErrorCode},
     privacy::{PrivacyAccessError, PrivacyManager, QuickAccessWritePermit},
 };
@@ -176,13 +172,6 @@ fn begin_quick_access_write(privacy: &PrivacyManager) -> CommandResult<QuickAcce
     }
 }
 
-fn history_retention(config: &State<'_, Mutex<Config>>) -> CommandResult<usize> {
-    config
-        .lock()
-        .map(|config| config.history_retention)
-        .map_err(|error| state_error("read_history_retention", error))
-}
-
 fn state_error(operation: &str, error: impl std::fmt::Display) -> CommandError {
     CommandError::unexpected(
         operation,
@@ -191,6 +180,23 @@ fn state_error(operation: &str, error: impl std::fmt::Display) -> CommandError {
         true,
         CommandGuardError::StateUnavailable(error.to_string()),
     )
+}
+
+pub(crate) async fn run_blocking<T: Send + 'static>(
+    operation: &'static str,
+    work: impl FnOnce() -> CommandResult<T> + Send + 'static,
+) -> CommandResult<T> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|error| {
+            CommandError::unexpected(
+                operation,
+                ErrorCode::InternalUnexpected,
+                "The operation could not be completed.",
+                true,
+                error,
+            )
+        })?
 }
 
 #[cfg(test)]
@@ -223,5 +229,18 @@ mod tests {
                 "affected": 1
             })
         );
+    }
+
+    #[test]
+    fn blocking_work_runs_off_the_calling_thread() {
+        let calling_thread = std::thread::current().id();
+        let worker_thread =
+            tauri::async_runtime::block_on(run_blocking(
+                "test",
+                || Ok(std::thread::current().id()),
+            ))
+            .unwrap();
+
+        assert_ne!(worker_thread, calling_thread);
     }
 }

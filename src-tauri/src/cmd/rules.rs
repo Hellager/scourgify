@@ -11,115 +11,134 @@ use crate::{
     error::{CommandError, CommandResult, ErrorCode},
     rules::{NewRule, Rule},
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager};
 
-use super::ActionReceipt;
+use super::{run_blocking, ActionReceipt};
 
 #[tauri::command]
-pub(crate) fn get_rules(database: State<'_, DbState>) -> CommandResult<Vec<Rule>> {
-    database
-        .with_connection(|connection| rules::list(connection))
-        .map_err(|error| database_error("get_rules", error))
+pub(crate) async fn get_rules(app: AppHandle) -> CommandResult<Vec<Rule>> {
+    run_blocking("get_rules", move || {
+        app.state::<DbState>()
+            .with_connection(|connection| rules::list(connection))
+            .map_err(|error| database_error("get_rules", error))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn add_rule(
-    app: AppHandle,
-    database: State<'_, DbState>,
-    rule: NewRule,
-) -> CommandResult<Rule> {
-    let result = database
-        .with_connection(|connection| rules::add(connection, rule))
-        .map_err(|error| database_error("add_rule", error))?;
+pub(crate) async fn add_rule(app: AppHandle, rule: NewRule) -> CommandResult<Rule> {
+    let app_for_worker = app.clone();
+    let result = run_blocking("add_rule", move || {
+        app_for_worker
+            .state::<DbState>()
+            .with_connection(|connection| rules::add(connection, rule))
+            .map_err(|error| database_error("add_rule", error))
+    })
+    .await?;
     trigger_monitor(&app);
     Ok(result)
 }
 
 #[tauri::command]
-pub(crate) fn update_rule(
-    app: AppHandle,
-    database: State<'_, DbState>,
-    id: i64,
-    rule: NewRule,
-) -> CommandResult<Rule> {
-    let result = database
-        .with_connection(|connection| rules::update(connection, id, rule))
-        .map_err(|error| database_error("update_rule", error))?;
+pub(crate) async fn update_rule(app: AppHandle, id: i64, rule: NewRule) -> CommandResult<Rule> {
+    let app_for_worker = app.clone();
+    let result = run_blocking("update_rule", move || {
+        app_for_worker
+            .state::<DbState>()
+            .with_connection(|connection| rules::update(connection, id, rule))
+            .map_err(|error| database_error("update_rule", error))
+    })
+    .await?;
     trigger_monitor(&app);
     Ok(result)
 }
 
 #[tauri::command]
-pub(crate) fn remove_rule(
-    app: AppHandle,
-    database: State<'_, DbState>,
-    id: i64,
-) -> CommandResult<ActionReceipt> {
-    database
-        .with_connection(|connection| rules::remove(connection, id))
-        .map_err(|error| database_error("remove_rule", error))?;
+pub(crate) async fn remove_rule(app: AppHandle, id: i64) -> CommandResult<ActionReceipt> {
+    let app_for_worker = app.clone();
+    run_blocking("remove_rule", move || {
+        app_for_worker
+            .state::<DbState>()
+            .with_connection(|connection| rules::remove(connection, id))
+            .map_err(|error| database_error("remove_rule", error))
+    })
+    .await?;
     trigger_monitor(&app);
     Ok(ActionReceipt::new("remove_rule", id.to_string(), 1))
 }
 
 #[tauri::command]
-pub(crate) fn clear_rules(
+pub(crate) async fn clear_rules(
     app: AppHandle,
-    database: State<'_, DbState>,
     ids: Option<Vec<i64>>,
 ) -> CommandResult<ActionReceipt> {
-    let affected = database
-        .with_connection(|connection| rules::clear(connection, ids.as_deref()))
-        .map_err(|error| database_error("clear_rules", error))?;
+    let target = if ids.is_some() { "selected" } else { "all" };
+    let app_for_worker = app.clone();
+    let affected = run_blocking("clear_rules", move || {
+        app_for_worker
+            .state::<DbState>()
+            .with_connection(|connection| rules::clear(connection, ids.as_deref()))
+            .map_err(|error| database_error("clear_rules", error))
+    })
+    .await?;
     trigger_monitor(&app);
-    Ok(ActionReceipt::new(
-        "clear_rules",
-        if ids.is_some() { "selected" } else { "all" },
-        affected as u64,
-    ))
+    Ok(ActionReceipt::new("clear_rules", target, affected as u64))
 }
 
 #[tauri::command]
-pub(crate) fn toggle_rule(
-    app: AppHandle,
-    database: State<'_, DbState>,
-    id: i64,
-    enabled: bool,
-) -> CommandResult<Rule> {
-    let result = database
-        .with_connection(|connection| rules::toggle(connection, id, enabled))
-        .map_err(|error| database_error("toggle_rule", error))?;
+pub(crate) async fn toggle_rule(app: AppHandle, id: i64, enabled: bool) -> CommandResult<Rule> {
+    let app_for_worker = app.clone();
+    let result = run_blocking("toggle_rule", move || {
+        app_for_worker
+            .state::<DbState>()
+            .with_connection(|connection| rules::toggle(connection, id, enabled))
+            .map_err(|error| database_error("toggle_rule", error))
+    })
+    .await?;
     trigger_monitor(&app);
     Ok(result)
 }
 
 #[tauri::command]
-pub(crate) fn export_rules(
-    database: State<'_, DbState>,
+pub(crate) async fn export_rules(
+    app: AppHandle,
     path: String,
     ids: Option<Vec<i64>>,
 ) -> CommandResult<RuleExportResult> {
-    database
-        .read_connection()
-        .and_then(|connection| rules_transfer::export(&connection, &path, ids.as_deref()))
-        .map_err(|error| database_error("export_rules", error))
+    run_blocking("export_rules", move || {
+        app.state::<DbState>()
+            .read_connection()
+            .and_then(|connection| rules_transfer::export(&connection, &path, ids.as_deref()))
+            .map_err(|error| database_error("export_rules", error))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn preview_rules_import(path: String) -> CommandResult<RuleImportPreview> {
-    rules_transfer::preview(&path).map_err(|error| database_error("preview_rules_import", error))
+pub(crate) async fn preview_rules_import(path: String) -> CommandResult<RuleImportPreview> {
+    run_blocking("preview_rules_import", move || {
+        rules_transfer::preview(&path)
+            .map_err(|error| database_error("preview_rules_import", error))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn import_rules(
+pub(crate) async fn import_rules(
     app: AppHandle,
-    database: State<'_, DbState>,
     path: String,
     indices: Option<Vec<usize>>,
 ) -> CommandResult<RuleImportResult> {
-    let result = database
-        .with_connection(|connection| rules_transfer::import(connection, &path, indices.as_deref()))
-        .map_err(|error| database_error("import_rules", error))?;
+    let app_for_worker = app.clone();
+    let result = run_blocking("import_rules", move || {
+        app_for_worker
+            .state::<DbState>()
+            .with_connection(|connection| {
+                rules_transfer::import(connection, &path, indices.as_deref())
+            })
+            .map_err(|error| database_error("import_rules", error))
+    })
+    .await?;
     trigger_monitor(&app);
     Ok(result)
 }

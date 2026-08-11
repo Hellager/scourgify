@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{AppHandle, Manager};
 
 use super::ActionReceipt;
 
@@ -14,59 +14,76 @@ use crate::{
     error::{CommandError, CommandResult, ErrorCode},
 };
 
+use super::run_blocking;
+
 #[tauri::command]
-pub(crate) fn get_clean_records(
-    database: State<'_, DbState>,
+pub(crate) async fn get_clean_records(
+    app: AppHandle,
     query: HistoryQuery,
 ) -> CommandResult<CleanRecordPage> {
-    database
-        .with_connection(|connection| history::list(connection, query))
-        .map_err(|error| history_error("get_clean_records", error))
+    run_blocking("get_clean_records", move || {
+        app.state::<DbState>()
+            .with_connection(|connection| history::list(connection, query))
+            .map_err(|error| history_error("get_clean_records", error))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn export_clean_records(
-    database: State<'_, DbState>,
+pub(crate) async fn export_clean_records(
+    app: AppHandle,
     path: String,
     format: HistoryExportFormat,
     filter: HistoryFilter,
 ) -> CommandResult<HistoryExportResult> {
-    database
-        .read_connection()
-        .and_then(|connection| history::export(&connection, &path, format, filter))
-        .map_err(|error| history_error("export_clean_records", error))
+    run_blocking("export_clean_records", move || {
+        app.state::<DbState>()
+            .read_connection()
+            .and_then(|connection| history::export(&connection, &path, format, filter))
+            .map_err(|error| history_error("export_clean_records", error))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn get_cleanup_runs(
-    database: State<'_, DbState>,
+pub(crate) async fn get_cleanup_runs(
+    app: AppHandle,
     query: CleanupRunQuery,
 ) -> CommandResult<CleanupRunPage> {
-    database
-        .with_connection(|connection| crate::db::history_runs::list(connection, query))
-        .map_err(|error| history_error("get_cleanup_runs", error))
+    run_blocking("get_cleanup_runs", move || {
+        app.state::<DbState>()
+            .with_connection(|connection| crate::db::history_runs::list(connection, query))
+            .map_err(|error| history_error("get_cleanup_runs", error))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn export_cleanup_runs(
-    database: State<'_, DbState>,
+pub(crate) async fn export_cleanup_runs(
+    app: AppHandle,
     path: String,
     format: HistoryExportFormat,
     filter: CleanupRunFilter,
 ) -> CommandResult<HistoryExportResult> {
-    database
-        .read_connection()
-        .and_then(|connection| history::export_runs(&connection, &path, format, filter))
-        .map_err(|error| history_error("export_cleanup_runs", error))
+    run_blocking("export_cleanup_runs", move || {
+        app.state::<DbState>()
+            .read_connection()
+            .and_then(|connection| history::export_runs(&connection, &path, format, filter))
+            .map_err(|error| history_error("export_cleanup_runs", error))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn clear_clean_records(
-    database: State<'_, DbState>,
+pub(crate) async fn clear_clean_records(
+    app: AppHandle,
 ) -> CommandResult<history::HistoryClearResult> {
-    let result = database
-        .with_connection(history::clear)
-        .map_err(|error| history_error("clear_clean_records", error))?;
+    let result = run_blocking("clear_clean_records", move || {
+        app.state::<DbState>()
+            .with_connection(history::clear)
+            .map_err(|error| history_error("clear_clean_records", error))
+    })
+    .await?;
     log::info!(
         "cleanup history cleared records={} runs={}",
         result.clean_records,
@@ -76,25 +93,28 @@ pub(crate) fn clear_clean_records(
 }
 
 #[tauri::command]
-pub(crate) fn remove_clean_record(
-    database: State<'_, DbState>,
-    id: i64,
-) -> CommandResult<ActionReceipt> {
-    database
-        .with_connection(|connection| history::remove(connection, id))
-        .map_err(|error| history_error("remove_clean_record", error))?;
+pub(crate) async fn remove_clean_record(app: AppHandle, id: i64) -> CommandResult<ActionReceipt> {
+    run_blocking("remove_clean_record", move || {
+        app.state::<DbState>()
+            .with_connection(|connection| history::remove(connection, id))
+            .map_err(|error| history_error("remove_clean_record", error))
+    })
+    .await?;
     Ok(ActionReceipt::new("remove_clean_record", id.to_string(), 1))
 }
 
 #[tauri::command]
-pub(crate) fn set_clean_record_visibility(
-    database: State<'_, DbState>,
+pub(crate) async fn set_clean_record_visibility(
+    app: AppHandle,
     id: i64,
     visible: bool,
 ) -> CommandResult<ActionReceipt> {
-    database
-        .with_connection(|connection| history::set_visible(connection, id, visible))
-        .map_err(|error| history_error("set_clean_record_visibility", error))?;
+    run_blocking("set_clean_record_visibility", move || {
+        app.state::<DbState>()
+            .with_connection(|connection| history::set_visible(connection, id, visible))
+            .map_err(|error| history_error("set_clean_record_visibility", error))
+    })
+    .await?;
     Ok(ActionReceipt::new(
         "set_clean_record_visibility",
         id.to_string(),
@@ -103,12 +123,13 @@ pub(crate) fn set_clean_record_visibility(
 }
 
 #[tauri::command]
-pub(crate) fn restore_hidden_clean_records(
-    database: State<'_, DbState>,
-) -> CommandResult<ActionReceipt> {
-    let affected = database
-        .with_connection(|connection| history::restore_hidden(connection))
-        .map_err(|error| history_error("restore_hidden_clean_records", error))?;
+pub(crate) async fn restore_hidden_clean_records(app: AppHandle) -> CommandResult<ActionReceipt> {
+    let affected = run_blocking("restore_hidden_clean_records", move || {
+        app.state::<DbState>()
+            .with_connection(|connection| history::restore_hidden(connection))
+            .map_err(|error| history_error("restore_hidden_clean_records", error))
+    })
+    .await?;
     Ok(ActionReceipt::new(
         "restore_hidden_clean_records",
         "hidden",
@@ -117,10 +138,13 @@ pub(crate) fn restore_hidden_clean_records(
 }
 
 #[tauri::command]
-pub(crate) fn get_stats(database: State<'_, DbState>, range: StatsRange) -> CommandResult<Stats> {
-    database
-        .with_connection(|connection| history::stats(connection, range))
-        .map_err(|error| history_error("get_stats", error))
+pub(crate) async fn get_stats(app: AppHandle, range: StatsRange) -> CommandResult<Stats> {
+    run_blocking("get_stats", move || {
+        app.state::<DbState>()
+            .with_connection(|connection| history::stats(connection, range))
+            .map_err(|error| history_error("get_stats", error))
+    })
+    .await
 }
 
 fn history_error(operation: &str, error: anyhow::Error) -> CommandError {

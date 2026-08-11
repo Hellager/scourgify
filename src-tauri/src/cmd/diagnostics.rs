@@ -1,7 +1,7 @@
 use serde::Serialize;
 use tauri::Manager;
 
-use super::ActionReceipt;
+use super::{run_blocking, ActionReceipt};
 use crate::error::{CommandError, CommandResult, ErrorCode};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -28,73 +28,79 @@ pub(crate) fn get_log_directory_status(app: tauri::AppHandle) -> CommandResult<L
 }
 
 #[tauri::command]
-pub(crate) fn open_log_directory(app: tauri::AppHandle) -> CommandResult<ActionReceipt> {
-    let directory = app.path().app_log_dir().map_err(|error| {
-        CommandError::unexpected(
+pub(crate) async fn open_log_directory(app: tauri::AppHandle) -> CommandResult<ActionReceipt> {
+    run_blocking("open_log_directory", move || {
+        let directory = app.path().app_log_dir().map_err(|error| {
+            CommandError::unexpected(
+                "open_log_directory",
+                ErrorCode::SystemOperationFailed,
+                "The log directory is unavailable.",
+                true,
+                error,
+            )
+        })?;
+        std::fs::create_dir_all(&directory).map_err(|error| {
+            CommandError::unexpected(
+                "open_log_directory",
+                ErrorCode::SystemOperationFailed,
+                "The log directory could not be created.",
+                true,
+                anyhow::Error::new(error).context(format!(
+                    "failed to create log directory {}",
+                    directory.display()
+                )),
+            )
+        })?;
+        tauri_plugin_opener::open_path(&directory, None::<&str>).map_err(|error| {
+            CommandError::unexpected(
+                "open_log_directory",
+                ErrorCode::SystemOperationFailed,
+                "The log directory could not be opened.",
+                true,
+                error,
+            )
+        })?;
+        Ok(ActionReceipt::new(
             "open_log_directory",
-            ErrorCode::SystemOperationFailed,
-            "The log directory is unavailable.",
-            true,
-            error,
-        )
-    })?;
-    std::fs::create_dir_all(&directory).map_err(|error| {
-        CommandError::unexpected(
-            "open_log_directory",
-            ErrorCode::SystemOperationFailed,
-            "The log directory could not be created.",
-            true,
-            anyhow::Error::new(error).context(format!(
-                "failed to create log directory {}",
-                directory.display()
-            )),
-        )
-    })?;
-    tauri_plugin_opener::open_path(&directory, None::<&str>).map_err(|error| {
-        CommandError::unexpected(
-            "open_log_directory",
-            ErrorCode::SystemOperationFailed,
-            "The log directory could not be opened.",
-            true,
-            error,
-        )
-    })?;
-    Ok(ActionReceipt::new(
-        "open_log_directory",
-        directory.to_string_lossy(),
-        1,
-    ))
+            directory.to_string_lossy(),
+            1,
+        ))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn clear_program_logs(app: tauri::AppHandle) -> CommandResult<ActionReceipt> {
-    let directory = app.path().app_log_dir().map_err(|error| {
-        CommandError::unexpected(
+pub(crate) async fn clear_program_logs(app: tauri::AppHandle) -> CommandResult<ActionReceipt> {
+    run_blocking("clear_program_logs", move || {
+        let directory = app.path().app_log_dir().map_err(|error| {
+            CommandError::unexpected(
+                "clear_program_logs",
+                ErrorCode::SystemOperationFailed,
+                "The program logs are unavailable.",
+                true,
+                error,
+            )
+        })?;
+        let affected = clear_log_files(&directory).map_err(|error| {
+            CommandError::unexpected(
+                "clear_program_logs",
+                ErrorCode::SystemOperationFailed,
+                "The program logs could not be cleared.",
+                true,
+                anyhow::Error::new(error).context(format!(
+                    "failed to clear program logs in {}",
+                    directory.display()
+                )),
+            )
+        })?;
+        log::info!("program logs cleared files={affected}");
+        Ok(ActionReceipt::new(
             "clear_program_logs",
-            ErrorCode::SystemOperationFailed,
-            "The program logs are unavailable.",
-            true,
-            error,
-        )
-    })?;
-    let affected = clear_log_files(&directory).map_err(|error| {
-        CommandError::unexpected(
-            "clear_program_logs",
-            ErrorCode::SystemOperationFailed,
-            "The program logs could not be cleared.",
-            true,
-            anyhow::Error::new(error).context(format!(
-                "failed to clear program logs in {}",
-                directory.display()
-            )),
-        )
-    })?;
-    log::info!("program logs cleared files={affected}");
-    Ok(ActionReceipt::new(
-        "clear_program_logs",
-        "program_logs",
-        affected,
-    ))
+            "program_logs",
+            affected,
+        ))
+    })
+    .await
 }
 
 fn clear_log_files(directory: &std::path::Path) -> std::io::Result<u64> {

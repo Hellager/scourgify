@@ -1,8 +1,8 @@
 use std::{path::PathBuf, sync::Mutex};
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
-use super::begin_quick_access_write;
+use super::{begin_quick_access_write, run_blocking};
 use crate::{
     backend::{BackendMode, PathKind, QuickAccessBackendState},
     config::Config,
@@ -20,32 +20,42 @@ use crate::{
 use super::ActionReceipt;
 
 #[tauri::command]
-pub(crate) fn list_qa_items(
+pub(crate) async fn list_qa_items(
     app: AppHandle,
     cache: State<'_, QuickAccessCache>,
     backend: State<'_, QuickAccessBackendState>,
     qa_type: String,
     fresh: Option<bool>,
 ) -> CommandResult<Vec<QaItem>> {
-    cache
-        .items(&app, backend.inner(), &qa_type, fresh.unwrap_or(true))
-        .map_err(|error| quick_access_error("list_qa_items", error))
+    let cache = cache.inner().clone();
+    let backend = backend.inner().clone();
+    run_blocking("list_qa_items", move || {
+        cache
+            .items(&app, &backend, &qa_type, fresh.unwrap_or(true))
+            .map_err(|error| quick_access_error("list_qa_items", error))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn get_qa_counts(
+pub(crate) async fn get_qa_counts(
     app: AppHandle,
     cache: State<'_, QuickAccessCache>,
     backend: State<'_, QuickAccessBackendState>,
     fresh: Option<bool>,
 ) -> CommandResult<QaCounts> {
-    cache
-        .counts(&app, backend.inner(), fresh.unwrap_or(false))
-        .map_err(|error| quick_access_error("get_qa_counts", error))
+    let cache = cache.inner().clone();
+    let backend = backend.inner().clone();
+    run_blocking("get_qa_counts", move || {
+        cache
+            .counts(&app, &backend, fresh.unwrap_or(false))
+            .map_err(|error| quick_access_error("get_qa_counts", error))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn list_qa_item_metadata(
+pub(crate) async fn list_qa_item_metadata(
     backend: State<'_, QuickAccessBackendState>,
     config: State<'_, Mutex<Config>>,
     qa_type: String,
@@ -63,122 +73,144 @@ pub(crate) fn list_qa_item_metadata(
             "DestList access requires visualization_deep_parse",
         ));
     }
-    backend
-        .backend()
-        .and_then(|backend| backend.list_item_metadata(&qa_type))
-        .map_err(|error| quick_access_error("list_qa_item_metadata", error))
+    let backend = backend.inner().clone();
+    run_blocking("list_qa_item_metadata", move || {
+        backend
+            .backend()
+            .and_then(|backend| backend.list_item_metadata(&qa_type))
+            .map_err(|error| quick_access_error("list_qa_item_metadata", error))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn add_qa_item(
+pub(crate) async fn add_qa_item(
     app: AppHandle,
-    cache: State<'_, QuickAccessCache>,
-    backend: State<'_, QuickAccessBackendState>,
-    privacy: State<'_, PrivacyManager>,
     qa_type: String,
     path: String,
 ) -> CommandResult<QaMutationResult> {
-    let _write_permit = begin_quick_access_write(privacy.inner())?;
-    let mut warnings = Vec::new();
-    if let Err(error) = backend
-        .backend()
-        .and_then(|backend| backend.add_item(&qa_type, &path))
-    {
-        let warning = error
-            .downcast_ref::<wincent::prelude::WincentError>()
-            .and_then(|error| wincent_post_mutation_warning("add_qa_item", error));
-        if let Some(warning) = warning {
-            warnings.push(warning);
-        } else {
-            return Err(quick_access_error("add_qa_item", error));
+    run_blocking("add_qa_item", move || {
+        let privacy = app.state::<PrivacyManager>();
+        let backend = app.state::<QuickAccessBackendState>();
+        let cache = app.state::<QuickAccessCache>();
+        let _write_permit = begin_quick_access_write(privacy.inner())?;
+        let mut warnings = Vec::new();
+        if let Err(error) = backend
+            .backend()
+            .and_then(|backend| backend.add_item(&qa_type, &path))
+        {
+            let warning = error
+                .downcast_ref::<wincent::prelude::WincentError>()
+                .and_then(|error| wincent_post_mutation_warning("add_qa_item", error));
+            if let Some(warning) = warning {
+                warnings.push(warning);
+            } else {
+                return Err(quick_access_error("add_qa_item", error));
+            }
         }
-    }
-    cache.refresh_after_write(&app, backend.inner(), &qa_type);
-    Ok(QaMutationResult {
-        action: "add_qa_item",
-        target: path,
-        affected: 1,
-        warnings,
+        cache.refresh_after_write(&app, backend.inner(), &qa_type);
+        Ok(QaMutationResult {
+            action: "add_qa_item",
+            target: path,
+            affected: 1,
+            warnings,
+        })
     })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn restore_qa_defaults(
+pub(crate) async fn restore_qa_defaults(
     app: AppHandle,
-    cache: State<'_, QuickAccessCache>,
-    backend: State<'_, QuickAccessBackendState>,
-    privacy: State<'_, PrivacyManager>,
     qa_type: String,
 ) -> CommandResult<QaRestoreResult> {
-    let _write_permit = begin_quick_access_write(privacy.inner())?;
-    let result = backend
-        .backend()
-        .and_then(|backend| backend.restore_defaults(&qa_type))
-        .map_err(|error| quick_access_error("restore_qa_defaults", error))?;
-    cache.refresh_after_write(&app, backend.inner(), &qa_type);
-    Ok(result)
+    run_blocking("restore_qa_defaults", move || {
+        let privacy = app.state::<PrivacyManager>();
+        let backend = app.state::<QuickAccessBackendState>();
+        let cache = app.state::<QuickAccessCache>();
+        let _write_permit = begin_quick_access_write(privacy.inner())?;
+        let result = backend
+            .backend()
+            .and_then(|backend| backend.restore_defaults(&qa_type))
+            .map_err(|error| quick_access_error("restore_qa_defaults", error))?;
+        cache.refresh_after_write(&app, backend.inner(), &qa_type);
+        Ok(result)
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn get_qa_visibility(
+pub(crate) async fn get_qa_visibility(
     backend: State<'_, QuickAccessBackendState>,
 ) -> CommandResult<QaVisibility> {
-    backend
-        .backend()
-        .and_then(|backend| backend.get_visibility())
-        .map_err(|error| quick_access_error("get_qa_visibility", error))
+    let backend = backend.inner().clone();
+    run_blocking("get_qa_visibility", move || {
+        backend
+            .backend()
+            .and_then(|backend| backend.get_visibility())
+            .map_err(|error| quick_access_error("get_qa_visibility", error))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn set_qa_visibility(
+pub(crate) async fn set_qa_visibility(
     app: AppHandle,
-    cache: State<'_, QuickAccessCache>,
-    backend: State<'_, QuickAccessBackendState>,
-    privacy: State<'_, PrivacyManager>,
     qa_type: String,
     visible: bool,
 ) -> CommandResult<QaVisibilityMutationResult> {
-    let _write_permit = begin_quick_access_write(privacy.inner())?;
-    let result = backend
-        .backend()
-        .and_then(|backend| backend.set_visibility(&qa_type, visible))
-        .map_err(|error| quick_access_error("set_qa_visibility", error))?;
-    if matches!(qa_type.as_str(), "recent" | "frequent") {
-        cache.refresh_after_write(&app, backend.inner(), &qa_type);
-    }
-    Ok(result)
+    run_blocking("set_qa_visibility", move || {
+        let privacy = app.state::<PrivacyManager>();
+        let backend = app.state::<QuickAccessBackendState>();
+        let cache = app.state::<QuickAccessCache>();
+        let _write_permit = begin_quick_access_write(privacy.inner())?;
+        let result = backend
+            .backend()
+            .and_then(|backend| backend.set_visibility(&qa_type, visible))
+            .map_err(|error| quick_access_error("set_qa_visibility", error))?;
+        if matches!(qa_type.as_str(), "recent" | "frequent") {
+            cache.refresh_after_write(&app, backend.inner(), &qa_type);
+        }
+        Ok(result)
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn open_in_explorer(
+pub(crate) async fn open_in_explorer(
     backend: State<'_, QuickAccessBackendState>,
     path: String,
 ) -> CommandResult<ActionReceipt> {
-    let kind = backend
-        .backend()
-        .map_err(|error| quick_access_error("open_in_explorer", error))?
-        .path_kind(&path);
-    let path = validate_open_path(&path, kind)
-        .map_err(|error| validation_error("open_in_explorer", error))?;
-    log::info!("open in explorer started path={}", path.display());
+    let backend = backend.inner().clone();
+    run_blocking("open_in_explorer", move || {
+        let kind = backend
+            .backend()
+            .map_err(|error| quick_access_error("open_in_explorer", error))?
+            .path_kind(&path);
+        let path = validate_open_path(&path, kind)
+            .map_err(|error| validation_error("open_in_explorer", error))?;
+        log::info!("open in explorer started path={}", path.display());
 
-    // Mock mode still uses the real filesystem for imported/exported files.
-    if backend.mode() == BackendMode::Real || path.exists() {
-        tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|error| {
-            CommandError::unexpected(
-                "open_in_explorer",
-                ErrorCode::SystemOperationFailed,
-                "The item could not be revealed in Explorer.",
-                true,
-                anyhow::Error::new(error).context(format!("failed to reveal {}", path.display())),
-            )
-        })?;
-    }
-    Ok(ActionReceipt::new(
-        "open_in_explorer",
-        path.to_string_lossy(),
-        1,
-    ))
+        // Mock mode still uses the real filesystem for imported/exported files.
+        if backend.mode() == BackendMode::Real || path.exists() {
+            tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|error| {
+                CommandError::unexpected(
+                    "open_in_explorer",
+                    ErrorCode::SystemOperationFailed,
+                    "The item could not be revealed in Explorer.",
+                    true,
+                    anyhow::Error::new(error)
+                        .context(format!("failed to reveal {}", path.display())),
+                )
+            })?;
+        }
+        Ok(ActionReceipt::new(
+            "open_in_explorer",
+            path.to_string_lossy(),
+            1,
+        ))
+    })
+    .await
 }
 
 fn validate_open_path(path: &str, kind: PathKind) -> Result<PathBuf, ValidationError> {
