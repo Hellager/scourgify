@@ -26,6 +26,7 @@ const EXPECTED_MONITORS: usize = 2;
 #[derive(Clone, Default)]
 pub(crate) struct QuickAccessCache {
     inner: Arc<RwLock<CacheSnapshot>>,
+    refresh_locks: Arc<CategoryRefreshLocks>,
 }
 
 #[derive(Default)]
@@ -33,6 +34,12 @@ struct CacheSnapshot {
     recent: Option<Vec<QaItem>>,
     frequent: Option<Vec<QaItem>>,
     revision: u64,
+}
+
+#[derive(Default)]
+struct CategoryRefreshLocks {
+    recent: Mutex<()>,
+    frequent: Mutex<()>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -116,10 +123,39 @@ impl QuickAccessCache {
             }
         }
 
-        log::debug!("Quick Access cache refresh qa_type={}", qa_name(qa_type));
-        let items = backend.backend()?.list_items(qa_name(qa_type))?;
-        self.update(app, qa_type, items.clone())?;
-        Ok(items)
+        self.with_category_refresh(qa_type, || {
+            if !fresh {
+                if let Some(items) = self.cached(qa_type)? {
+                    log::debug!(
+                        "Quick Access cache hit after refresh wait qa_type={}",
+                        qa_name(qa_type)
+                    );
+                    return Ok(items);
+                }
+            }
+
+            log::debug!("Quick Access cache refresh qa_type={}", qa_name(qa_type));
+            let items = backend.backend()?.list_items(qa_name(qa_type))?;
+            self.update(app, qa_type, items.clone())?;
+            Ok(items)
+        })
+    }
+
+    fn with_category_refresh<T>(
+        &self,
+        qa_type: QuickAccess,
+        refresh: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        let lock = match qa_type {
+            QuickAccess::RecentFiles => &self.refresh_locks.recent,
+            QuickAccess::FrequentFolders => &self.refresh_locks.frequent,
+            _ => anyhow::bail!("Quick Access cache only refreshes individual categories"),
+        };
+        let _guard = lock
+            .lock()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))
+            .context("failed to lock Quick Access cache refresh")?;
+        refresh()
     }
 
     fn cached(&self, qa_type: QuickAccess) -> Result<Option<Vec<QaItem>>> {
@@ -189,22 +225,22 @@ impl QuickAccessCache {
         backend: &QuickAccessBackendState,
         qa_type: QuickAccess,
     ) -> Result<()> {
-        self.update(
-            app,
-            qa_type,
-            backend.backend()?.list_items(qa_name(qa_type))?,
-        )
+        self.category_items(app, backend, qa_type, true).map(|_| ())
     }
 
     #[cfg(debug_assertions)]
     pub(crate) fn clear(&self) -> Result<()> {
-        let mut snapshot = self
-            .inner
-            .write()
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        snapshot.recent = None;
-        snapshot.frequent = None;
-        Ok(())
+        self.with_category_refresh(QuickAccess::RecentFiles, || {
+            self.with_category_refresh(QuickAccess::FrequentFolders, || {
+                let mut snapshot = self
+                    .inner
+                    .write()
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                snapshot.recent = None;
+                snapshot.frequent = None;
+                Ok(())
+            })
+        })
     }
 }
 
@@ -351,6 +387,7 @@ fn qa_name(qa_type: QuickAccess) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{sync::mpsc, thread, time::Duration as StdDuration};
 
     fn item(path: &str) -> QaItem {
         QaItem {
@@ -395,5 +432,87 @@ mod tests {
     #[test]
     fn monitor_uses_three_second_polling() {
         assert_eq!(POLL_INTERVAL, Duration::from_secs(3));
+    }
+
+    #[test]
+    fn same_category_refreshes_commit_in_query_order() {
+        let cache = QuickAccessCache::default();
+        let first_cache = cache.clone();
+        let second_cache = cache.clone();
+        let (first_started_tx, first_started_rx) = mpsc::channel();
+        let (release_first_tx, release_first_rx) = mpsc::channel();
+        let (second_ready_tx, second_ready_rx) = mpsc::channel();
+        let (second_started_tx, second_started_rx) = mpsc::channel();
+
+        let first = thread::spawn(move || {
+            first_cache
+                .with_category_refresh(QuickAccess::RecentFiles, || {
+                    first_started_tx.send(()).unwrap();
+                    release_first_rx.recv().unwrap();
+                    first_cache.store(QuickAccess::RecentFiles, vec![item("old")])
+                })
+                .unwrap();
+        });
+        first_started_rx.recv().unwrap();
+
+        let second = thread::spawn(move || {
+            second_ready_tx.send(()).unwrap();
+            second_cache
+                .with_category_refresh(QuickAccess::RecentFiles, || {
+                    second_started_tx.send(()).unwrap();
+                    second_cache.store(QuickAccess::RecentFiles, vec![item("new")])
+                })
+                .unwrap();
+        });
+        second_ready_rx.recv().unwrap();
+        assert!(second_started_rx
+            .recv_timeout(StdDuration::from_millis(100))
+            .is_err());
+
+        release_first_tx.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+
+        assert_eq!(
+            cache.cached(QuickAccess::RecentFiles).unwrap(),
+            Some(vec![item("new")])
+        );
+    }
+
+    #[test]
+    fn different_categories_refresh_independently() {
+        let cache = QuickAccessCache::default();
+        let recent_cache = cache.clone();
+        let frequent_cache = cache.clone();
+        let (recent_started_tx, recent_started_rx) = mpsc::channel();
+        let (release_recent_tx, release_recent_rx) = mpsc::channel();
+        let (frequent_started_tx, frequent_started_rx) = mpsc::channel();
+
+        let recent = thread::spawn(move || {
+            recent_cache
+                .with_category_refresh(QuickAccess::RecentFiles, || {
+                    recent_started_tx.send(()).unwrap();
+                    release_recent_rx.recv().unwrap();
+                    recent_cache.store(QuickAccess::RecentFiles, vec![item("recent")])
+                })
+                .unwrap();
+        });
+        recent_started_rx.recv().unwrap();
+
+        let frequent = thread::spawn(move || {
+            frequent_cache
+                .with_category_refresh(QuickAccess::FrequentFolders, || {
+                    frequent_started_tx.send(()).unwrap();
+                    frequent_cache.store(QuickAccess::FrequentFolders, vec![item("frequent")])
+                })
+                .unwrap();
+        });
+        frequent_started_rx
+            .recv_timeout(StdDuration::from_secs(1))
+            .unwrap();
+
+        release_recent_tx.send(()).unwrap();
+        recent.join().unwrap();
+        frequent.join().unwrap();
     }
 }
