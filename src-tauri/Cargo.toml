@@ -2,8 +2,15 @@
 name = "Scourgify"
 version = "0.6.4"
 description = "Rule-driven Windows Quick Access cleaner"
-authors = ["Stein Gu"]
+authors = ["Stein Gu <steinsgu@gmail.com>"]
 edition = "2021"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/Hellager/scourgify"
+readme = "../README.md"
+keywords = ["windows", "quick-access", "privacy", "cleanup", "tauri"]
+categories = ["gui", "os::windows-apis"]
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -42,3 +49,7 @@ unicode-segmentation = "1.13.3"
 [target.'cfg(windows)'.dependencies]
 wincent = { git = "https://github.com/Hellager/wincent-rs.git", rev = "cd7e7289b4b12bbfb744624125a8c7639d4e3482" }
 winreg = "0.56.0"
+
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+targets = ["x86_64-pc-windows-msvc"]

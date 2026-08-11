@@ -38,3 +38,9 @@ pnpm tauri build
 ```
 
 The Windows MSI is emitted under `src-tauri/target/release/bundle/msi/`.
+Scourgify is distributed as a Windows application through GitHub Releases; its
+internal Tauri crate is not published to crates.io.
+
+## License
+
+Scourgify is licensed under the [MIT License](LICENSE).
