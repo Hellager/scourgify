@@ -1,5 +1,10 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { X } from "lucide-react";
+import { useTheme } from "next-themes";
 import packageJson from "../../package.json";
+import darkIcon from "../../src-tauri/icons/dark/incognito-svgrepo-com.svg";
+import lightIcon from "../../src-tauri/icons/light/incognito-svgrepo-com.svg";
+import { Button } from "@/components/ui/button";
 import { invokeCommand } from "@/lib/commands";
 import { useI18n } from "@/lib/i18n";
 
@@ -7,6 +12,8 @@ const GITHUB_URL = "https://github.com/hellager/scourgify";
 
 export function AboutDialog() {
   const { t } = useI18n();
+  const { resolvedTheme } = useTheme();
+  const appIcon = resolvedTheme === "dark" ? darkIcon : lightIcon;
 
   const openGitHub = async () => {
     await openUrl(GITHUB_URL);
@@ -17,37 +24,47 @@ export function AboutDialog() {
   };
 
   return (
-    <main className="about-shell">
-      <section className="about-panel" aria-labelledby="about-title">
-        <button
-          aria-label={t("close")}
-          className="close-button"
-          onClick={close}
-          type="button"
-        >
-          x
-        </button>
-        <div className="app-mark" aria-hidden="true">
-          S
+    <main className="relative min-h-svh overflow-hidden bg-background text-foreground">
+      <Button
+        aria-label={t("close")}
+        className="absolute right-1 top-1 text-muted-foreground hover:text-foreground"
+        onClick={() => void close()}
+        size="icon-lg"
+        title={t("close")}
+        type="button"
+        variant="ghost"
+      >
+        <X />
+      </Button>
+
+      <section
+        className="flex min-h-svh w-full flex-col items-center pt-[26px]"
+        aria-labelledby="about-title"
+      >
+        <img alt="" className="size-12" src={appIcon} />
+        <h1 className="mt-3 text-xl font-semibold" id="about-title">
+          Scourgify
+        </h1>
+
+        <div className="mt-4 flex flex-col items-stretch gap-5">
+          <p className="flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium text-muted-foreground">
+            <span className="tabular-nums">v{packageJson.version}</span>
+            <span aria-hidden="true">·</span>
+            <span>Stein Gu</span>
+            <span aria-hidden="true">·</span>
+            <span>MIT</span>
+          </p>
+
+          <Button
+            className="w-full"
+            onClick={() => void openGitHub()}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {t("github")}
+          </Button>
         </div>
-        <h1 id="about-title">Scourgify</h1>
-        <dl className="about-details">
-          <div>
-            <dt>{t("version")}</dt>
-            <dd>{packageJson.version}</dd>
-          </div>
-          <div>
-            <dt>{t("author")}</dt>
-            <dd>Stein Gu</dd>
-          </div>
-          <div>
-            <dt>{t("license")}</dt>
-            <dd>MIT</dd>
-          </div>
-        </dl>
-        <button className="github-link" onClick={openGitHub} type="button">
-          {t("github")}
-        </button>
       </section>
     </main>
   );
