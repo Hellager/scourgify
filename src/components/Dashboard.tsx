@@ -549,7 +549,7 @@ export function Dashboard() {
 
   return (
     <main className="mx-auto grid w-full max-w-7xl gap-6 p-6">
-      <section className="grid grid-cols-4 gap-4">
+      <section className="grid min-w-0 grid-cols-[repeat(4,minmax(0,1fr))] gap-4">
         <SummaryCard
           onOpen={() => openDialog("recent")}
           title={t("recentFiles")}
@@ -698,15 +698,16 @@ function SummaryCard({
   value: ReactNode;
 }) {
   return (
-    <div className="flex h-24 min-w-0 flex-col items-center justify-center rounded-md border bg-card p-3 text-center text-card-foreground">
+    <div className="flex min-h-28 min-w-0 flex-col items-center justify-center rounded-md border bg-card p-3 text-center text-card-foreground">
       <button
-        className="rounded-sm text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="line-clamp-2 h-10 w-full content-center break-words rounded-sm px-1 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={onOpen}
+        title={title}
         type="button"
       >
         {title}
       </button>
-      <div className="mt-1 max-w-full text-xl font-semibold tabular-nums">
+      <div className="mt-1 flex h-9 w-full min-w-0 shrink-0 items-center justify-center overflow-hidden whitespace-nowrap text-xl font-semibold tabular-nums">
         {value}
       </div>
       {detail ? (
