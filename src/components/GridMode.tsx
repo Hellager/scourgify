@@ -100,7 +100,7 @@ export function GridMode() {
   );
 
   return (
-    <main className="flex h-screen flex-col bg-border text-foreground">
+    <main className="flex h-svh flex-col bg-border text-foreground">
       <TitleBar
         closeLabel={t("closeWindow")}
         maximizeLabel={t("maximizeWindow")}
@@ -115,11 +115,11 @@ export function GridMode() {
       >
         {tiles.map(({ key, label, value }) => (
           <section
-            className="group relative flex min-w-0 flex-col items-center justify-center bg-card px-3 py-4 text-center text-card-foreground transition-[background-color,box-shadow] duration-200 hover:z-10 hover:bg-accent hover:shadow-lg"
+            className="group relative flex min-w-0 flex-col items-center justify-center bg-card px-2 py-2 text-center text-card-foreground transition-[background-color,box-shadow] duration-200 hover:z-10 hover:bg-accent hover:shadow-lg"
             key={key}
           >
             <h2
-              className="mb-2 line-clamp-2 text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground"
+              className="mb-1 line-clamp-2 text-xs leading-4 font-medium text-muted-foreground transition-colors group-hover:text-foreground"
               title={label}
             >
               {label}
