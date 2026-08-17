@@ -12,6 +12,7 @@ use fake::{
 };
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use std::time::Duration as StdDuration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
@@ -24,7 +25,7 @@ use crate::{
     rules::{NewRule, RuleScope, RuleType},
 };
 
-use super::{MockScenario, MockSnapshot};
+use super::{MockOverviewConfig, MockOverviewRequest, MockScenario, MockSnapshot};
 
 const MAX_MOCK_RULES: usize = 1_000;
 const MAX_MOCK_HISTORY_RECORDS: usize = 1_000;
@@ -141,6 +142,7 @@ impl MockPathLocale {
 pub(crate) struct MockState {
     pub enabled: bool,
     pub snapshot: MockSnapshot,
+    pub overview: MockOverviewConfig,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -161,10 +163,91 @@ pub(crate) enum MockEventKind {
     AutoCleanFinished,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum MockOverviewPreset {
+    Normal,
+    Loading,
+    CountsFailure,
+    StatsFailure,
+    BatchOverviewFailure,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum MockOverviewTarget {
+    Counts,
+    Stats,
+}
+
+pub(crate) fn apply_overview_request(
+    backend: &QuickAccessBackendState,
+    target: MockOverviewTarget,
+    operation: &str,
+) -> CommandResult<()> {
+    if backend.mode() != BackendMode::Mock {
+        return Ok(());
+    }
+
+    let config = backend
+        .mock()
+        .overview_config()
+        .map_err(|error| mock_error(operation, error))?;
+    if config.delay_ms > 0 {
+        std::thread::sleep(StdDuration::from_millis(config.delay_ms));
+    }
+    let behavior = match target {
+        MockOverviewTarget::Counts => config.counts,
+        MockOverviewTarget::Stats => config.stats,
+    };
+    if behavior == MockOverviewRequest::Fail {
+        return Err(CommandError::expected(
+            operation,
+            ErrorCode::SystemOperationFailed,
+            "The mock overview request failed.",
+            true,
+            format!("mock overview {target:?} request was configured to fail"),
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn get_mock_state(
     backend: State<'_, QuickAccessBackendState>,
 ) -> CommandResult<MockState> {
+    state(backend.inner())
+}
+
+#[tauri::command]
+pub(crate) fn set_mock_overview_preset(
+    backend: State<'_, QuickAccessBackendState>,
+    preset: MockOverviewPreset,
+) -> CommandResult<MockState> {
+    ensure_enabled(backend.inner())?;
+    let config = match preset {
+        MockOverviewPreset::Normal => MockOverviewConfig::default(),
+        MockOverviewPreset::Loading => MockOverviewConfig {
+            delay_ms: 2_500,
+            ..MockOverviewConfig::default()
+        },
+        MockOverviewPreset::CountsFailure => MockOverviewConfig {
+            counts: MockOverviewRequest::Fail,
+            ..MockOverviewConfig::default()
+        },
+        MockOverviewPreset::StatsFailure => MockOverviewConfig {
+            stats: MockOverviewRequest::Fail,
+            ..MockOverviewConfig::default()
+        },
+        MockOverviewPreset::BatchOverviewFailure => MockOverviewConfig {
+            counts: MockOverviewRequest::Fail,
+            stats: MockOverviewRequest::Fail,
+            ..MockOverviewConfig::default()
+        },
+    };
+    backend
+        .mock()
+        .set_overview_config(config)
+        .map_err(|error| mock_error("set_mock_overview_preset", error))?;
     state(backend.inner())
 }
 
@@ -192,12 +275,20 @@ pub(crate) fn set_mock_mode(
             let _ = watchers.resume(app.clone(), cache.inner().clone(), backend.inner().clone());
             return Err(mock_error("set_mock_mode", error));
         }
+        backend
+            .mock()
+            .set_overview_config(MockOverviewConfig::default())
+            .map_err(|error| mock_error("set_mock_mode", error))?;
     } else {
         privacy
             .set_mock_mode(false)
             .map_err(|error| mock_error("set_mock_mode", error))?;
         backend
             .set_real()
+            .map_err(|error| mock_error("set_mock_mode", error))?;
+        backend
+            .mock()
+            .set_overview_config(MockOverviewConfig::default())
             .map_err(|error| mock_error("set_mock_mode", error))?;
         database
             .set_mock_mode(false)
@@ -391,6 +482,10 @@ fn state(backend: &QuickAccessBackendState) -> CommandResult<MockState> {
         snapshot: backend
             .mock()
             .snapshot()
+            .map_err(|error| mock_error("get_mock_state", error))?,
+        overview: backend
+            .mock()
+            .overview_config()
             .map_err(|error| mock_error("get_mock_state", error))?,
     })
 }

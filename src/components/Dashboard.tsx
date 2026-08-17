@@ -34,6 +34,7 @@ import {
 import { toast } from "sonner";
 import { useAppShell } from "@/components/AppShell";
 import { AutoCleanMonitorPulse } from "@/components/AutoCleanMonitorPulse";
+import { Dots } from "@/components/loading-ui/dots";
 import { WordCloudPanel } from "@/components/dashboard/WordCloudPanel";
 import {
   AlertDialog,
@@ -173,20 +174,41 @@ interface QuickAccessChanged {
   revision: number;
 }
 
-const emptyCounts: QaCounts = { recent: 0, frequent: 0, all: 0 };
+interface ResourceState<T> {
+  data: T | null;
+  error: string | null;
+  loading: boolean;
+}
+
+const initialResourceState = <T,>(): ResourceState<T> => ({
+  data: null,
+  error: null,
+  loading: true,
+});
+const initialDestlistState = (): Record<QaType, ResourceState<number>> => ({
+  recent: initialResourceState<number>(),
+  frequent: initialResourceState<number>(),
+});
 const emptyCleanRecords: CleanRecord[] = [];
 const HISTORY_PAGE_SIZE = 10;
 
 export function Dashboard() {
   const { language, t } = useI18n();
-  const { config, privacyActive, setConfig } = useAppShell();
+  const {
+    config,
+    overviewHealth,
+    privacyActive,
+    reportOverviewFailure,
+    setConfig,
+  } = useAppShell();
   const location = useLocation();
-  const [counts, setCounts] = useState<QaCounts>(emptyCounts);
-  const [destlistCounts, setDestlistCounts] = useState<Record<QaType, number | null>>({
-    recent: null,
-    frequent: null,
-  });
-  const [stats, setStats] = useState<Stats | null>(null);
+  const [counts, setCounts] = useState<ResourceState<QaCounts>>(
+    initialResourceState,
+  );
+  const [destlistCounts, setDestlistCounts] = useState<
+    Record<QaType, ResourceState<number>>
+  >(initialDestlistState);
+  const [stats, setStats] = useState<ResourceState<Stats>>(initialResourceState);
   const [dashboardRevision, setDashboardRevision] = useState(0);
   const [dialog, setDialog] = useState<DashboardDialog>(null);
   const [qaDialogState, setQaDialogState] = useState<
@@ -206,39 +228,107 @@ export function Dashboard() {
   const [skipSmartCleanConfirm, setSkipSmartCleanConfirm] = useState(false);
   const [smartCleaning, setSmartCleaning] = useState(false);
   const smartCleanTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const countsRequestRef = useRef(0);
+  const statsRequestRef = useRef(0);
+  const initialPreviewKeyRef = useRef<string | null>(null);
+  const reportedOverviewErrorsRef = useRef({ counts: null as string | null, stats: null as string | null });
 
   const loadCounts = useCallback(async () => {
-    setCounts(await invokeCommand<QaCounts>("get_qa_counts", { fresh: false }));
-    if (!config.visualization_deep_parse) {
-      setDestlistCounts({ recent: null, frequent: null });
-      return;
+    const requestId = ++countsRequestRef.current;
+    setCounts((current) => ({ ...current, loading: true }));
+    if (config.visualization_deep_parse) {
+      setDestlistCounts((current) => ({
+        recent: { ...current.recent, loading: true },
+        frequent: { ...current.frequent, loading: true },
+      }));
+    } else {
+      setDestlistCounts({
+        recent: { data: null, error: null, loading: false },
+        frequent: { data: null, error: null, loading: false },
+      });
     }
-    const [recent, frequent] = await Promise.allSettled([
-      invokeCommand<QaItemMetadata[]>("list_qa_item_metadata", { qaType: "recent" }),
-      invokeCommand<QaItemMetadata[]>("list_qa_item_metadata", { qaType: "frequent" }),
-    ]);
-    setDestlistCounts({
-      recent: recent.status === "fulfilled" ? recent.value.length : null,
-      frequent: frequent.status === "fulfilled" ? frequent.value.length : null,
-    });
+
+    try {
+      const nextCounts = await invokeCommand<QaCounts>("get_qa_counts", {
+        fresh: false,
+      });
+      if (requestId !== countsRequestRef.current) {
+        return;
+      }
+
+      if (config.visualization_deep_parse) {
+        const [recent, frequent] = await Promise.allSettled([
+          invokeCommand<QaItemMetadata[]>("list_qa_item_metadata", {
+            qaType: "recent",
+          }),
+          invokeCommand<QaItemMetadata[]>("list_qa_item_metadata", {
+            qaType: "frequent",
+          }),
+        ]);
+        if (requestId !== countsRequestRef.current) {
+          return;
+        }
+        setDestlistCounts((current) => ({
+          recent: settledNumberState(current.recent, recent),
+          frequent: settledNumberState(current.frequent, frequent),
+        }));
+      }
+
+      setCounts({ data: nextCounts, error: null, loading: false });
+    } catch (error) {
+      if (requestId !== countsRequestRef.current) {
+        return;
+      }
+      setCounts((current) => ({
+        ...current,
+        error: errorMessage(error),
+        loading: false,
+      }));
+      setDestlistCounts((current) => ({
+        recent: { ...current.recent, loading: false },
+        frequent: { ...current.frequent, loading: false },
+      }));
+    }
   }, [config.visualization_deep_parse]);
 
   const loadStats = useCallback(async () => {
-    setStats(await invokeCommand<Stats>("get_stats", { range: "30d" }));
+    const requestId = ++statsRequestRef.current;
+    setStats((current) => ({ ...current, loading: true }));
+    try {
+      const nextStats = await invokeCommand<Stats>("get_stats", { range: "30d" });
+      if (requestId === statsRequestRef.current) {
+        setStats({ data: nextStats, error: null, loading: false });
+      }
+    } catch (error) {
+      if (requestId === statsRequestRef.current) {
+        setStats((current) => ({
+          ...current,
+          error: errorMessage(error),
+          loading: false,
+        }));
+      }
+    }
   }, []);
 
   const loadOverview = useCallback(async () => {
-    const [countsResult, statsResult] = await Promise.allSettled([
-      loadCounts(),
-      loadStats(),
-    ]);
-    if (countsResult.status === "rejected") {
-      setCounts(emptyCounts);
-    }
-    if (statsResult.status === "rejected") {
-      setStats(null);
-    }
+    await Promise.all([loadCounts(), loadStats()]);
   }, [loadCounts, loadStats]);
+
+  useEffect(() => {
+    const countsError = counts.error;
+    const statsError = stats.error;
+    const countsMessage = countsError ? t("overviewCountsUnavailable") : null;
+    const statsMessage = statsError ? t("overviewStatsUnavailable") : null;
+    reportOverviewFailure("counts", countsError);
+    reportOverviewFailure("stats", statsError);
+    if (countsMessage && reportedOverviewErrorsRef.current.counts !== countsMessage) {
+      toast.error(countsMessage);
+    }
+    if (statsMessage && reportedOverviewErrorsRef.current.stats !== statsMessage) {
+      toast.error(statsMessage);
+    }
+    reportedOverviewErrorsRef.current = { counts: countsMessage, stats: statsMessage };
+  }, [counts.error, reportOverviewFailure, stats.error, t]);
 
   const loadQaItems = useCallback(async (qaType: QaType) => {
     setQaDialogState((current) => ({
@@ -327,9 +417,22 @@ export function Dashboard() {
 
   useEffect(() => {
     if (location.pathname === "/") {
+      if (
+        import.meta.env.DEV &&
+        (location.state as { mockOverviewPreview?: string } | null)
+          ?.mockOverviewPreview === "initial" &&
+        initialPreviewKeyRef.current !== location.key
+      ) {
+        initialPreviewKeyRef.current = location.key;
+        countsRequestRef.current += 1;
+        statsRequestRef.current += 1;
+        setCounts(initialResourceState());
+        setDestlistCounts(initialDestlistState());
+        setStats(initialResourceState());
+      }
       void loadOverview();
     }
-  }, [loadOverview, location.pathname]);
+  }, [loadOverview, location.key, location.pathname, location.state]);
 
   useEffect(() => {
     const refreshDashboard = () => {
@@ -345,7 +448,7 @@ export function Dashboard() {
     const unlisten = listen<QuickAccessChanged>(QUICK_ACCESS_CHANGED_EVENT, () => {
       window.clearTimeout(timeout);
       timeout = window.setTimeout(() => {
-        void loadCounts().catch(() => setCounts(emptyCounts));
+        void loadCounts();
         setDashboardRevision((revision) => revision + 1);
       }, 100);
     });
@@ -546,34 +649,46 @@ export function Dashboard() {
     : null;
   const activeQaType = dialog === "frequent" ? "frequent" : "recent";
   const activeQaState = qaDialogState[activeQaType];
+  const countValues = counts.data;
 
   return (
     <main className="mx-auto grid w-full max-w-7xl gap-6 p-6">
       <section className="grid min-w-0 grid-cols-[repeat(4,minmax(0,1fr))] gap-4">
         <SummaryCard
+          disabled={!overviewHealth.counts}
           onOpen={() => openDialog("recent")}
           title={t("recentFiles")}
+          loading={counts.loading && countValues === null}
           value={
-            config.visualization_deep_parse
-              ? `${counts.recent}/${destlistCounts.recent ?? "--"}`
-              : counts.recent
+            countValues === null
+              ? "--"
+              : config.visualization_deep_parse
+                ? `${countValues.recent}/${destlistCounts.recent.data ?? "--"}`
+                : countValues.recent
           }
         />
         <SummaryCard
+          disabled={!overviewHealth.counts}
           onOpen={() => openDialog("frequent")}
           title={t("frequentFolders")}
+          loading={counts.loading && countValues === null}
           value={
-            config.visualization_deep_parse
-              ? `${counts.frequent}/${destlistCounts.frequent ?? "--"}`
-              : counts.frequent
+            countValues === null
+              ? "--"
+              : config.visualization_deep_parse
+                ? `${countValues.frequent}/${destlistCounts.frequent.data ?? "--"}`
+                : countValues.frequent
           }
         />
         <SummaryCard
+          disabled={!overviewHealth.stats}
           onOpen={() => openDialog("cleaned")}
           title={t("cleaned")}
-          value={stats?.total ?? "--"}
+          loading={stats.loading && stats.data === null}
+          value={stats.data?.total ?? "--"}
         />
         <SummaryCard
+          disabled={!overviewHealth.stats}
           onOpen={() => openDialog("auto")}
           title={t("autoClean")}
           value={autoCleanCardValue}
@@ -628,7 +743,12 @@ export function Dashboard() {
       <Button
         aria-label={t("smartClean")}
         className="fixed bottom-6 right-6 z-20 size-12 rounded-full shadow-lg"
-        disabled={smartCleaning || privacyActive}
+        disabled={
+          smartCleaning ||
+          privacyActive ||
+          !overviewHealth.counts ||
+          !overviewHealth.stats
+        }
         onClick={requestSmartClean}
         ref={smartCleanTriggerRef}
         size="icon-lg"
@@ -688,19 +808,28 @@ export function Dashboard() {
 
 function SummaryCard({
   detail,
+  disabled = false,
+  loading = false,
   onOpen,
   title,
   value,
 }: {
   detail?: ReactNode;
+  disabled?: boolean;
+  loading?: boolean;
   onOpen: () => void;
   title: string;
   value: ReactNode;
 }) {
   return (
-    <div className="flex min-h-28 min-w-0 flex-col items-center justify-center rounded-md border bg-card p-3 text-center text-card-foreground">
+    <div
+      aria-busy={loading}
+      className="flex min-h-28 min-w-0 flex-col items-center justify-center rounded-md border bg-card p-3 text-center text-card-foreground"
+    >
       <button
+        aria-disabled={disabled}
         className="line-clamp-2 h-10 w-full content-center break-words rounded-sm px-1 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        disabled={disabled}
         onClick={onOpen}
         title={title}
         type="button"
@@ -708,7 +837,11 @@ function SummaryCard({
         {title}
       </button>
       <div className="mt-1 flex h-9 w-full min-w-0 shrink-0 items-center justify-center overflow-hidden whitespace-nowrap text-xl font-semibold tabular-nums">
-        {value}
+        {loading ? (
+          <Dots aria-label="Loading" className="h-5 w-12 text-muted-foreground" />
+        ) : (
+          value
+        )}
       </div>
       {detail ? (
         <div
@@ -720,6 +853,20 @@ function SummaryCard({
       ) : null}
     </div>
   );
+}
+
+function settledNumberState(
+  current: ResourceState<number>,
+  result: PromiseSettledResult<QaItemMetadata[]>,
+): ResourceState<number> {
+  if (result.status === "fulfilled") {
+    return { data: result.value.length, error: null, loading: false };
+  }
+  return {
+    ...current,
+    error: errorMessage(result.reason),
+    loading: false,
+  };
 }
 
 function AutoCleanCountdown({

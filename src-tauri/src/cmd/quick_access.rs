@@ -3,6 +3,8 @@ use std::{path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager, State};
 
 use super::{begin_quick_access_write, run_blocking};
+#[cfg(debug_assertions)]
+use crate::mock::commands::{apply_overview_request, MockOverviewTarget};
 use crate::{
     backend::{BackendMode, PathKind, QuickAccessBackendState},
     config::Config,
@@ -47,6 +49,8 @@ pub(crate) async fn get_qa_counts(
     let cache = cache.inner().clone();
     let backend = backend.inner().clone();
     run_blocking("get_qa_counts", move || {
+        #[cfg(debug_assertions)]
+        apply_overview_request(&backend, MockOverviewTarget::Counts, "get_qa_counts")?;
         cache
             .counts(&app, &backend, fresh.unwrap_or(false))
             .map_err(|error| quick_access_error("get_qa_counts", error))

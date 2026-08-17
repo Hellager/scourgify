@@ -55,6 +55,8 @@ interface AppShellContextValue {
   privacyActive: boolean;
   refreshPrivacyState: () => Promise<void>;
   setConfig: Dispatch<SetStateAction<ConfigForm>>;
+  overviewHealth: { counts: boolean; stats: boolean };
+  reportOverviewFailure: (kind: "counts" | "stats", error: string | null) => void;
 }
 
 type PrivacyState =
@@ -73,8 +75,15 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
   const [config, setConfig] = useState<ConfigForm>(defaultConfig);
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   const [privacyActive, setPrivacyActive] = useState(true);
+  const [overviewHealth, setOverviewHealth] = useState({ counts: true, stats: true });
   const onDashboard = location.pathname === "/";
   const onRules = location.pathname === "/rules";
+  const reportOverviewFailure = useCallback(
+    (kind: "counts" | "stats", error: string | null) => {
+      setOverviewHealth((current) => ({ ...current, [kind]: error === null }));
+    },
+    [],
+  );
   const refreshPrivacyState = useCallback(async () => {
     try {
       const state = await invokeCommand<PrivacyState>("privacy_state");
@@ -153,13 +162,25 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
   }, [refreshPrivacyState]);
 
   const context = useMemo(
-    () => ({ config, privacyActive, refreshPrivacyState, setConfig }),
-    [config, privacyActive, refreshPrivacyState],
+    () => ({
+      config,
+      overviewHealth,
+      privacyActive,
+      refreshPrivacyState,
+      reportOverviewFailure,
+      setConfig,
+    }),
+    [config, overviewHealth, privacyActive, refreshPrivacyState, reportOverviewFailure],
   );
   const navigation = [
     { icon: Gauge, label: t("dataCenter"), path: "/" },
     { icon: ShieldCheck, label: t("rules"), path: "/rules" },
-    { icon: History, label: t("history"), path: "/history" },
+    {
+      icon: History,
+      label: t("history"),
+      path: "/history",
+      disabled: !overviewHealth.stats,
+    },
     { icon: Settings, label: t("preferences"), path: "/settings" },
     ...(import.meta.env.DEV
       ? [{ icon: FlaskConical, label: "Mock Lab", path: "/mock" }]
@@ -188,10 +209,17 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
                 <SidebarGroup>
                   <SidebarGroupContent>
                     <SidebarMenu>
-                      {navigation.map(({ icon: Icon, label, path }) => (
+                      {navigation.map(({ disabled, icon: Icon, label, path }) => (
                         <SidebarMenuItem key={path}>
-                          <SidebarMenuButton
-                            isActive={location.pathname === path}
+                            <SidebarMenuButton
+                              aria-disabled={disabled || undefined}
+                              className={disabled ? "pointer-events-none opacity-50" : undefined}
+                              isActive={location.pathname === path}
+                              onClick={(event) => {
+                                if (disabled) {
+                                  event.preventDefault();
+                                }
+                              }}
                             render={<Link to={path} />}
                             tooltip={label}
                           >
@@ -203,7 +231,7 @@ export function AppShell({ dashboard }: { dashboard: ReactNode }) {
                     </SidebarMenu>
                   </SidebarGroupContent>
                 </SidebarGroup>
-                <SidebarRuntimeStatus />
+                <SidebarRuntimeStatus overviewHealth={overviewHealth} />
               </ScrollArea>
               <div className="mt-auto flex justify-end px-2 pb-2 group-data-[collapsible=icon]:justify-center">
                 <SidebarTrigger />

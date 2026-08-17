@@ -269,6 +269,8 @@
   "runtimeInactive": "Inactif",
   "runtimePaused": "En pause",
   "runtimeQuickAccess": "Surveillance système",
+  "overviewCountsUnavailable": "Échec du démarrage du service de surveillance système.",
+  "overviewStatsUnavailable": "Échec du démarrage du service d’historique des nettoyages.",
   "runtimeRules": "Correspondance des règles",
   "runtimeRunning": "En cours",
   "runtimeStatus": "État des services",

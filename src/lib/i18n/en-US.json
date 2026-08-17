@@ -269,6 +269,8 @@
   "runtimeInactive": "Inactive",
   "runtimePaused": "Paused",
   "runtimeQuickAccess": "System monitoring",
+  "overviewCountsUnavailable": "System monitoring service failed to start.",
+  "overviewStatsUnavailable": "Cleanup records service failed to start.",
   "runtimeRules": "Rule matching",
   "runtimeRunning": "Running",
   "runtimeStatus": "Service status",

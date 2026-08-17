@@ -79,7 +79,11 @@ const stateDotClasses: Record<RuntimeState, string> = {
   unknown: "bg-muted-foreground/30",
 };
 
-export function SidebarRuntimeStatus() {
+export function SidebarRuntimeStatus({
+  overviewHealth,
+}: {
+  overviewHealth: { counts: boolean; stats: boolean };
+}) {
   const { t } = useI18n();
   const [status, setStatus] = useState<RuntimeStatusSnapshot | null>(null);
 
@@ -107,7 +111,7 @@ export function SidebarRuntimeStatus() {
       {
         key: "qa_monitoring",
         label: "runtimeQuickAccess",
-        state: status?.qa_monitoring.state ?? "unknown",
+        state: overviewHealth.counts ? status?.qa_monitoring.state ?? "unknown" : "error",
       },
       {
         key: "rules",
@@ -122,10 +126,10 @@ export function SidebarRuntimeStatus() {
       {
         key: "database",
         label: "runtimeDatabase",
-        state: status?.database.state ?? "unknown",
+        state: overviewHealth.stats ? status?.database.state ?? "unknown" : "error",
       },
     ],
-    [status],
+    [overviewHealth, status],
   );
   const overall = status?.overall ?? "unknown";
   const overallLabel = t(stateLabelKeys[overall]);

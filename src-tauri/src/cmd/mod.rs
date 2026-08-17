@@ -149,6 +149,7 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         crate::mock::commands::generate_mock_rules,
         crate::mock::commands::generate_mock_history,
         crate::mock::commands::trigger_mock_event,
+        crate::mock::commands::set_mock_overview_preset,
     ]
 }
 

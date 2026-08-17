@@ -45,6 +45,32 @@ pub(crate) enum MockScenario {
     PostMutationWarning,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum MockOverviewRequest {
+    #[serde(rename = "normal")]
+    Normal,
+    #[serde(rename = "fail")]
+    Fail,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct MockOverviewConfig {
+    pub counts: MockOverviewRequest,
+    pub stats: MockOverviewRequest,
+    pub delay_ms: u64,
+}
+
+impl Default for MockOverviewConfig {
+    fn default() -> Self {
+        Self {
+            counts: MockOverviewRequest::Normal,
+            stats: MockOverviewRequest::Normal,
+            delay_ms: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct MockSnapshot {
     pub scenario: MockScenario,
@@ -69,13 +95,30 @@ struct MockData {
 
 pub(crate) struct MockQuickAccessBackend {
     data: RwLock<MockData>,
+    overview: RwLock<MockOverviewConfig>,
 }
 
 impl MockQuickAccessBackend {
     pub(crate) fn new() -> Self {
         Self {
             data: RwLock::new(seed(MockScenario::Normal)),
+            overview: RwLock::new(MockOverviewConfig::default()),
         }
+    }
+
+    pub(crate) fn overview_config(&self) -> Result<MockOverviewConfig> {
+        self.overview
+            .read()
+            .map(|config| *config)
+            .map_err(|error| anyhow!("mock overview state is unavailable: {error}"))
+    }
+
+    pub(crate) fn set_overview_config(&self, config: MockOverviewConfig) -> Result<()> {
+        *self
+            .overview
+            .write()
+            .map_err(|error| anyhow!("mock overview state is unavailable: {error}"))? = config;
+        Ok(())
     }
 
     pub(crate) fn set_scenario(&self, scenario: MockScenario) -> Result<MockSnapshot> {
@@ -540,6 +583,35 @@ mod tests {
         assert_ne!(changed.frequent[0].path, before.frequent[0].path);
         assert_eq!(changed.revision, before.revision + 1);
         assert_eq!(changed.frequent_metadata.len(), changed.frequent.len());
+    }
+
+    #[test]
+    fn overview_configuration_can_be_updated_without_changing_mock_data() {
+        let backend = MockQuickAccessBackend::new();
+        let snapshot = backend.snapshot().unwrap();
+
+        assert_eq!(
+            backend.overview_config().unwrap(),
+            MockOverviewConfig::default()
+        );
+
+        backend
+            .set_overview_config(MockOverviewConfig {
+                counts: MockOverviewRequest::Fail,
+                stats: MockOverviewRequest::Normal,
+                delay_ms: 2_500,
+            })
+            .unwrap();
+
+        assert_eq!(
+            backend.overview_config().unwrap(),
+            MockOverviewConfig {
+                counts: MockOverviewRequest::Fail,
+                stats: MockOverviewRequest::Normal,
+                delay_ms: 2_500,
+            }
+        );
+        assert_eq!(backend.snapshot().unwrap().revision, snapshot.revision);
     }
 
     #[test]

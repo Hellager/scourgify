@@ -2,6 +2,8 @@ use tauri::{AppHandle, Manager};
 
 use super::ActionReceipt;
 
+#[cfg(debug_assertions)]
+use crate::mock::commands::{apply_overview_request, MockOverviewTarget};
 use crate::{
     db::history_runs::{CleanupRunFilter, CleanupRunPage, CleanupRunQuery},
     db::{
@@ -140,6 +142,13 @@ pub(crate) async fn restore_hidden_clean_records(app: AppHandle) -> CommandResul
 #[tauri::command]
 pub(crate) async fn get_stats(app: AppHandle, range: StatsRange) -> CommandResult<Stats> {
     run_blocking("get_stats", move || {
+        #[cfg(debug_assertions)]
+        apply_overview_request(
+            app.state::<crate::backend::QuickAccessBackendState>()
+                .inner(),
+            MockOverviewTarget::Stats,
+            "get_stats",
+        )?;
         app.state::<DbState>()
             .with_connection(|connection| history::stats(connection, range))
             .map_err(|error| history_error("get_stats", error))

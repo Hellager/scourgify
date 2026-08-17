@@ -269,6 +269,8 @@
   "runtimeInactive": "Неактивно",
   "runtimePaused": "Приостановлено",
   "runtimeQuickAccess": "Системный мониторинг",
+  "overviewCountsUnavailable": "Не удалось запустить службу системного мониторинга.",
+  "overviewStatsUnavailable": "Не удалось запустить службу журнала очистки.",
   "runtimeRules": "Сопоставление правил",
   "runtimeRunning": "Выполняется",
   "runtimeStatus": "Состояние служб",

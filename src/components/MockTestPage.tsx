@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useNavigate } from "react-router-dom";
 import {
   Activity,
   Cloud,
@@ -40,6 +41,12 @@ type MockScenario =
   | "post_mutation_warning";
 type WordCloudSource = "access" | "cleanup";
 type WordCloudRange = "last7_days" | "last30_days";
+type MockOverviewPreset =
+  | "normal"
+  | "loading"
+  | "counts_failure"
+  | "stats_failure"
+  | "batch_overview_failure";
 
 interface QaItem {
   path: string;
@@ -76,6 +83,11 @@ interface MockSnapshot {
 interface MockState {
   enabled: boolean;
   snapshot: MockSnapshot;
+  overview: {
+    counts: "normal" | "fail";
+    stats: "normal" | "fail";
+    delay_ms: number;
+  };
 }
 
 interface EventEntry {
@@ -122,10 +134,18 @@ const scenarios: Array<{ label: string; value: MockScenario }> = [
   { label: "Partial failure", value: "partial_failure" },
   { label: "Post-mutation warning", value: "post_mutation_warning" },
 ];
+const overviewPresets: Array<{ label: string; value: MockOverviewPreset }> = [
+  { label: "Normal responses", value: "normal" },
+  { label: "Initial loading delay", value: "loading" },
+  { label: "Quick Access counts fail", value: "counts_failure" },
+  { label: "Cleanup statistics fail", value: "stats_failure" },
+  { label: "Batch overview failure", value: "batch_overview_failure" },
+];
 const MAX_MOCK_RULES = 1_000;
 const MAX_MOCK_HISTORY_RECORDS = 1_000;
 
 export function MockTestPage() {
+  const navigate = useNavigate();
   const [state, setState] = useState<MockState | null>(null);
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [pending, setPending] = useState(false);
@@ -141,6 +161,7 @@ export function MockTestPage() {
   const [wordCloudSource, setWordCloudSource] = useState<WordCloudSource>("access");
   const [wordCloudRange, setWordCloudRange] = useState<WordCloudRange>("last30_days");
   const [wordCloudResult, setWordCloudResult] = useState<WordCloudResult | null>(null);
+  const [overviewPreset, setOverviewPreset] = useState<MockOverviewPreset>("normal");
 
   const recordEvent = useCallback((name: string, payload: unknown) => {
     setEvents((current) => [
@@ -150,7 +171,9 @@ export function MockTestPage() {
   }, []);
 
   const load = useCallback(async () => {
-    setState(await invokeCommand<MockState>("get_mock_state"));
+    const next = await invokeCommand<MockState>("get_mock_state");
+    setState(next);
+    setOverviewPreset(overviewPresetFor(next.overview));
   }, []);
 
   useEffect(() => {
@@ -176,7 +199,9 @@ export function MockTestPage() {
     setError(null);
     setWordCloudResult(null);
     try {
-      setState(await operation());
+      const next = await operation();
+      setState(next);
+      setOverviewPreset(overviewPresetFor(next.overview));
     } catch (value) {
       setError(commandErrorMessage(value));
     } finally {
@@ -244,6 +269,20 @@ export function MockTestPage() {
       );
     } catch (value) {
       setWordCloudResult(null);
+      setError(commandErrorMessage(value));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const setOverviewBehavior = async (preset: MockOverviewPreset) => {
+    setPending(true);
+    setError(null);
+    try {
+      const next = await invokeCommand<MockState>("set_mock_overview_preset", { preset });
+      setState(next);
+      setOverviewPreset(overviewPresetFor(next.overview));
+    } catch (value) {
       setError(commandErrorMessage(value));
     } finally {
       setPending(false);
@@ -336,6 +375,53 @@ export function MockTestPage() {
           >
             <RotateCcw />
             Reset
+          </Button>
+        </div>
+      </section>
+
+      <section className="grid gap-4 border-b py-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+        <div>
+          <h2 className="text-sm font-semibold">Dashboard overview requests</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Injects delays or failures into the production counts and statistics commands while mock mode is enabled.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="grid w-56 gap-2 text-sm font-medium">
+            Response behavior
+            <Select
+              disabled={!enabled || pending}
+              onValueChange={(value) => void setOverviewBehavior(value as MockOverviewPreset)}
+              value={overviewPreset}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {overviewPresets.map((preset) => (
+                  <SelectItem key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          <Button
+            disabled={!enabled || pending}
+            onClick={() => dispatchAppEvent(REFRESH_DASHBOARD_EVENT)}
+            type="button"
+            variant="outline"
+          >
+            <RefreshCw />
+            Refresh Dashboard
+          </Button>
+          <Button
+            disabled={!enabled || pending}
+            onClick={() => navigate("/", { state: { mockOverviewPreview: "initial" } })}
+            type="button"
+          >
+            <Activity />
+            Preview initial load
           </Button>
         </div>
       </section>
@@ -642,6 +728,22 @@ export function MockTestPage() {
 
 function formatTimestamp(value: number | null) {
   return value == null ? "-" : new Date(value).toLocaleString();
+}
+
+function overviewPresetFor(overview: MockState["overview"]): MockOverviewPreset {
+  if (overview.delay_ms > 0) {
+    return "loading";
+  }
+  if (overview.counts === "fail" && overview.stats === "fail") {
+    return "batch_overview_failure";
+  }
+  if (overview.counts === "fail") {
+    return "counts_failure";
+  }
+  if (overview.stats === "fail") {
+    return "stats_failure";
+  }
+  return "normal";
 }
 
 function EventButton({

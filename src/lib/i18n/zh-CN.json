@@ -269,6 +269,8 @@
   "runtimeInactive": "未启用",
   "runtimePaused": "已暂停",
   "runtimeQuickAccess": "系统监控",
+  "overviewCountsUnavailable": "系统监控服务启动失败。",
+  "overviewStatsUnavailable": "清理记录服务启动失败。",
   "runtimeRules": "规则匹配",
   "runtimeRunning": "运行中",
   "runtimeStatus": "服务状态",
