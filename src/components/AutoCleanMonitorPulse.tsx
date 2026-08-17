@@ -178,14 +178,14 @@ export function AutoCleanMonitorPulse({ label }: { label: string }) {
   }, [reduceMotion]);
 
   return (
-    <div className="relative h-9 w-20 max-w-full overflow-hidden text-foreground">
+    <span className="relative block h-9 w-20 max-w-full overflow-hidden text-foreground">
       <canvas
         aria-hidden="true"
         className="block h-full w-full"
         ref={canvasRef}
       />
       <span className="sr-only">{label}</span>
-    </div>
+    </span>
   );
 }
 

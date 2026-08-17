@@ -688,7 +688,6 @@ export function Dashboard() {
           value={stats.data?.total ?? "--"}
         />
         <SummaryCard
-          disabled={!overviewHealth.stats}
           onOpen={() => openDialog("auto")}
           title={t("autoClean")}
           value={autoCleanCardValue}
@@ -822,36 +821,34 @@ function SummaryCard({
   value: ReactNode;
 }) {
   return (
-    <div
+    <button
+      aria-label={title}
       aria-busy={loading}
-      className="flex min-h-28 min-w-0 flex-col items-center justify-center rounded-md border bg-card p-3 text-center text-card-foreground"
+      className="group flex min-h-28 min-w-0 flex-col items-center justify-center rounded-md border bg-card p-3 text-center text-card-foreground transition-[color,background-color,border-color,box-shadow,transform] outline-none hover:border-foreground/20 hover:bg-accent/40 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:translate-y-px disabled:pointer-events-none disabled:opacity-50"
+      disabled={disabled}
+      onClick={onOpen}
+      title={title}
+      type="button"
     >
-      <button
-        aria-disabled={disabled}
-        className="line-clamp-2 h-10 w-full content-center break-words rounded-sm px-1 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        disabled={disabled}
-        onClick={onOpen}
-        title={title}
-        type="button"
-      >
+      <span className="line-clamp-2 h-10 w-full content-center break-words px-1 text-sm font-medium text-muted-foreground transition-colors group-hover:text-foreground">
         {title}
-      </button>
-      <div className="mt-1 flex h-9 w-full min-w-0 shrink-0 items-center justify-center overflow-hidden whitespace-nowrap text-xl font-semibold tabular-nums">
+      </span>
+      <span className="mt-1 flex h-9 w-full min-w-0 shrink-0 items-center justify-center overflow-hidden whitespace-nowrap text-xl font-semibold tabular-nums">
         {loading ? (
-          <Dots aria-label="Loading" className="h-5 w-12 text-muted-foreground" />
+          <Dots aria-label="Loading" className="h-3 w-7 text-muted-foreground" />
         ) : (
           value
         )}
-      </div>
+      </span>
       {detail ? (
-        <div
-          className="mt-0.5 w-full truncate text-[11px] text-muted-foreground"
+        <span
+          className="mt-0.5 block w-full truncate text-[11px] text-muted-foreground"
           title={typeof detail === "string" ? detail : undefined}
         >
           {detail}
-        </div>
+        </span>
       ) : null}
-    </div>
+    </button>
   );
 }
 
