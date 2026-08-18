@@ -790,7 +790,7 @@ export function RulesPage() {
 
   return (
     <>
-      <PageFrame className="h-full overflow-hidden" reserveFabSpace width="table">
+      <PageFrame className="h-full" reserveFabSpace width="table">
         {database && !database.available ? (
           <DatabaseRecoveryPanel
             onRecovered={loadRules}
@@ -1449,7 +1449,7 @@ function ruleColumnClassName(columnId: string): string {
     case "select":
       return "w-10";
     case "keyword":
-      return "min-w-52";
+      return "min-w-44 lg:min-w-52";
     case "rule_type":
       return "min-w-40";
     case "scope":
@@ -1457,7 +1457,7 @@ function ruleColumnClassName(columnId: string): string {
     case "status":
       return "min-w-40";
     case "actions":
-      return "w-28";
+      return "w-24 min-w-24";
     default:
       return "";
   }

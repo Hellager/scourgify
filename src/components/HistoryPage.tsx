@@ -931,7 +931,7 @@ function historyColumnClassName(columnId: string): string {
     case "cleaned_at":
       return "min-w-44";
     case "item_path":
-      return "min-w-80";
+      return "min-w-64 lg:min-w-80";
     case "item_type":
       return "min-w-40";
     case "source":
@@ -939,7 +939,7 @@ function historyColumnClassName(columnId: string): string {
     case "rule_keyword":
       return "min-w-44";
     case "actions":
-      return "w-28";
+      return "w-24 min-w-24";
     default:
       return "";
   }
