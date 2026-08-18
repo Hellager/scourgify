@@ -495,13 +495,10 @@ export function SettingsPage() {
               void updateVisibility("frequent", checked)
             }
           />
-          <label className="flex items-center justify-between gap-4 py-3">
-            <span>
-              <span className="block text-sm">{t("showStartRecommended")}</span>
-              <span className="block text-xs text-muted-foreground">
-                {t("showStartRecommendedDescription")}
-              </span>
-            </span>
+          <SettingsRow
+            description={t("showStartRecommendedDescription")}
+            label={t("showStartRecommended")}
+          >
             <Switch
               checked={startRecommendedVisible}
               disabled={
@@ -511,7 +508,7 @@ export function SettingsPage() {
                 void updateVisibility("start_recommended", checked)
               }
             />
-          </label>
+          </SettingsRow>
         </Section>
 
         <Section title={t("notifications")}>
@@ -573,10 +570,9 @@ export function SettingsPage() {
         </Section>
 
         <Section title={t("cleanup")}>
-          <div className="flex flex-wrap items-center justify-between gap-4 py-3">
-            <span className="text-sm">{t("programLogs")}</span>
+          <SettingsRow asLabel={false} label={t("programLogs")}>
             <Button
-              className="shrink-0"
+              className="w-full sm:w-auto"
               disabled={clearing}
               onClick={() => setClearTarget("logs")}
               size="sm"
@@ -586,11 +582,10 @@ export function SettingsPage() {
               <Trash2 />
               {t("actionClear")}
             </Button>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-4 py-3">
-            <span className="text-sm">{t("recordedCleanupHistory")}</span>
+          </SettingsRow>
+          <SettingsRow asLabel={false} label={t("recordedCleanupHistory")}>
             <Button
-              className="shrink-0"
+              className="w-full sm:w-auto"
               disabled={clearing}
               onClick={() => setClearTarget("history")}
               size="sm"
@@ -600,16 +595,16 @@ export function SettingsPage() {
               <Trash2 />
               {t("actionClear")}
             </Button>
-          </div>
+          </SettingsRow>
         </Section>
 
         <Section title={t("about")}>
           <InfoRow label={t("version")} value={packageJson.version} />
           <InfoRow label={t("author")} value="Stein Gu" />
           <InfoRow label={t("license")} value="MIT" />
-          <div className="flex items-center justify-between gap-4 py-2">
-            <span className="text-sm text-muted-foreground">{t("github")}</span>
+          <SettingsRow asLabel={false} label={t("github")} muted>
             <Button
+              className="w-full sm:w-auto"
               onClick={() => void openUrl(GITHUB_URL)}
               size="sm"
               type="button"
@@ -617,12 +612,10 @@ export function SettingsPage() {
             >
               {t("visit")}
             </Button>
-          </div>
-          <div className="flex items-center justify-between gap-4 py-2">
-            <span className="text-sm text-muted-foreground">
-              {t("diagnostics")}
-            </span>
+          </SettingsRow>
+          <SettingsRow asLabel={false} label={t("diagnostics")} muted>
             <Button
+              className="w-full sm:w-auto"
               onClick={() =>
                 void invokeCommand("open_log_directory").catch((error) =>
                   toast.error(errorMessage(error)),
@@ -634,7 +627,7 @@ export function SettingsPage() {
             >
               {t("openLogDirectory")}
             </Button>
-          </div>
+          </SettingsRow>
         </Section>
         <AlertDialog
           open={clearTarget !== null}
@@ -712,13 +705,12 @@ function SelectControl({
       control={control}
       name={field.name}
       render={({ field: formField }) => (
-        <label className="flex items-center justify-between gap-4 py-3">
-          <span className="text-sm">{field.label}</span>
+        <SettingsRow label={field.label}>
           <Select
             onValueChange={formField.onChange}
             value={String(formField.value)}
           >
-            <SelectTrigger className="w-48">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue>
                 {field.options.find(
                   (option) => option.value === String(formField.value),
@@ -733,7 +725,7 @@ function SelectControl({
               ))}
             </SelectContent>
           </Select>
-        </label>
+        </SettingsRow>
       )}
     />
   );
@@ -755,15 +747,7 @@ function SwitchControl({
       control={control}
       name={field.name}
       render={({ field: formField }) => (
-        <label className="flex items-center justify-between gap-4 py-3">
-          <span>
-            <span className="block text-sm">{field.label}</span>
-            {field.description ? (
-              <span className="block text-xs text-muted-foreground">
-                {field.description}
-              </span>
-            ) : null}
-          </span>
+        <SettingsRow description={field.description} label={field.label}>
           <Switch
             checked={Boolean(formField.value)}
             disabled={disabled}
@@ -775,7 +759,7 @@ function SwitchControl({
               onCheckedChange?.(checked);
             }}
           />
-        </label>
+        </SettingsRow>
       )}
     />
   );
@@ -783,9 +767,58 @@ function SwitchControl({
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium">{value}</span>
+    <SettingsRow asLabel={false} label={label} muted>
+      <span className="break-words text-sm font-medium">{value}</span>
+    </SettingsRow>
+  );
+}
+
+function SettingsRow({
+  asLabel = true,
+  children,
+  description,
+  label,
+  muted = false,
+}: {
+  asLabel?: boolean;
+  children: ReactNode;
+  description?: string;
+  label: string;
+  muted?: boolean;
+}) {
+  const content = (
+    <>
+      <span className="min-w-0 max-w-prose break-words">
+        <span
+          className={
+            muted
+              ? "block text-sm text-muted-foreground"
+              : "block text-sm"
+          }
+        >
+          {label}
+        </span>
+        {description ? (
+          <span className="mt-1 block max-w-prose text-xs leading-relaxed text-muted-foreground">
+            {description}
+          </span>
+        ) : null}
+      </span>
+      <span className="flex w-full min-w-0 items-center sm:justify-end">
+        {children}
+      </span>
+    </>
+  );
+  const className =
+    "grid min-w-0 gap-3 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center sm:gap-6";
+
+  return asLabel ? (
+    <label className={className} data-slot="settings-row">
+      {content}
+    </label>
+  ) : (
+    <div className={className} data-slot="settings-row">
+      {content}
     </div>
   );
 }
