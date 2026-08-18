@@ -59,6 +59,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { PageFrame } from "@/components/ui/page-frame";
+import { StatusNotice } from "@/components/ui/status-notice";
 import {
   Table,
   TableBody,
@@ -573,7 +575,7 @@ export function HistoryPage() {
 
   return (
     <>
-      <div className="mx-auto grid h-full max-w-6xl content-start gap-4 p-4">
+      <PageFrame className="h-full" reserveFabSpace width="table">
         {database && !database.available ? (
           <DatabaseRecoveryPanel
             onRecovered={loadRecords}
@@ -583,23 +585,25 @@ export function HistoryPage() {
         ) : null}
 
         {error ? (
-          <section className="flex items-center justify-between gap-4 border-l-2 border-destructive px-4 py-2">
-            <p className="min-w-0 break-words text-sm text-destructive">
-              {error}
-            </p>
-            <Button
-              onClick={() => void loadRecords()}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              {t("refreshHistory")}
-            </Button>
-          </section>
+          <StatusNotice
+            actions={
+              <Button
+                onClick={() => void loadRecords()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {t("refreshHistory")}
+              </Button>
+            }
+            tone="error"
+          >
+            {error}
+          </StatusNotice>
         ) : null}
 
         <section aria-label={t("historyItems")} className="min-w-0">
-          <div className="rounded-md border">
+          <div className="surface-panel overflow-hidden">
             <Table>
               <TableHeader>
                 {table.getHeaderGroups().map((headerGroup) => (
@@ -684,13 +688,14 @@ export function HistoryPage() {
             </div>
           ) : null}
         </section>
-      </div>
+      </PageFrame>
 
       <Button
         aria-label={t("exportAllHistoryCsv")}
-        className="fixed bottom-6 right-6 z-20 size-12 rounded-full shadow-lg"
+        className="primary-fab size-12 rounded-full"
         disabled={exportDisabled}
         onClick={() => void exportHistory()}
+        size="icon"
         title={t("exportAllHistoryCsv")}
         type="button"
       >

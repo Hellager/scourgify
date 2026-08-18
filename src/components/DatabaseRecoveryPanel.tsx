@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FolderOpen, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { StatusNotice } from "@/components/ui/status-notice";
 import {
   dispatchAppEvent,
   REFRESH_DASHBOARD_EVENT,
@@ -56,21 +57,41 @@ export function DatabaseRecoveryPanel({
   };
 
   return (
-    <section
+    <StatusNotice
+      actions={
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            disabled={retrying}
+            onClick={() => void retry()}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <RefreshCw className={retrying ? "animate-spin" : ""} />
+            {t("retryDatabase")}
+          </Button>
+          <Button
+            disabled={!status.path}
+            onClick={() => void openDirectory()}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <FolderOpen />
+            {t("openDatabaseDirectory")}
+          </Button>
+        </div>
+      }
       aria-live="polite"
-      className="grid gap-3 border-l-2 border-destructive px-4 py-2"
+      title={t("databaseUnavailable")}
+      tone="error"
     >
-      <div>
-        <h2 className="text-sm font-semibold">{t("databaseUnavailable")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("databaseUnavailableDescription")}
-        </p>
-      </div>
-      <dl className="grid gap-2 text-xs text-muted-foreground">
+      <p>{t("databaseUnavailableDescription")}</p>
+      <dl className="mt-3 grid gap-2 text-xs text-muted-foreground">
         {status.path ? (
           <div className="grid gap-1">
             <dt className="font-medium text-foreground">{t("databasePath")}</dt>
-            <dd className="break-all font-mono">{status.path}</dd>
+            <dd className="data-code break-all">{status.path}</dd>
           </div>
         ) : null}
         {status.error ? (
@@ -80,29 +101,7 @@ export function DatabaseRecoveryPanel({
           </div>
         ) : null}
       </dl>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          disabled={retrying}
-          onClick={() => void retry()}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          <RefreshCw className={retrying ? "animate-spin" : ""} />
-          {t("retryDatabase")}
-        </Button>
-        <Button
-          disabled={!status.path}
-          onClick={() => void openDirectory()}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          <FolderOpen />
-          {t("openDatabaseDirectory")}
-        </Button>
-      </div>
-    </section>
+    </StatusNotice>
   );
 }
 

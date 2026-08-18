@@ -57,6 +57,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PageFrame } from "@/components/ui/page-frame";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -652,7 +653,7 @@ export function Dashboard() {
   const countValues = counts.data;
 
   return (
-    <main className="mx-auto grid w-full max-w-7xl gap-6 p-6">
+    <PageFrame as="main" comfortable reserveFabSpace width="wide">
       <section className="grid min-w-0 grid-cols-[repeat(4,minmax(0,1fr))] gap-4">
         <SummaryCard
           disabled={!overviewHealth.counts}
@@ -741,7 +742,7 @@ export function Dashboard() {
 
       <Button
         aria-label={t("smartClean")}
-        className="fixed bottom-6 right-6 z-20 size-12 rounded-full shadow-lg"
+        className="primary-fab size-12 rounded-full"
         disabled={
           smartCleaning ||
           privacyActive ||
@@ -801,7 +802,7 @@ export function Dashboard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </main>
+    </PageFrame>
   );
 }
 
@@ -824,7 +825,7 @@ function SummaryCard({
     <button
       aria-label={title}
       aria-busy={loading}
-      className="group flex min-h-28 min-w-0 flex-col items-center justify-center rounded-md border bg-card p-3 text-center text-card-foreground transition-[color,background-color,border-color,box-shadow,transform] outline-none hover:border-foreground/20 hover:bg-accent/40 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:translate-y-px disabled:pointer-events-none disabled:opacity-50"
+      className="surface-panel group flex min-h-28 min-w-0 flex-col items-center justify-center p-3 text-center transition-[color,background-color,border-color,box-shadow,transform] outline-none hover:border-foreground/20 hover:bg-surface-subtle focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:translate-y-px disabled:pointer-events-none disabled:opacity-50"
       disabled={disabled}
       onClick={onOpen}
       title={title}
@@ -833,7 +834,7 @@ function SummaryCard({
       <span className="line-clamp-2 h-10 w-full content-center break-words px-1 text-sm font-medium text-muted-foreground transition-colors group-hover:text-foreground">
         {title}
       </span>
-      <span className="mt-1 flex h-9 w-full min-w-0 shrink-0 items-center justify-center overflow-hidden whitespace-nowrap text-xl font-semibold tabular-nums">
+      <span className="data-value mt-1 flex h-9 w-full min-w-0 shrink-0 items-center justify-center overflow-hidden whitespace-nowrap text-xl font-semibold">
         {loading ? (
           <Dots aria-label="Loading" className="h-3 w-7 text-muted-foreground" />
         ) : (

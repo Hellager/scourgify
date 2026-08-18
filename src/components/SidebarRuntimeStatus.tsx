@@ -70,11 +70,11 @@ const stateLabelKeys: Record<RuntimeState, I18nKey> = {
 };
 
 const stateDotClasses: Record<RuntimeState, string> = {
-  healthy: "bg-emerald-500",
-  degraded: "bg-amber-500",
-  error: "bg-red-500",
+  healthy: "bg-status-success",
+  degraded: "bg-status-warning",
+  error: "bg-status-error",
   inactive: "bg-muted-foreground/45",
-  running: "animate-pulse bg-sky-500",
+  running: "animate-pulse bg-status-running",
   paused: "bg-muted-foreground/45",
   unknown: "bg-muted-foreground/30",
 };

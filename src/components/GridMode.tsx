@@ -100,7 +100,7 @@ export function GridMode() {
   );
 
   return (
-    <main className="flex h-svh flex-col bg-border text-foreground">
+    <main className="flex h-svh flex-col bg-surface-inset text-foreground">
       <TitleBar
         closeLabel={t("closeWindow")}
         maximizeLabel={t("maximizeWindow")}
@@ -115,7 +115,7 @@ export function GridMode() {
       >
         {tiles.map(({ key, label, value }) => (
           <section
-            className="group relative flex min-w-0 flex-col items-center justify-center bg-card px-2 py-2 text-center text-card-foreground transition-[background-color,box-shadow] duration-200 hover:z-10 hover:bg-accent hover:shadow-lg"
+            className="group relative flex min-w-0 flex-col items-center justify-center bg-surface-raised px-2 py-2 text-center text-card-foreground transition-[background-color,box-shadow] duration-200 hover:z-10 hover:bg-surface-subtle hover:shadow-sm"
             key={key}
           >
             <h2
@@ -127,7 +127,7 @@ export function GridMode() {
             {loading ? (
               <Skeleton className="h-9 w-14" />
             ) : (
-              <strong className="min-h-9 text-3xl font-semibold tabular-nums">
+              <strong className="data-value min-h-9 text-3xl font-semibold">
                 {value ?? "--"}
               </strong>
             )}

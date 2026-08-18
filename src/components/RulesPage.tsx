@@ -67,6 +67,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { PageFrame } from "@/components/ui/page-frame";
 import {
   Select,
   SelectContent,
@@ -75,6 +76,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { StatusNotice } from "@/components/ui/status-notice";
 import {
   Table,
   TableBody,
@@ -788,7 +790,7 @@ export function RulesPage() {
 
   return (
     <>
-      <div className="mx-auto grid h-full max-w-6xl content-start gap-4 overflow-hidden p-4">
+      <PageFrame className="h-full overflow-hidden" reserveFabSpace width="table">
         {database && !database.available ? (
           <DatabaseRecoveryPanel
             onRecovered={loadRules}
@@ -798,33 +800,33 @@ export function RulesPage() {
         ) : null}
 
         {error ? (
-          <section className="flex items-center justify-between gap-4 border-l-2 border-destructive px-4 py-2">
-            <p className="min-w-0 break-words text-sm text-destructive">
-              {error}
-            </p>
-            <Button
-              onClick={() => void loadRules()}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              {t("refreshRules")}
-            </Button>
-          </section>
+          <StatusNotice
+            actions={
+              <Button
+                onClick={() => void loadRules()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {t("refreshRules")}
+              </Button>
+            }
+            tone="error"
+          >
+            {error}
+          </StatusNotice>
         ) : null}
 
         {conflictingKeywords.length > 0 ? (
-          <section className="border-l-2 border-amber-500 px-4 py-2">
-            <p className="break-words text-sm text-muted-foreground">
-              {t("ruleConflictWarning", {
-                keywords: conflictingKeywords.join(", "),
-              })}
-            </p>
-          </section>
+          <StatusNotice tone="warning">
+            {t("ruleConflictWarning", {
+              keywords: conflictingKeywords.join(", "),
+            })}
+          </StatusNotice>
         ) : null}
 
         <section aria-label={t("rules")}>
-          <div className="rounded-md border">
+          <div className="surface-panel overflow-hidden">
             <Table>
               <TableHeader>
                 {table.getHeaderGroups().map((headerGroup) => (
@@ -923,11 +925,11 @@ export function RulesPage() {
             </div>
           ) : null}
         </section>
-      </div>
+      </PageFrame>
 
       <Button
         aria-label={t("addRule")}
-        className="fixed bottom-6 right-6 z-20 size-12 rounded-full shadow-lg"
+        className="primary-fab size-12 rounded-full"
         disabled={writesDisabled}
         onClick={(event) => {
           formTriggerRef.current = event.currentTarget;
@@ -1297,8 +1299,8 @@ export function RulesPage() {
       <span
         className={
           whitelist
-            ? "inline-flex items-center gap-1 rounded-sm bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-            : "inline-flex items-center gap-1 rounded-sm bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+            ? "inline-flex items-center gap-1 rounded-sm bg-status-success-muted px-2 py-0.5 text-xs font-medium text-status-success-foreground"
+            : "inline-flex items-center gap-1 rounded-sm bg-status-warning-muted px-2 py-0.5 text-xs font-medium text-status-warning-foreground"
         }
       >
         <ShieldCheck className="size-3" />

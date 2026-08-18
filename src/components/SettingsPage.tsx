@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { PageFrame } from "@/components/ui/page-frame";
 import {
   Select,
   SelectContent,
@@ -361,7 +362,7 @@ export function SettingsPage() {
   }, [watch]);
 
   return (
-    <div className="mx-auto grid max-w-5xl gap-4 p-6">
+    <PageFrame comfortable width="settings">
         <Section title={t("general")}>
           <SelectControl
             control={control}
@@ -680,7 +681,7 @@ export function SettingsPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-    </div>
+    </PageFrame>
   );
 }
 
@@ -692,7 +693,7 @@ function Section({
   title: string;
 }) {
   return (
-    <section className="rounded-md border bg-card p-4 text-card-foreground">
+    <section className="surface-panel p-4">
       <h2 className="text-sm font-semibold">{title}</h2>
       <div className="mt-3 divide-y">{children}</div>
     </section>
