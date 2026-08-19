@@ -6,6 +6,7 @@ import { StatusNotice } from "@/components/ui/status-notice";
 import {
   dispatchAppEvent,
   REFRESH_DASHBOARD_EVENT,
+  REFRESH_RUNTIME_STATUS_EVENT,
 } from "@/lib/app-events";
 import { useI18n } from "@/lib/i18n";
 import { invokeCommand } from "@/lib/commands";
@@ -34,6 +35,7 @@ export function DatabaseRecoveryPanel({
     try {
       const next = await invokeCommand<DatabaseStatus>("retry_database");
       onStatusChange(next);
+      dispatchAppEvent(REFRESH_RUNTIME_STATUS_EVENT);
       if (next.available) {
         toast.success(t("databaseRecovered"));
         dispatchAppEvent(REFRESH_DASHBOARD_EVENT);

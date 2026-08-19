@@ -228,10 +228,6 @@ export function HistoryPage() {
       if (request !== requestId.current) {
         return;
       }
-      setRecords([]);
-      setTotal(0);
-      setOverallTotal(0);
-      setHiddenTotal(0);
       setError(errorMessage(loadError));
     } finally {
       if (request === requestId.current) {

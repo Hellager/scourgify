@@ -14,7 +14,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { AUTO_CLEAN_UPDATED_EVENT } from "@/lib/app-events";
+import {
+  AUTO_CLEAN_UPDATED_EVENT,
+  REFRESH_RUNTIME_STATUS_EVENT,
+} from "@/lib/app-events";
 import { invokeCommand } from "@/lib/commands";
 import { useI18n, type I18nKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -99,10 +102,12 @@ export function SidebarRuntimeStatus({
     const refreshOnFocus = () => refresh();
     window.addEventListener("focus", refreshOnFocus);
     window.addEventListener(AUTO_CLEAN_UPDATED_EVENT, refreshOnFocus);
+    window.addEventListener(REFRESH_RUNTIME_STATUS_EVENT, refreshOnFocus);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshOnFocus);
       window.removeEventListener(AUTO_CLEAN_UPDATED_EVENT, refreshOnFocus);
+      window.removeEventListener(REFRESH_RUNTIME_STATUS_EVENT, refreshOnFocus);
     };
   }, [refresh]);
 

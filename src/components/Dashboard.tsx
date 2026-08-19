@@ -34,6 +34,10 @@ import {
 import { toast } from "sonner";
 import { useAppShell } from "@/components/AppShell";
 import { AutoCleanMonitorPulse } from "@/components/AutoCleanMonitorPulse";
+import {
+  DatabaseRecoveryPanel,
+  type DatabaseStatus,
+} from "@/components/DatabaseRecoveryPanel";
 import { Dots } from "@/components/loading-ui/dots";
 import { WordCloudPanel } from "@/components/dashboard/WordCloudPanel";
 import {
@@ -47,6 +51,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { StatusNotice } from "@/components/ui/status-notice";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -210,6 +215,7 @@ export function Dashboard() {
     Record<QaType, ResourceState<number>>
   >(initialDestlistState);
   const [stats, setStats] = useState<ResourceState<Stats>>(initialResourceState);
+  const [database, setDatabase] = useState<DatabaseStatus | null>(null);
   const [dashboardRevision, setDashboardRevision] = useState(0);
   const [dialog, setDialog] = useState<DashboardDialog>(null);
   const [qaDialogState, setQaDialogState] = useState<
@@ -232,7 +238,6 @@ export function Dashboard() {
   const countsRequestRef = useRef(0);
   const statsRequestRef = useRef(0);
   const initialPreviewKeyRef = useRef<string | null>(null);
-  const reportedOverviewErrorsRef = useRef({ counts: null as string | null, stats: null as string | null });
 
   const loadCounts = useCallback(async () => {
     const requestId = ++countsRequestRef.current;
@@ -311,25 +316,24 @@ export function Dashboard() {
     }
   }, []);
 
+  const loadDatabaseStatus = useCallback(async () => {
+    try {
+      setDatabase(await invokeCommand<DatabaseStatus>("get_database_status"));
+    } catch {
+      setDatabase(null);
+    }
+  }, []);
+
   const loadOverview = useCallback(async () => {
-    await Promise.all([loadCounts(), loadStats()]);
-  }, [loadCounts, loadStats]);
+    await Promise.all([loadCounts(), loadStats(), loadDatabaseStatus()]);
+  }, [loadCounts, loadDatabaseStatus, loadStats]);
 
   useEffect(() => {
     const countsError = counts.error;
     const statsError = stats.error;
-    const countsMessage = countsError ? t("overviewCountsUnavailable") : null;
-    const statsMessage = statsError ? t("overviewStatsUnavailable") : null;
     reportOverviewFailure("counts", countsError);
     reportOverviewFailure("stats", statsError);
-    if (countsMessage && reportedOverviewErrorsRef.current.counts !== countsMessage) {
-      toast.error(countsMessage);
-    }
-    if (statsMessage && reportedOverviewErrorsRef.current.stats !== statsMessage) {
-      toast.error(statsMessage);
-    }
-    reportedOverviewErrorsRef.current = { counts: countsMessage, stats: statsMessage };
-  }, [counts.error, reportOverviewFailure, stats.error, t]);
+  }, [counts.error, reportOverviewFailure, stats.error]);
 
   const loadQaItems = useCallback(async (qaType: QaType) => {
     setQaDialogState((current) => ({
@@ -654,6 +658,13 @@ export function Dashboard() {
 
   return (
     <PageFrame as="main" comfortable reserveFabSpace width="wide">
+      {database && !database.available ? (
+        <DatabaseRecoveryPanel
+          onRecovered={loadOverview}
+          onStatusChange={setDatabase}
+          status={database}
+        />
+      ) : null}
       <section className="grid min-w-0 grid-cols-[repeat(4,minmax(0,1fr))] gap-4">
         <SummaryCard
           disabled={!overviewHealth.counts}
@@ -694,6 +705,35 @@ export function Dashboard() {
           value={autoCleanCardValue}
         />
       </section>
+
+      {counts.error && database?.available !== false ? (
+        <StatusNotice
+          actions={
+            <Button onClick={() => void loadCounts()} size="sm" variant="outline">
+              {t("refreshDashboard")}
+            </Button>
+          }
+          role="status"
+          tone={counts.data === null ? "error" : "warning"}
+          title={t("overviewCountsUnavailable")}
+        >
+          {counts.error}
+        </StatusNotice>
+      ) : null}
+      {stats.error && database?.available !== false ? (
+        <StatusNotice
+          actions={
+            <Button onClick={() => void loadStats()} size="sm" variant="outline">
+              {t("refreshDashboard")}
+            </Button>
+          }
+          role="status"
+          tone={stats.data === null ? "error" : "warning"}
+          title={t("overviewStatsUnavailable")}
+        >
+          {stats.error}
+        </StatusNotice>
+      ) : null}
 
       <WordCloudPanel
         blacklistTermsEnabled={config.word_cloud_show_blacklist_terms}

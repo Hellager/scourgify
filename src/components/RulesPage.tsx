@@ -191,7 +191,6 @@ export function RulesPage() {
       );
       setRowSelection({});
     } catch (loadError) {
-      setRules([]);
       setError(errorMessage(loadError));
     } finally {
       setLoading(false);
