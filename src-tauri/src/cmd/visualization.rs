@@ -18,8 +18,10 @@ pub(crate) async fn get_dashboard_word_cloud(
     config: State<'_, Mutex<Config>>,
     source: Option<WordCloudSource>,
     range: Option<WordCloudRange>,
+    deep_parse_enabled: Option<bool>,
+    blacklist_terms_enabled: Option<bool>,
 ) -> CommandResult<WordCloudResult> {
-    let config = config
+    let mut config = config
         .lock()
         .map_err(|error| super::state_error("read_word_cloud_config", error))?
         .clone();
@@ -28,6 +30,12 @@ pub(crate) async fn get_dashboard_word_cloud(
         VisualizationDataSource::RecentCleanup => WordCloudSource::Cleanup,
     });
     let range = range.unwrap_or_else(|| config.visualization_data_range.into());
+    if let Some(enabled) = deep_parse_enabled {
+        config.visualization_deep_parse = enabled;
+    }
+    if let Some(enabled) = blacklist_terms_enabled {
+        config.word_cloud_show_blacklist_terms = enabled;
+    }
     let backend = app.state::<QuickAccessBackendState>().inner().clone();
     let app_for_worker = app.clone();
     run_blocking("get_dashboard_word_cloud", move || {

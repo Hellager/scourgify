@@ -139,7 +139,12 @@ export function WordCloudPanel({
     setLoading(true);
     setError(null);
     try {
-      const loaded = await invokeCommand<WordCloudResult>("get_dashboard_word_cloud");
+      const loaded = await invokeCommand<WordCloudResult>("get_dashboard_word_cloud", {
+        source,
+        range: dataRange,
+        deepParseEnabled,
+        blacklistTermsEnabled,
+      });
       if (currentRequest !== requestId.current) {
         return;
       }
