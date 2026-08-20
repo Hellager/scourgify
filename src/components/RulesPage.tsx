@@ -151,6 +151,7 @@ export function RulesPage() {
   const [clearTarget, setClearTarget] = useState<ClearTarget | null>(null);
   const [clearing, setClearing] = useState(false);
   const [mutatingId, setMutatingId] = useState<number | null>(null);
+  const [exitingId, setExitingId] = useState<number | null>(null);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [pagination, setPagination] = useState<PaginationState>({
@@ -326,8 +327,11 @@ export function RulesPage() {
     setMutatingId(rule.id);
     try {
       await invokeCommand("remove_rule", { id: rule.id });
-      setRules((current) => current.filter((item) => item.id !== rule.id));
       setPendingDelete(null);
+      setExitingId(rule.id);
+      await waitForMotion();
+      setRules((current) => current.filter((item) => item.id !== rule.id));
+      setExitingId(null);
       toast.success(t("ruleDeleted"));
     } catch (deleteError) {
       toast.error(errorMessage(deleteError));
@@ -855,7 +859,10 @@ export function RulesPage() {
                   <RuleTableMessage message={t("noMatches")} />
                 ) : (
                   table.getRowModel().rows.map((row) => (
-                    <TableRow key={row.id}>
+                    <TableRow
+                      className={`motion-row ${exitingId === row.original.id ? "motion-row-exiting" : ""}`}
+                      key={row.id}
+                    >
                       {row.getVisibleCells().map((cell) => (
                         <TableCell
                           className={ruleColumnClassName(cell.column.id)}
@@ -1477,6 +1484,13 @@ function RuleTableMessage({ message }: { message: string }) {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function waitForMotion() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => window.setTimeout(resolve, 180));
 }
 
 function ruleExportFileName(suffix?: string): string {

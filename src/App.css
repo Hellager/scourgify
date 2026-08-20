@@ -227,6 +227,44 @@
     border-radius: 9999px;
     box-shadow: 0 0.5rem 1.25rem oklch(0 0 0 / 14%);
   }
+
+  .motion-row {
+    animation: scourgify-row-enter 180ms ease-out both;
+    transition: opacity 180ms ease-out, transform 180ms ease-out,
+      background-color 180ms ease-out;
+  }
+
+  .motion-row-exiting {
+    opacity: 0;
+    transform: translateX(0.35rem);
+  }
+}
+
+@keyframes scourgify-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.15rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .motion-row-exiting {
+    opacity: 0;
+    transform: none;
+  }
 }
 
 @media (min-width: 48rem) {

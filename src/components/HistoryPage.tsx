@@ -143,6 +143,8 @@ export function HistoryPage() {
   const [pendingDelete, setPendingDelete] = useState<CleanRecord | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [hidingId, setHidingId] = useState<number | null>(null);
+  const [exitingId, setExitingId] = useState<number | null>(null);
+  const [refreshRevision, setRefreshRevision] = useState(0);
   const [restoringHidden, setRestoringHidden] = useState(false);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [pagination, setPagination] = useState<PaginationState>({
@@ -241,7 +243,10 @@ export function HistoryPage() {
   }, [loadRecords]);
 
   useEffect(() => {
-    const refreshHistory = () => void loadRecords();
+    const refreshHistory = () => {
+      setRefreshRevision((revision) => revision + 1);
+      void loadRecords();
+    };
     window.addEventListener(REFRESH_HISTORY_EVENT, refreshHistory);
     return () =>
       window.removeEventListener(REFRESH_HISTORY_EVENT, refreshHistory);
@@ -275,7 +280,10 @@ export function HistoryPage() {
     try {
       await invokeCommand("remove_clean_record", { id: record.id });
       setPendingDelete(null);
+      setExitingId(record.id);
+      await waitForMotion();
       await loadRecords();
+      setExitingId(null);
       dispatchAppEvent(REFRESH_DASHBOARD_EVENT, { fresh: false });
       toast.success(t("historyRecordDeleted"));
     } catch (deleteError) {
@@ -293,7 +301,10 @@ export function HistoryPage() {
           id: record.id,
           visible: false,
         });
+        setExitingId(record.id);
+        await waitForMotion();
         await loadRecords();
+        setExitingId(null);
         dispatchAppEvent(REFRESH_DASHBOARD_EVENT, { fresh: false });
         toast.success(t("historyRecordHidden"));
       } catch (hideError) {
@@ -631,7 +642,10 @@ export function HistoryPage() {
                   />
                 ) : (
                   table.getRowModel().rows.map((row) => (
-                    <TableRow key={row.id}>
+                    <TableRow
+                      className={`motion-row ${exitingId === row.original.id ? "motion-row-exiting" : ""}`}
+                      key={`${row.id}-${refreshRevision}`}
+                    >
                       {row.getVisibleCells().map((cell) => (
                         <TableCell
                           className={historyColumnClassName(cell.column.id)}
@@ -966,4 +980,11 @@ function exportFileName() {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function waitForMotion() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => window.setTimeout(resolve, 180));
 }

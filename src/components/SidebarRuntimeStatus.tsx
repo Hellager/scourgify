@@ -210,7 +210,7 @@ function StatusBadge({
   const badge = (
     <div
       className={cn(
-        "flex min-w-0 items-center gap-2 rounded-sm py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+        "flex min-w-0 items-center gap-2 rounded-sm py-1 text-xs outline-none transition-[color,background-color,opacity] duration-200 ease-out focus-visible:ring-2 focus-visible:ring-sidebar-ring",
         inverted ? "text-background" : "text-sidebar-foreground",
       )}
       tabIndex={withTooltip ? 0 : undefined}
@@ -253,7 +253,7 @@ function StatusDot({
     <span
       aria-hidden="true"
       className={cn(
-        "size-2 shrink-0 rounded-full ring-2 ring-sidebar/80",
+        "size-2 shrink-0 rounded-full ring-2 ring-sidebar/80 transition-[background-color,opacity,transform] duration-200 ease-out",
         stateDotClasses[state],
       )}
     />
