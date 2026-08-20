@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { X } from "lucide-react";
+import { ExternalLink, X } from "lucide-react";
 import { useTheme } from "next-themes";
 import packageJson from "../../package.json";
 import darkIcon from "../../src-tauri/icons/dark/incognito-svgrepo-com.svg";
@@ -62,6 +62,7 @@ export function AboutDialog() {
             type="button"
             variant="outline"
           >
+            <ExternalLink />
             {t("github")}
           </Button>
         </div>

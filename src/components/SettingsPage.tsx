@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Controller, type Control, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LoaderCircle, Trash2 } from "lucide-react";
+import { ExternalLink, FolderOpen, LoaderCircle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import packageJson from "../../package.json";
 import { useAppShell } from "@/components/AppShell";
@@ -610,6 +610,7 @@ export function SettingsPage() {
               type="button"
               variant="outline"
             >
+              <ExternalLink />
               {t("visit")}
             </Button>
           </SettingsRow>
@@ -625,6 +626,7 @@ export function SettingsPage() {
               type="button"
               variant="outline"
             >
+              <FolderOpen />
               {t("openLogDirectory")}
             </Button>
           </SettingsRow>
