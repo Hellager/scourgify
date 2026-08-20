@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   type ReactNode,
   useCallback,
   useEffect,
@@ -39,7 +41,6 @@ import {
   type DatabaseStatus,
 } from "@/components/DatabaseRecoveryPanel";
 import { Dots } from "@/components/loading-ui/dots";
-import { WordCloudPanel } from "@/components/dashboard/WordCloudPanel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -79,6 +80,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
+const WordCloudPanel = lazy(() =>
+  import("@/components/dashboard/WordCloudPanel").then((module) => ({
+    default: module.WordCloudPanel,
+  })),
+);
 import {
   Table,
   TableBody,
@@ -735,14 +742,26 @@ export function Dashboard() {
         </StatusNotice>
       ) : null}
 
-      <WordCloudPanel
-        blacklistTermsEnabled={config.word_cloud_show_blacklist_terms}
-        dataRange={config.visualization_data_range}
-        dataSource={config.visualization_data_source}
-        deepParseEnabled={config.visualization_deep_parse}
-        refreshKey={dashboardRevision}
-        t={t}
-      />
+      <Suspense
+        fallback={
+          <div
+            aria-busy="true"
+            className="grid h-[360px] place-items-center bg-card text-sm text-muted-foreground"
+            role="status"
+          >
+            {t("wordCloudLoading")}
+          </div>
+        }
+      >
+        <WordCloudPanel
+          blacklistTermsEnabled={config.word_cloud_show_blacklist_terms}
+          dataRange={config.visualization_data_range}
+          dataSource={config.visualization_data_source}
+          deepParseEnabled={config.visualization_deep_parse}
+          refreshKey={dashboardRevision}
+          t={t}
+        />
+      </Suspense>
 
       <QuickAccessDialog
         items={activeQaState.items}
