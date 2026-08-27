@@ -340,7 +340,6 @@
   "wordCloudSampleTruncated": "Les {count} enregistrements de nettoyage les plus récents sont affichés.",
   "wordCloudBlacklistUnavailable": "La correspondance de la liste noire est indisponible ; les termes peuvent ne pas être marqués.",
   "wordCloudOccurrences": "{count} occurrence(s)",
-  "wordCloudScore": "Score pondéré : {score}",
   "wordCloudAccessCount": "{count} accès, {recent} fichier(s) récent(s), {frequent} dossier(s) fréquent(s)",
   "wordCloudCleanupCount": "{count} nettoyage(s), {manual} manuel(s), {automatic} automatique(s)",
   "wordCloudBlacklistHits": "{count} correspondance(s) de la liste noire",

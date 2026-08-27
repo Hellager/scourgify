@@ -340,7 +340,6 @@
   "wordCloudSampleTruncated": "Showing the newest {count} cleanup records.",
   "wordCloudBlacklistUnavailable": "Blacklist matching is unavailable; blacklist terms may not be marked.",
   "wordCloudOccurrences": "{count} occurrence(s)",
-  "wordCloudScore": "Weighted score {score}",
   "wordCloudAccessCount": "{count} access count(s), {recent} recent item(s), {frequent} frequent folder(s)",
   "wordCloudCleanupCount": "{count} cleanup(s), {manual} manual, {automatic} automatic",
   "wordCloudBlacklistHits": "{count} blacklist hit(s)",

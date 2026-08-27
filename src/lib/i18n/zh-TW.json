@@ -340,7 +340,6 @@
   "wordCloudSampleTruncated": "目前顯示最近 {count} 筆清理記錄。",
   "wordCloudBlacklistUnavailable": "黑名單比對暫時無法使用，黑名單詞語可能無法標記。",
   "wordCloudOccurrences": "出現 {count} 次",
-  "wordCloudScore": "加權分數 {score}",
   "wordCloudAccessCount": "存取次數 {count}，最近檔案 {recent} 個，常用資料夾 {frequent} 個",
   "wordCloudCleanupCount": "清理 {count} 次，手動 {manual} 次，自動 {automatic} 次",
   "wordCloudBlacklistHits": "命中黑名單 {count} 次",

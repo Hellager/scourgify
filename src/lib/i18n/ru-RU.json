@@ -340,7 +340,6 @@
   "wordCloudSampleTruncated": "Показаны последние {count} записей очистки.",
   "wordCloudBlacklistUnavailable": "Сопоставление с чёрным списком недоступно; слова могут быть не отмечены.",
   "wordCloudOccurrences": "Упоминаний: {count}",
-  "wordCloudScore": "Взвешенная оценка: {score}",
   "wordCloudAccessCount": "Обращений: {count}, последних файлов: {recent}, частых папок: {frequent}",
   "wordCloudCleanupCount": "Очисток: {count}, вручную: {manual}, автоматически: {automatic}",
   "wordCloudBlacklistHits": "Совпадений с чёрным списком: {count}",

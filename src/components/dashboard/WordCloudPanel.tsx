@@ -267,7 +267,6 @@ export function WordCloudPanel({
                       transform={`translate(${cloudWord.x ?? 0},${cloudWord.y ?? 0}) rotate(${cloudWord.rotate ?? 0})`}
                     >
                       {text}
-                      <title>{termLabel(term, t)}</title>
                     </text>
                   );
                 })
@@ -336,7 +335,6 @@ function termColor(term: WordCloudTerm, source: WordCloudSource) {
 function termLabel(term: WordCloudTerm, t: Translate) {
   const parts = [
     `${term.text}: ${t("wordCloudOccurrences", { count: term.occurrences })}`,
-    t("wordCloudScore", { score: term.score.toFixed(2) }),
   ];
   if (term.recent_occurrences || term.frequent_occurrences) {
     parts.push(
