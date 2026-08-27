@@ -950,9 +950,9 @@ function AutoCleanCountdown({
 function quickAccessColumnClassName(columnId: string) {
   switch (columnId) {
     case "visible":
-      return "w-28";
+      return "w-28 min-w-28";
     case "last_interaction_at":
-      return "w-40";
+      return "w-40 min-w-40";
     case "name":
       return "max-w-56";
     case "path":
@@ -1096,7 +1096,11 @@ function QuickAccessDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
-        className="max-h-[80svh] overflow-hidden sm:max-w-4xl"
+        className={
+          deepParseEnabled
+            ? "max-h-[80svh] overflow-hidden sm:w-[calc(100%-4rem)] sm:max-w-5xl"
+            : "max-h-[80svh] overflow-hidden sm:max-w-4xl"
+        }
         showCloseButton={false}
       >
         <DialogHeader className="sr-only">
