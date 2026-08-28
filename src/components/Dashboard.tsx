@@ -947,10 +947,23 @@ function AutoCleanCountdown({
   return <>{formatCountdown(target.getTime() - now)}</>;
 }
 
-function quickAccessColumnClassName(columnId: string) {
+function quickAccessColumnClassName(columnId: string, constrained: boolean) {
+  if (constrained) {
+    switch (columnId) {
+      case "name":
+        return "min-w-0 overflow-hidden";
+      case "path":
+        return "min-w-0 overflow-hidden";
+      case "last_interaction_at":
+        return "min-w-0 overflow-hidden";
+      case "visible":
+        return "min-w-0 overflow-hidden";
+      default:
+        return undefined;
+    }
+  }
+
   switch (columnId) {
-    case "visible":
-      return "w-28 min-w-28";
     case "last_interaction_at":
       return "w-40 min-w-40";
     case "name":
@@ -960,6 +973,25 @@ function quickAccessColumnClassName(columnId: string) {
     default:
       return undefined;
   }
+}
+
+function quickAccessVisibleColumnWidth(label: string) {
+  const fallbackWidth = 112;
+  if (typeof document === "undefined") {
+    return fallbackWidth;
+  }
+
+  const context = document.createElement("canvas").getContext("2d");
+  if (!context) {
+    return fallbackWidth;
+  }
+
+  const fontFamily =
+    window.getComputedStyle(document.documentElement).fontFamily || "sans-serif";
+  context.font = `600 12px ${fontFamily}`;
+
+  // Include table padding, the header gap, the filter button, and a small buffer.
+  return Math.min(128, Math.max(84, Math.ceil(context.measureText(label).width + 60)));
 }
 
 function QuickAccessDialog({
@@ -1043,15 +1075,17 @@ function QuickAccessDialog({
             {t("lastUsed")}
           </QuickAccessSortableHeader>
         ),
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">
-            {row.original.last_interaction_at === null
+        cell: ({ row }) => {
+          const value =
+            row.original.last_interaction_at === null
               ? "--"
-              : new Date(
-                  row.original.last_interaction_at,
-                ).toLocaleString(language)}
-          </span>
-        ),
+              : new Date(row.original.last_interaction_at).toLocaleString(language);
+          return (
+            <span className="block truncate text-muted-foreground" title={value}>
+              {value}
+            </span>
+          );
+        },
       },
       ...(deepParseEnabled
         ? [
@@ -1092,6 +1126,10 @@ function QuickAccessDialog({
     state: { columnFilters, sorting },
   });
   const rows = table.getRowModel().rows;
+  const visibleColumnWidth = useMemo(
+    () => quickAccessVisibleColumnWidth(t("visible")),
+    [language, t],
+  );
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -1113,13 +1151,24 @@ function QuickAccessDialog({
           aria-busy={loading}
           className="h-[58svh] overflow-auto rounded-md border"
         >
-          <Table>
+          <Table className={deepParseEnabled ? "table-fixed" : undefined}>
+            {deepParseEnabled ? (
+              <colgroup>
+                <col className="w-[22%]" />
+                <col />
+                <col className="w-[25%]" />
+                <col style={{ width: visibleColumnWidth }} />
+              </colgroup>
+            ) : null}
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
                   {headerGroup.headers.map((header) => (
                     <TableHead
-                      className={quickAccessColumnClassName(header.column.id)}
+                      className={quickAccessColumnClassName(
+                        header.column.id,
+                        deepParseEnabled,
+                      )}
                       key={header.id}
                     >
                       {header.isPlaceholder
@@ -1146,7 +1195,10 @@ function QuickAccessDialog({
                   <TableRow key={row.id}>
                     {row.getVisibleCells().map((cell) => (
                       <TableCell
-                        className={quickAccessColumnClassName(cell.column.id)}
+                        className={quickAccessColumnClassName(
+                          cell.column.id,
+                          deepParseEnabled,
+                        )}
                         key={cell.id}
                       >
                         {flexRender(
@@ -1188,14 +1240,21 @@ function QuickAccessSortableHeader({
     sorted === "asc" ? ArrowUp : sorted === "desc" ? ArrowDown : ArrowUpDown;
   return (
     <button
-      className="flex h-8 w-full items-center justify-between gap-1.5 text-left text-sm font-medium"
+      className="flex h-8 w-full min-w-0 items-center justify-between gap-1.5 text-left text-sm font-medium"
       onClick={column.getToggleSortingHandler()}
       type="button"
     >
-      {children}
+      <span
+        className="min-w-0 truncate"
+        title={typeof children === "string" ? children : undefined}
+      >
+        {children}
+      </span>
       <SortIcon
         className={
-          sorted ? "size-4 text-primary" : "size-4 text-muted-foreground"
+          sorted
+            ? "size-4 shrink-0 text-primary"
+            : "size-4 shrink-0 text-muted-foreground"
         }
       />
     </button>
@@ -1216,8 +1275,10 @@ function QuickAccessKeywordFilterHeader({
   const value = (column.getFilterValue() as string | undefined) ?? "";
   const active = column.getIsFiltered();
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span>{label}</span>
+    <div className="flex min-w-0 items-center justify-between gap-2">
+      <span className="min-w-0 truncate" title={label}>
+        {label}
+      </span>
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -1277,8 +1338,10 @@ function QuickAccessEnumFilterHeader({
   const active = column.getIsFiltered();
   const value = (column.getFilterValue() as string | undefined) ?? "all";
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span>{label}</span>
+    <div className="flex min-w-0 items-center justify-between gap-2">
+      <span className="min-w-0 truncate" title={label}>
+        {label}
+      </span>
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
