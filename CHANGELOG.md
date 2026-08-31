@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0 - 2026-08-31
+
+- Refined the desktop visual system with consistent page frames, surfaces, status colors, compact radii, Lucide action icons, and state-driven motion that respects reduced-motion preferences.
+- Made Dashboard summary cards fully interactive and added explicit loading, partial-failure, unavailable-service, and database-recovery states without discarding previously loaded data.
+- Improved Dashboard usability with resilient word-cloud requests, persistent deep-parsing visibility controls, simpler tooltips, and Quick Access columns that adapt to localized labels.
+- Improved narrow-window and multilingual layouts across Dashboard, Rules, History, Settings, Grid, and About, including stable viewport sizing and unclipped table content.
+- Lazy-loaded secondary routes and word-cloud rendering to reduce the initial frontend bundle and provide visible route-loading feedback.
+- Standardized page-level query and runtime error feedback, and expanded Debug Mock Lab coverage for delayed and failed Dashboard overview requests.
+
 ## 0.7.0 - 2026-08-11
 
 - Documented the Rust crate entry point, Windows platform requirements, side

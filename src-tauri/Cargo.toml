@@ -1,7 +1,7 @@
 [package]
 name = "Scourgify"
-version = "0.7.0"
-description = "Rule-driven Windows Quick Access cleaner"
+version = "0.8.0"
+description = "Windows Quick Access privacy manager with rule-driven cleanup and history"
 authors = ["Stein Gu <steinsgu@gmail.com>"]
 edition = "2021"
 rust-version = "1.89"
