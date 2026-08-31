@@ -12,7 +12,7 @@ use crate::{
     config::{AppMode, Config},
     db,
     error::report_background_error,
-    privacy::{LockResult, PrivacyManager},
+    privacy::{LockResult, PrivacyEnterOutcome, PrivacyManager},
     quick_access::{QuickAccessBackendState, QuickAccessCache, QuickAccessWatchers},
 };
 
@@ -60,19 +60,24 @@ fn restore_privacy_mode(app: &tauri::AppHandle, config: &Config, privacy: &Priva
     }
 
     match privacy.enter() {
-        Ok(LockResult::Full) => log::info!("restored privacy mode: full"),
-        Ok(LockResult::Partial) => {
-            log::warn!("restored privacy mode with partial protection");
-            alert::warning(
-                app,
-                "Scourgify",
-                "Privacy mode was restored with partial protection.",
-            );
-            notifier::notify_partial_failure(
-                app,
-                config,
-                "Privacy mode was restored with partial protection.",
-            );
+        Ok(outcome) => {
+            report_privacy_enter_degradation(&outcome);
+            match outcome.lock_result {
+                LockResult::Full => log::info!("restored privacy mode: full"),
+                LockResult::Partial => {
+                    log::warn!("restored privacy mode with partial protection");
+                    alert::warning(
+                        app,
+                        "Scourgify",
+                        "Privacy mode was restored with partial protection.",
+                    );
+                    notifier::notify_partial_failure(
+                        app,
+                        config,
+                        "Privacy mode was restored with partial protection.",
+                    );
+                }
+            }
         }
         Err(error) => {
             let incident_id = report_background_error("restore_privacy_mode", &error);
@@ -86,4 +91,13 @@ fn restore_privacy_mode(app: &tauri::AppHandle, config: &Config, privacy: &Priva
             log::warn!("privacy mode restore failed incident_id={incident_id}");
         }
     }
+}
+
+fn report_privacy_enter_degradation(outcome: &PrivacyEnterOutcome) {
+    if outcome.failures.is_empty() {
+        return;
+    }
+    let incident_id =
+        report_background_error("restore_privacy_mode_degraded", outcome.diagnostics());
+    log::warn!("privacy mode restored with fallback protection incident_id={incident_id}");
 }

@@ -6,7 +6,7 @@ use crate::{
     config::Config,
     error::{command_warning, CommandError, CommandResult, CommandWarning, ErrorCode},
     privacy::{
-        LockResult, PrivacyExitFailure, PrivacyManager, PrivacyModeState,
+        LockResult, PrivacyEnterOutcome, PrivacyExitFailure, PrivacyManager, PrivacyModeState,
         PRIVACY_STATE_CHANGED_EVENT,
     },
     quick_access::{BackendMode, QuickAccessBackendState},
@@ -31,7 +31,7 @@ pub(crate) async fn privacy_enter(app: tauri::AppHandle) -> CommandResult<Privac
         let config = app.state::<std::sync::Mutex<Config>>();
         let privacy = app.state::<PrivacyManager>();
         let backend = app.state::<QuickAccessBackendState>();
-        let result = privacy.enter().map_err(|error| {
+        let outcome = privacy.enter().map_err(|error| {
             CommandError::unexpected(
                 "privacy_enter",
                 ErrorCode::QuickAccessOperationFailed,
@@ -42,14 +42,15 @@ pub(crate) async fn privacy_enter(app: tauri::AppHandle) -> CommandResult<Privac
         })?;
         let state = privacy.state();
         emit_privacy_state(&app, state);
+        let warnings = privacy_enter_warning(&outcome).into_iter().collect();
         let mut transition = PrivacyTransition {
             state,
-            lock_result: Some(result),
+            lock_result: Some(outcome.lock_result),
             reports: 0,
             new_links: 0,
             deleted_links: 0,
             failed_link_deletions: 0,
-            warnings: Vec::new(),
+            warnings,
         };
         if backend.mode() == BackendMode::Real {
             if let Err(error) = settings::persist_privacy_mode(&app, config.inner(), true) {
@@ -135,6 +136,24 @@ pub(crate) fn privacy_state(privacy: State<'_, PrivacyManager>) -> CommandResult
     Ok(privacy.state())
 }
 
+fn privacy_enter_warning(outcome: &PrivacyEnterOutcome) -> Option<CommandWarning> {
+    if outcome.failures.is_empty() {
+        return None;
+    }
+    let message = if outcome.has_target_failure() {
+        "Privacy mode is active with partial protection."
+    } else {
+        "Privacy mode is active using fallback protection."
+    };
+    Some(command_warning(
+        "privacy_enter",
+        "privacy_enter_degraded",
+        "acquire_quick_access_locks",
+        message,
+        outcome.diagnostics(),
+    ))
+}
+
 fn emit_privacy_state(app: &tauri::AppHandle, state: PrivacyModeState) {
     if let Err(error) = app.emit(PRIVACY_STATE_CHANGED_EVENT, state) {
         log::warn!("failed to emit privacy state change: {error}");
@@ -165,5 +184,40 @@ mod tests {
         assert_eq!(warning.code, "privacy_exit_report_failed");
         assert_eq!(warning.step, "recent_files");
         assert!(warning.message.contains("disabled"));
+    }
+
+    #[test]
+    fn exposes_degraded_enter_as_safe_aggregated_warning() {
+        let outcome = PrivacyEnterOutcome {
+            lock_result: LockResult::Partial,
+            failures: vec![
+                crate::privacy::PrivacyEnterFailure {
+                    target: crate::privacy::PrivacyLockAttemptTarget::All,
+                    error: anyhow::anyhow!("private full lock detail"),
+                },
+                crate::privacy::PrivacyEnterFailure {
+                    target: crate::privacy::PrivacyLockAttemptTarget::FrequentFolders,
+                    error: anyhow::anyhow!("private frequent lock detail"),
+                },
+            ],
+        };
+
+        let warning = privacy_enter_warning(&outcome).unwrap();
+
+        assert_eq!(warning.code, "privacy_enter_degraded");
+        assert_eq!(warning.step, "acquire_quick_access_locks");
+        assert!(warning.message.contains("partial protection"));
+        assert!(!warning.message.contains("private"));
+        assert!(!warning.incident_id.is_empty());
+    }
+
+    #[test]
+    fn full_enter_has_no_degradation_warning() {
+        let outcome = PrivacyEnterOutcome {
+            lock_result: LockResult::Full,
+            failures: Vec::new(),
+        };
+
+        assert!(privacy_enter_warning(&outcome).is_none());
     }
 }

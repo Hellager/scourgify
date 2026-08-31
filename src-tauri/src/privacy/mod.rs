@@ -2,7 +2,10 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 #[cfg(debug_assertions)]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::{
+    fmt,
+    sync::{Mutex, MutexGuard},
+};
 use thiserror::Error;
 use wincent::prelude::{
     QuickAccessLock, QuickAccessLockTarget, QuickAccessManager, QuickAccessUnlockOptions,
@@ -22,6 +25,108 @@ pub enum PrivacyModeState {
     Inactive,
     ActiveFull,
     ActivePartial { recent: bool, frequent: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrivacyLockAttemptTarget {
+    All,
+    RecentFiles,
+    FrequentFolders,
+}
+
+impl PrivacyLockAttemptTarget {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::RecentFiles => "recent_files",
+            Self::FrequentFolders => "frequent_folders",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct PrivacyEnterFailure {
+    pub(crate) target: PrivacyLockAttemptTarget,
+    pub(crate) error: anyhow::Error,
+}
+
+impl PrivacyEnterFailure {
+    fn new(target: PrivacyLockAttemptTarget, error: anyhow::Error) -> Self {
+        Self { target, error }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct PrivacyEnterOutcome {
+    pub(crate) lock_result: LockResult,
+    pub(crate) failures: Vec<PrivacyEnterFailure>,
+}
+
+impl PrivacyEnterOutcome {
+    pub(crate) fn has_target_failure(&self) -> bool {
+        self.failures
+            .iter()
+            .any(|failure| failure.target != PrivacyLockAttemptTarget::All)
+    }
+
+    pub(crate) fn diagnostics(&self) -> PrivacyEnterDiagnostics<'_> {
+        PrivacyEnterDiagnostics(&self.failures)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct PrivacyEnterDiagnostics<'a>(&'a [PrivacyEnterFailure]);
+
+impl fmt::Display for PrivacyEnterDiagnostics<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_enter_failures(formatter, self.0)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct PrivacyLockError {
+    failures: Vec<PrivacyEnterFailure>,
+}
+
+impl fmt::Display for PrivacyLockError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "failed to acquire Quick Access privacy locks: ")?;
+        write_enter_failures(formatter, &self.failures)
+    }
+}
+
+impl std::error::Error for PrivacyLockError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.failures
+            .first()
+            .map(|failure| failure.error.as_ref() as &(dyn std::error::Error + 'static))
+    }
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum PrivacyEnterError {
+    #[error("privacy operation state is unavailable")]
+    StateUnavailable,
+    #[error(transparent)]
+    Lock(#[from] PrivacyLockError),
+}
+
+fn write_enter_failures(
+    formatter: &mut fmt::Formatter<'_>,
+    failures: &[PrivacyEnterFailure],
+) -> fmt::Result {
+    for (index, failure) in failures.iter().enumerate() {
+        if index > 0 {
+            formatter.write_str("; ")?;
+        }
+        write!(
+            formatter,
+            "target={} error={:#}",
+            failure.target.as_str(),
+            failure.error
+        )?;
+    }
+    Ok(())
 }
 
 enum PrivacyLockState {
@@ -117,11 +222,11 @@ impl PrivacyManager {
         Ok(QuickAccessWritePermit { _guard: guard })
     }
 
-    pub fn enter(&self) -> Result<LockResult> {
+    pub(crate) fn enter(&self) -> Result<PrivacyEnterOutcome, PrivacyEnterError> {
         let _operation = self
             .operation_gate
             .lock()
-            .map_err(|_| anyhow!("privacy operation gate mutex poisoned"))?;
+            .map_err(|_| PrivacyEnterError::StateUnavailable)?;
 
         #[cfg(debug_assertions)]
         if self.mock_mode.load(Ordering::Relaxed) {
@@ -129,42 +234,60 @@ impl PrivacyManager {
                 .mock_state
                 .lock()
                 .expect("mock privacy state mutex poisoned") = PrivacyModeState::ActiveFull;
-            return Ok(LockResult::Full);
+            return Ok(PrivacyEnterOutcome {
+                lock_result: LockResult::Full,
+                failures: Vec::new(),
+            });
         }
 
         {
             let state = self.state.lock().expect("privacy state mutex poisoned");
             if !matches!(*state, PrivacyLockState::Inactive) {
-                return Ok(match &*state {
+                let lock_result = match &*state {
                     PrivacyLockState::Inactive => unreachable!(),
                     PrivacyLockState::Exiting(state) => lock_result(*state),
                     PrivacyLockState::ActiveFull(_) => LockResult::Full,
                     PrivacyLockState::ActivePartial { .. } => LockResult::Partial,
+                };
+                return Ok(PrivacyEnterOutcome {
+                    lock_result,
+                    failures: Vec::new(),
                 });
             }
         }
 
-        match self.manager.lock_quick_access() {
+        let full_failure = match self.manager.lock_quick_access() {
             Ok(lock) => {
                 *self.state.lock().expect("privacy state mutex poisoned") =
                     PrivacyLockState::ActiveFull(lock);
-                return Ok(LockResult::Full);
+                return Ok(PrivacyEnterOutcome {
+                    lock_result: LockResult::Full,
+                    failures: Vec::new(),
+                });
             }
             Err(error) => {
-                log::warn!("full Quick Access lock failed, trying partial locks: {error}")
+                PrivacyEnterFailure::new(PrivacyLockAttemptTarget::All, anyhow::Error::from(error))
             }
-        }
-
-        let recent = self.manager.lock_recent_files().ok();
-        let frequent = self.manager.lock_frequent_folders().ok();
-
-        if recent.is_none() && frequent.is_none() {
-            return Err(anyhow!("failed to lock any Quick Access target"));
-        }
+        };
+        let partial = resolve_partial_lock_attempts(
+            full_failure,
+            self.manager
+                .lock_recent_files()
+                .map_err(anyhow::Error::from),
+            self.manager
+                .lock_frequent_folders()
+                .map_err(anyhow::Error::from),
+        )?;
 
         *self.state.lock().expect("privacy state mutex poisoned") =
-            PrivacyLockState::ActivePartial { recent, frequent };
-        Ok(LockResult::Partial)
+            PrivacyLockState::ActivePartial {
+                recent: partial.recent,
+                frequent: partial.frequent,
+            };
+        Ok(PrivacyEnterOutcome {
+            lock_result: LockResult::Partial,
+            failures: partial.failures,
+        })
     }
 
     pub(crate) fn exit(&self) -> Result<PrivacyExitOutcome> {
@@ -251,6 +374,51 @@ impl PrivacyManager {
     }
 }
 
+#[derive(Debug)]
+struct PartialLockOutcome<T> {
+    recent: Option<T>,
+    frequent: Option<T>,
+    failures: Vec<PrivacyEnterFailure>,
+}
+
+fn resolve_partial_lock_attempts<T>(
+    full_failure: PrivacyEnterFailure,
+    recent: Result<T>,
+    frequent: Result<T>,
+) -> Result<PartialLockOutcome<T>, PrivacyLockError> {
+    let mut failures = vec![full_failure];
+    let recent = record_lock_attempt(PrivacyLockAttemptTarget::RecentFiles, recent, &mut failures);
+    let frequent = record_lock_attempt(
+        PrivacyLockAttemptTarget::FrequentFolders,
+        frequent,
+        &mut failures,
+    );
+
+    if recent.is_none() && frequent.is_none() {
+        return Err(PrivacyLockError { failures });
+    }
+
+    Ok(PartialLockOutcome {
+        recent,
+        frequent,
+        failures,
+    })
+}
+
+fn record_lock_attempt<T>(
+    target: PrivacyLockAttemptTarget,
+    result: Result<T>,
+    failures: &mut Vec<PrivacyEnterFailure>,
+) -> Option<T> {
+    match result {
+        Ok(lock) => Some(lock),
+        Err(error) => {
+            failures.push(PrivacyEnterFailure::new(target, error));
+            None
+        }
+    }
+}
+
 fn privacy_state(state: &PrivacyLockState) -> PrivacyModeState {
     match state {
         PrivacyLockState::Inactive => PrivacyModeState::Inactive,
@@ -333,7 +501,9 @@ mod tests {
         let manager = PrivacyManager::new(true);
         manager.set_mock_mode(true).unwrap();
 
-        assert_eq!(manager.enter().unwrap(), LockResult::Full);
+        let outcome = manager.enter().unwrap();
+        assert_eq!(outcome.lock_result, LockResult::Full);
+        assert!(outcome.failures.is_empty());
         assert_eq!(manager.state(), PrivacyModeState::ActiveFull);
         let outcome = manager.exit().unwrap();
         assert!(outcome.reports.is_empty());
@@ -381,13 +551,12 @@ mod tests {
         started_rx.recv().unwrap();
         assert!(finished_rx.recv_timeout(Duration::from_millis(50)).is_err());
         drop(permit);
-        assert_eq!(
-            finished_rx
-                .recv_timeout(Duration::from_secs(1))
-                .unwrap()
-                .unwrap(),
-            LockResult::Full
-        );
+        let outcome = finished_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        assert_eq!(outcome.lock_result, LockResult::Full);
+        assert!(outcome.failures.is_empty());
         handle.join().unwrap();
         assert!(matches!(
             manager.begin_quick_access_write(),
@@ -434,5 +603,82 @@ mod tests {
             outcome.failures[0].error.to_string(),
             "Recent shortcut snapshot is unavailable"
         );
+    }
+
+    #[test]
+    fn partial_fallback_preserves_full_lock_failure_when_both_targets_succeed() {
+        let outcome = resolve_partial_lock_attempts(
+            enter_failure(PrivacyLockAttemptTarget::All, "full lock denied"),
+            Ok("recent"),
+            Ok("frequent"),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.recent, Some("recent"));
+        assert_eq!(outcome.frequent, Some("frequent"));
+        assert_eq!(failure_targets(&outcome.failures), ["all"]);
+        assert!(outcome.failures[0].error.to_string().contains("denied"));
+    }
+
+    #[test]
+    fn partial_fallback_preserves_frequent_target_failure() {
+        let outcome = resolve_partial_lock_attempts(
+            enter_failure(PrivacyLockAttemptTarget::All, "full lock denied"),
+            Ok("recent"),
+            Err(anyhow!("frequent lock denied")),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.recent, Some("recent"));
+        assert_eq!(outcome.frequent, None);
+        assert_eq!(
+            failure_targets(&outcome.failures),
+            ["all", "frequent_folders"]
+        );
+    }
+
+    #[test]
+    fn partial_fallback_preserves_recent_target_failure() {
+        let outcome = resolve_partial_lock_attempts(
+            enter_failure(PrivacyLockAttemptTarget::All, "full lock denied"),
+            Err(anyhow!("recent lock denied")),
+            Ok("frequent"),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.recent, None);
+        assert_eq!(outcome.frequent, Some("frequent"));
+        assert_eq!(failure_targets(&outcome.failures), ["all", "recent_files"]);
+    }
+
+    #[test]
+    fn failed_fallback_returns_all_target_errors() {
+        let error = resolve_partial_lock_attempts::<()>(
+            enter_failure(PrivacyLockAttemptTarget::All, "full lock denied"),
+            Err(anyhow!("recent lock denied")),
+            Err(anyhow!("frequent lock denied")),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            failure_targets(&error.failures),
+            ["all", "recent_files", "frequent_folders"]
+        );
+        let message = error.to_string();
+        assert!(message.contains("full lock denied"));
+        assert!(message.contains("recent lock denied"));
+        assert!(message.contains("frequent lock denied"));
+        assert!(std::error::Error::source(&error).is_some());
+    }
+
+    fn enter_failure(target: PrivacyLockAttemptTarget, message: &str) -> PrivacyEnterFailure {
+        PrivacyEnterFailure::new(target, anyhow!(message.to_string()))
+    }
+
+    fn failure_targets(failures: &[PrivacyEnterFailure]) -> Vec<&'static str> {
+        failures
+            .iter()
+            .map(|failure| failure.target.as_str())
+            .collect()
     }
 }

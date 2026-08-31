@@ -12,7 +12,7 @@ use super::{alert, i18n, scheduler::AutoCleanMonitor, settings, theme, window};
 use crate::{
     config::{AppMode, Config},
     privacy::{
-        LockResult, PrivacyExitOutcome, PrivacyManager, PrivacyModeState,
+        LockResult, PrivacyEnterOutcome, PrivacyExitOutcome, PrivacyManager, PrivacyModeState,
         PRIVACY_STATE_CHANGED_EVENT,
     },
 };
@@ -274,22 +274,25 @@ fn toggle_privacy_mode<R: Runtime>(app: &AppHandle<R>) {
             is_privacy_enabled(privacy.state())
         });
 
-    let result = if requested {
+    let result: anyhow::Result<()> = if requested {
         privacy.exit().map(|outcome| {
             log_privacy_exit_outcome(outcome);
-            LockResult::Full
         })
     } else {
-        privacy.enter().inspect(|result| {
-            log::info!("privacy mode entered: {result:?}");
-            if matches!(result, LockResult::Partial) {
-                alert::warning(
-                    app,
-                    "Scourgify",
-                    "Privacy mode is active with partial protection.",
-                );
-            }
-        })
+        privacy
+            .enter()
+            .map(|outcome| {
+                log::info!("privacy mode entered: {:?}", outcome.lock_result);
+                log_privacy_enter_degradation(&outcome);
+                if matches!(outcome.lock_result, LockResult::Partial) {
+                    alert::warning(
+                        app,
+                        "Scourgify",
+                        "Privacy mode is active with partial protection.",
+                    );
+                }
+            })
+            .map_err(anyhow::Error::from)
     };
 
     match result {
@@ -322,6 +325,15 @@ fn toggle_privacy_mode<R: Runtime>(app: &AppHandle<R>) {
             refresh_menu(app);
         }
     }
+}
+
+fn log_privacy_enter_degradation(outcome: &PrivacyEnterOutcome) {
+    if outcome.failures.is_empty() {
+        return;
+    }
+    let incident_id =
+        crate::error::report_background_error("privacy_enter_degraded", outcome.diagnostics());
+    log::warn!("privacy mode entered with fallback protection incident_id={incident_id}");
 }
 
 fn set_language<R: Runtime>(app: &AppHandle<R>, language: &str) {
