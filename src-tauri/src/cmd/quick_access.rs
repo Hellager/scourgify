@@ -6,7 +6,6 @@ use super::{begin_quick_access_write, run_blocking};
 #[cfg(debug_assertions)]
 use crate::mock::commands::{apply_overview_request, MockOverviewTarget};
 use crate::{
-    backend::{BackendMode, PathKind, QuickAccessBackendState},
     config::Config,
     error::{
         wincent_command_error, wincent_post_mutation_warning, CommandError, CommandResult,
@@ -14,8 +13,9 @@ use crate::{
     },
     privacy::PrivacyManager,
     quick_access::{
-        QaCounts, QaItem, QaItemMetadata, QaMutationResult, QaRestoreResult, QaVisibility,
-        QaVisibilityMutationResult, QuickAccessCache, QuickAccessError,
+        BackendMode, PathKind, QaCounts, QaItem, QaItemMetadata, QaMutationResult, QaRestoreResult,
+        QaVisibility, QaVisibilityMutationResult, QuickAccessBackendState, QuickAccessCache,
+        QuickAccessError,
     },
 };
 

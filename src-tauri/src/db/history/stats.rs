@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 
-use super::history::{HistoryTotals, RuleHitStat, Stats, StatsRange, StatsTrendPoint};
+use super::{HistoryTotals, RuleHitStat, Stats, StatsRange, StatsTrendPoint};
 
 pub(super) fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
     let retained = totals(connection)?;
-    let lifetime = super::history_runs::lifetime_totals(connection)?;
+    let lifetime = super::runs::lifetime_totals(connection)?;
     let (daily_trend, weekly_trend) = if retained.total == 0 {
         (Vec::new(), Vec::new())
     } else {

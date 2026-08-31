@@ -17,11 +17,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     app::scheduler::{AutoCleanFinished, AutoCleanMonitor, AUTO_CLEAN_FINISHED_EVENT},
-    backend::{BackendMode, QuickAccessBackendState},
     db::DbState,
     error::{CommandError, CommandResult, ErrorCode},
     privacy::PrivacyManager,
-    quick_access::{QuickAccessCache, QuickAccessWatchers},
+    quick_access::{BackendMode, QuickAccessBackendState, QuickAccessCache, QuickAccessWatchers},
     rules::{NewRule, RuleScope, RuleType},
 };
 

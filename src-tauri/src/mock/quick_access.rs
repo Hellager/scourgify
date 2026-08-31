@@ -4,12 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
 use crate::{
-    backend::{PathKind, QuickAccessBackend},
     error::{CommandError, CommandWarning, ErrorCode},
     quick_access::{
-        QaBatchFailure, QaBatchResult, QaBatchWarning, QaItem, QaItemMetadata,
+        PathKind, QaBatchFailure, QaBatchResult, QaBatchWarning, QaItem, QaItemMetadata,
         QaRawPathCleanupResult, QaRestoreResult, QaRestoreSectionResult, QaVisibility,
-        QaVisibilityMutationResult, QuickAccessError,
+        QaVisibilityMutationResult, QuickAccessBackend, QuickAccessError,
     },
 };
 

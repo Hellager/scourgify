@@ -34,7 +34,6 @@
 compile_error!("Scourgify is Windows-only because wincent targets Windows Quick Access.");
 
 mod app;
-mod backend;
 mod cleanup;
 mod cmd;
 mod config;

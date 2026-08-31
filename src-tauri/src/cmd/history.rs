@@ -5,7 +5,7 @@ use super::ActionReceipt;
 #[cfg(debug_assertions)]
 use crate::mock::commands::{apply_overview_request, MockOverviewTarget};
 use crate::{
-    db::history_runs::{CleanupRunFilter, CleanupRunPage, CleanupRunQuery},
+    db::history::runs::{CleanupRunFilter, CleanupRunPage, CleanupRunQuery},
     db::{
         history::{
             self, CleanRecordPage, HistoryError, HistoryExportFormat, HistoryExportResult,
@@ -54,7 +54,7 @@ pub(crate) async fn get_cleanup_runs(
 ) -> CommandResult<CleanupRunPage> {
     run_blocking("get_cleanup_runs", move || {
         app.state::<DbState>()
-            .with_connection(|connection| crate::db::history_runs::list(connection, query))
+            .with_connection(|connection| crate::db::history::runs::list(connection, query))
             .map_err(|error| history_error("get_cleanup_runs", error))
     })
     .await
@@ -144,7 +144,7 @@ pub(crate) async fn get_stats(app: AppHandle, range: StatsRange) -> CommandResul
     run_blocking("get_stats", move || {
         #[cfg(debug_assertions)]
         apply_overview_request(
-            app.state::<crate::backend::QuickAccessBackendState>()
+            app.state::<crate::quick_access::QuickAccessBackendState>()
                 .inner(),
             MockOverviewTarget::Stats,
             "get_stats",

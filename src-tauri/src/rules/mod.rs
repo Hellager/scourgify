@@ -1,4 +1,9 @@
+mod matcher;
+pub(crate) mod transfer;
+
 use serde::{Deserialize, Serialize};
+
+pub(crate) use matcher::{classify, MatchResult};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

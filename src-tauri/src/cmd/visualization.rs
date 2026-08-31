@@ -3,10 +3,10 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
 use crate::{
-    backend::QuickAccessBackendState,
     config::{Config, VisualizationDataSource},
     db::DbState,
     error::{CommandError, CommandResult, ErrorCode},
+    quick_access::QuickAccessBackendState,
     visualization::{self, WordCloudRange, WordCloudResult, WordCloudSource},
 };
 

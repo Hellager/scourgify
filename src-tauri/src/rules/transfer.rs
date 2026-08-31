@@ -11,9 +11,7 @@ use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-use crate::rules::NewRule;
-
-use super::rules;
+use crate::{db::rule_repository, rules::NewRule};
 
 const RULE_FILE_VERSION: u32 = 1;
 const MAX_IMPORT_RULES: usize = 10_000;
@@ -74,7 +72,7 @@ pub(crate) fn export(
     let parent = path
         .parent()
         .context("rule export target has no parent directory")?;
-    let all_rules = rules::list(connection)?;
+    let all_rules = rule_repository::list(connection)?;
     let selected_ids = selected_ids.map(|ids| ids.iter().copied().collect::<HashSet<_>>());
     let rules = all_rules
         .into_iter()
@@ -262,12 +260,12 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("rules.json");
         let mut connection = test_connection();
-        rules::add(
+        rule_repository::add(
             &connection,
             new_rule("  Report  ", RuleType::Whitelist, RuleScope::Files, true),
         )
         .unwrap();
-        rules::add(
+        rule_repository::add(
             &connection,
             new_rule("Cache", RuleType::Blacklist, RuleScope::Folders, false),
         )
@@ -276,7 +274,7 @@ mod tests {
         let exported = export(&connection, path.to_str().unwrap(), None).unwrap();
         connection.execute("DELETE FROM rules", []).unwrap();
         let imported = import(&mut connection, path.to_str().unwrap(), None).unwrap();
-        let restored = rules::list(&connection).unwrap();
+        let restored = rule_repository::list(&connection).unwrap();
 
         assert_eq!(exported.count, 2);
         assert_eq!(exported.version, RULE_FILE_VERSION);
@@ -302,7 +300,7 @@ mod tests {
         let error = import(&mut connection, path.to_str().unwrap(), None).unwrap_err();
 
         assert!(error.to_string().contains("empty keyword"));
-        assert!(rules::list(&connection).unwrap().is_empty());
+        assert!(rule_repository::list(&connection).unwrap().is_empty());
     }
 
     #[test]
@@ -310,12 +308,12 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("rules.json");
         let mut connection = test_connection();
-        let first = rules::add(
+        let first = rule_repository::add(
             &connection,
             new_rule("First", RuleType::Whitelist, RuleScope::All, true),
         )
         .unwrap();
-        let second = rules::add(
+        let second = rule_repository::add(
             &connection,
             new_rule("Second", RuleType::Blacklist, RuleScope::Files, false),
         )
@@ -325,7 +323,7 @@ mod tests {
         let preview = preview(path.to_str().unwrap()).unwrap();
         connection.execute("DELETE FROM rules", []).unwrap();
         let imported = import(&mut connection, path.to_str().unwrap(), Some(&[0])).unwrap();
-        let restored = rules::list(&connection).unwrap();
+        let restored = rule_repository::list(&connection).unwrap();
 
         assert_eq!(exported.count, 1);
         assert_eq!(preview.count, 1);
@@ -352,7 +350,7 @@ mod tests {
 
         assert!(empty.to_string().contains("no rules were selected"));
         assert!(out_of_range.to_string().contains("out of range"));
-        assert!(rules::list(&connection).unwrap().is_empty());
+        assert!(rule_repository::list(&connection).unwrap().is_empty());
     }
 
     fn new_rule(keyword: &str, rule_type: RuleType, scope: RuleScope, enabled: bool) -> NewRule {

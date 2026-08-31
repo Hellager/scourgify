@@ -12,13 +12,12 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::{
-    backend::QuickAccessBackendState,
     cleanup::{self, AutoCleanError, AutoCleanResult, AutoCleanState},
     config::{self, AutoCleanPolicy, Config},
-    db::{history_runs::CleanupTrigger, DbState},
+    db::{history::runs::CleanupTrigger, DbState},
     error::{command_warning, report_background_error, CommandWarning},
     privacy::PrivacyManager,
-    quick_access::QuickAccessCache,
+    quick_access::{QuickAccessBackendState, QuickAccessCache},
 };
 
 pub const AUTO_CLEAN_FINISHED_EVENT: &str = "auto-clean-finished";
@@ -332,7 +331,7 @@ fn effective_scheduled_last_run<R: Runtime>(
     let database = app.state::<DbState>();
     let history_last_run = database
         .with_connection(|connection| {
-            crate::db::history_runs::latest_terminal_auto_clean_completion(
+            crate::db::history::runs::latest_terminal_auto_clean_completion(
                 connection,
                 CleanupTrigger::Scheduled,
             )

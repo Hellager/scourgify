@@ -10,12 +10,10 @@ use serde::{ser::SerializeSeq, Serializer};
 use tempfile::NamedTempFile;
 
 use super::{
-    history::{
-        history_filter_params, read_clean_record, validate_history_filter, CleanRecord,
-        ExportCleanRecord, HistoryError, HistoryExportFormat, HistoryExportResult, HistoryFilter,
-        ValidatedHistoryFilter, HISTORY_COLUMNS, HISTORY_FILTERS,
-    },
-    history_runs::{self, CleanupRunFilter},
+    history_filter_params, read_clean_record,
+    runs::{self, CleanupRunFilter},
+    validate_history_filter, CleanRecord, ExportCleanRecord, HistoryError, HistoryExportFormat,
+    HistoryExportResult, HistoryFilter, ValidatedHistoryFilter, HISTORY_COLUMNS, HISTORY_FILTERS,
 };
 
 pub(super) fn export(
@@ -157,7 +155,7 @@ fn export_runs_csv(
             "completed_at",
         ])
         .context("failed to write cleanup run CSV header")?;
-    let count = history_runs::visit_filtered(connection, filter, |run| {
+    let count = runs::visit_filtered(connection, filter, |run| {
         writer
             .serialize(run)
             .context("failed to serialize cleanup run CSV record")
@@ -180,7 +178,7 @@ fn export_runs_json(
         let mut sequence = serializer
             .serialize_seq(None)
             .context("failed to start cleanup run JSON export")?;
-        count = history_runs::visit_filtered(connection, filter, |run| {
+        count = runs::visit_filtered(connection, filter, |run| {
             sequence
                 .serialize_element(&run)
                 .context("failed to serialize cleanup run JSON record")

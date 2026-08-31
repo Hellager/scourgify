@@ -12,12 +12,9 @@ use wincent::prelude::{
     QuickAccess, QuickAccessManager, QuickAccessMonitor, QuickAccessMonitorOptions,
 };
 
-use crate::{
-    app::scheduler::AutoCleanMonitor, backend::QuickAccessBackendState,
-    error::report_background_error,
-};
+use crate::{app::scheduler::AutoCleanMonitor, error::report_background_error};
 
-use super::{operations, QaCounts, QaItem};
+use super::{operations, QaCounts, QaItem, QuickAccessBackendState};
 
 pub(crate) const QUICK_ACCESS_CHANGED_EVENT: &str = "quick-access-changed";
 const POLL_INTERVAL: Duration = Duration::from_secs(3);

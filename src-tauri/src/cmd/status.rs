@@ -5,19 +5,20 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     app::scheduler::{AutoCleanMonitor, AutoCleanScheduler},
-    backend::{BackendMode, QuickAccessBackendState},
     cleanup::AutoCleanState,
     config::{AutoCleanPolicy, Config},
     db::{
-        history_runs::{
+        history::runs::{
             self, CleanupAction, CleanupRunFilter, CleanupRunQuery, CleanupRunStatus,
             CleanupTrigger,
         },
-        rules as database_rules, DbState,
+        rule_repository as database_rules, DbState,
     },
     error::CommandResult,
     privacy::{PrivacyManager, PrivacyModeState},
-    quick_access::{QuickAccessWatcherStatus, QuickAccessWatchers},
+    quick_access::{
+        BackendMode, QuickAccessBackendState, QuickAccessWatcherStatus, QuickAccessWatchers,
+    },
 };
 
 use super::run_blocking;
@@ -236,7 +237,7 @@ fn latest_auto_clean_run(
         }
     };
     database.with_connection(|connection| {
-        history_runs::list(
+        runs::list(
             connection,
             CleanupRunQuery {
                 page: 1,

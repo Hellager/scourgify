@@ -8,12 +8,10 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    backend::QuickAccessBackendState,
-    cleanup::{classify, MatchResult},
     config::{Config, VisualizationDataRange},
-    db::{rules, DbState},
-    quick_access::QaItemMetadata,
-    rules::{Rule, RuleScope},
+    db::{rule_repository, DbState},
+    quick_access::{QaItemMetadata, QuickAccessBackendState},
+    rules::{classify, MatchResult, Rule, RuleScope},
 };
 
 use self::tokenizer::{tokenize_name, tokenize_path, tokenize_text, Token};
@@ -266,7 +264,7 @@ fn build_cleanup_word_cloud(
 }
 
 fn load_rules(database: &DbState, warnings: &mut Vec<WordCloudWarning>) -> Option<Vec<Rule>> {
-    match database.with_connection(|connection| rules::list(connection)) {
+    match database.with_connection(|connection| rule_repository::list(connection)) {
         Ok(rules) => Some(rules),
         Err(_) => {
             warnings.push(WordCloudWarning {

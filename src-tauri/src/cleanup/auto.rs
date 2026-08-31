@@ -6,15 +6,16 @@ use thiserror::Error;
 
 use super::smart_clean_in_run;
 use crate::{
-    backend::QuickAccessBackendState,
     db::{
-        history::CleanSource,
-        history_runs::{self, CleanupAction, CleanupTrigger, NewCleanupRun, RunCompletion},
+        history::{
+            runs, runs::CleanupAction, runs::CleanupTrigger, runs::NewCleanupRun,
+            runs::RunCompletion, CleanSource,
+        },
         DbState,
     },
     error::CommandWarning,
     privacy::{PrivacyAccessError, PrivacyManager},
-    quick_access::QaBatchResult,
+    quick_access::{QaBatchResult, QuickAccessBackendState},
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -126,7 +127,7 @@ pub(crate) fn run(
         .begin_quick_access_write()
         .map_err(auto_clean_privacy_error)?;
     let run_id = database.with_connection(|connection| {
-        history_runs::begin(
+        runs::begin(
             connection,
             NewCleanupRun {
                 action: CleanupAction::AutoClean,
@@ -149,7 +150,7 @@ pub(crate) fn run(
 
     let completion = completion_from_result(&result);
     if let Err(error) = database.with_connection(|connection| {
-        history_runs::finish(connection, run_id, &completion, history_retention)
+        runs::finish(connection, run_id, &completion, history_retention)
     }) {
         result.history_errors += 1;
         log::error!("auto-clean run completion failed run_id={run_id} error={error:#}");

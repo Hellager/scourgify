@@ -2,11 +2,10 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use crate::{
-    backend::QuickAccessBackendState,
     cleanup,
-    db::{history, rules, DatabaseStateError, DbState},
+    db::{history, rule_repository, DatabaseStateError, DbState},
     error::{wincent_command_error, CommandError, CommandResult, ErrorCode},
-    quick_access::{QaItem, QuickAccessCache},
+    quick_access::{QaItem, QuickAccessBackendState, QuickAccessCache},
     rules::{RuleScope, RuleType},
 };
 
@@ -39,7 +38,10 @@ pub(crate) async fn get_grid_summary(app: AppHandle) -> CommandResult<GridSummar
         let mut summary = empty_database_summary(&recent, &frequent);
 
         let database_values = database.with_connection(|connection| {
-            Ok((rules::list(connection)?, history::totals(connection)?))
+            Ok((
+                rule_repository::list(connection)?,
+                history::totals(connection)?,
+            ))
         });
         let (rules, stats) = match database_values {
             Ok(values) => values,

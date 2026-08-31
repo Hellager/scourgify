@@ -11,12 +11,8 @@ use tauri::{AppHandle, Manager, Runtime};
 use thiserror::Error;
 
 pub(crate) mod history;
-mod history_export;
-pub(crate) mod history_runs;
 mod migrations;
-pub(crate) mod rules;
-pub(crate) mod rules_transfer;
-mod stats;
+pub(crate) mod rule_repository;
 
 use migrations::migrate;
 #[cfg(test)]
@@ -375,7 +371,7 @@ fn open_database(path: &Path) -> Result<(Connection, u32)> {
         .execute_batch("PRAGMA foreign_keys = ON;")
         .context("failed to enable SQLite foreign keys")?;
     let schema_version = migrate(&mut connection)?;
-    history_runs::mark_interrupted(&connection)?;
+    history::runs::mark_interrupted(&connection)?;
     Ok((connection, schema_version))
 }
 
@@ -548,7 +544,7 @@ mod tests {
             Some(path.to_string_lossy().as_ref())
         );
         assert!(!state
-            .with_connection(|connection| rules::list(connection))
+            .with_connection(|connection| rule_repository::list(connection))
             .unwrap()
             .is_empty());
 
@@ -559,7 +555,7 @@ mod tests {
         );
         assert_eq!(
             state
-                .with_connection(|connection| rules::list(connection))
+                .with_connection(|connection| rule_repository::list(connection))
                 .unwrap()
                 .len(),
             0

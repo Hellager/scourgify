@@ -1,15 +1,13 @@
 use crate::{
     app::scheduler::AutoCleanMonitor,
-    db::{
-        rules,
-        rules::RuleError,
-        rules_transfer::{
+    db::{rule_repository, rule_repository::RuleError, DatabaseStateError, DbState},
+    error::{CommandError, CommandResult, ErrorCode},
+    rules::{
+        transfer::{
             self, RuleExportResult, RuleImportPreview, RuleImportResult, RuleTransferError,
         },
-        DatabaseStateError, DbState,
+        NewRule, Rule,
     },
-    error::{CommandError, CommandResult, ErrorCode},
-    rules::{NewRule, Rule},
 };
 use tauri::{AppHandle, Manager};
 
@@ -19,7 +17,7 @@ use super::{run_blocking, ActionReceipt};
 pub(crate) async fn get_rules(app: AppHandle) -> CommandResult<Vec<Rule>> {
     run_blocking("get_rules", move || {
         app.state::<DbState>()
-            .with_connection(|connection| rules::list(connection))
+            .with_connection(|connection| rule_repository::list(connection))
             .map_err(|error| database_error("get_rules", error))
     })
     .await
@@ -31,7 +29,7 @@ pub(crate) async fn add_rule(app: AppHandle, rule: NewRule) -> CommandResult<Rul
     let result = run_blocking("add_rule", move || {
         app_for_worker
             .state::<DbState>()
-            .with_connection(|connection| rules::add(connection, rule))
+            .with_connection(|connection| rule_repository::add(connection, rule))
             .map_err(|error| database_error("add_rule", error))
     })
     .await?;
@@ -45,7 +43,7 @@ pub(crate) async fn update_rule(app: AppHandle, id: i64, rule: NewRule) -> Comma
     let result = run_blocking("update_rule", move || {
         app_for_worker
             .state::<DbState>()
-            .with_connection(|connection| rules::update(connection, id, rule))
+            .with_connection(|connection| rule_repository::update(connection, id, rule))
             .map_err(|error| database_error("update_rule", error))
     })
     .await?;
@@ -59,7 +57,7 @@ pub(crate) async fn remove_rule(app: AppHandle, id: i64) -> CommandResult<Action
     run_blocking("remove_rule", move || {
         app_for_worker
             .state::<DbState>()
-            .with_connection(|connection| rules::remove(connection, id))
+            .with_connection(|connection| rule_repository::remove(connection, id))
             .map_err(|error| database_error("remove_rule", error))
     })
     .await?;
@@ -77,7 +75,7 @@ pub(crate) async fn clear_rules(
     let affected = run_blocking("clear_rules", move || {
         app_for_worker
             .state::<DbState>()
-            .with_connection(|connection| rules::clear(connection, ids.as_deref()))
+            .with_connection(|connection| rule_repository::clear(connection, ids.as_deref()))
             .map_err(|error| database_error("clear_rules", error))
     })
     .await?;
@@ -91,7 +89,7 @@ pub(crate) async fn toggle_rule(app: AppHandle, id: i64, enabled: bool) -> Comma
     let result = run_blocking("toggle_rule", move || {
         app_for_worker
             .state::<DbState>()
-            .with_connection(|connection| rules::toggle(connection, id, enabled))
+            .with_connection(|connection| rule_repository::toggle(connection, id, enabled))
             .map_err(|error| database_error("toggle_rule", error))
     })
     .await?;
@@ -108,7 +106,7 @@ pub(crate) async fn export_rules(
     run_blocking("export_rules", move || {
         app.state::<DbState>()
             .read_connection()
-            .and_then(|connection| rules_transfer::export(&connection, &path, ids.as_deref()))
+            .and_then(|connection| transfer::export(&connection, &path, ids.as_deref()))
             .map_err(|error| database_error("export_rules", error))
     })
     .await
@@ -117,8 +115,7 @@ pub(crate) async fn export_rules(
 #[tauri::command]
 pub(crate) async fn preview_rules_import(path: String) -> CommandResult<RuleImportPreview> {
     run_blocking("preview_rules_import", move || {
-        rules_transfer::preview(&path)
-            .map_err(|error| database_error("preview_rules_import", error))
+        transfer::preview(&path).map_err(|error| database_error("preview_rules_import", error))
     })
     .await
 }
@@ -133,9 +130,7 @@ pub(crate) async fn import_rules(
     let result = run_blocking("import_rules", move || {
         app_for_worker
             .state::<DbState>()
-            .with_connection(|connection| {
-                rules_transfer::import(connection, &path, indices.as_deref())
-            })
+            .with_connection(|connection| transfer::import(connection, &path, indices.as_deref()))
             .map_err(|error| database_error("import_rules", error))
     })
     .await?;

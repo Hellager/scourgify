@@ -5,13 +5,12 @@ use tauri::{AppHandle, Manager, State};
 use super::{begin_quick_access_write, run_blocking};
 use crate::{
     app::scheduler,
-    backend::QuickAccessBackendState,
     cleanup::{self, AutoCleanError, AutoCleanResult, ClassifiedItem, CleanupError},
     config::Config,
     db::{history::CleanSource, DatabaseStateError, DbState},
     error::{wincent_command_error, CommandError, CommandResult, ErrorCode},
     privacy::PrivacyManager,
-    quick_access::{QaBatchResult, QuickAccessCache},
+    quick_access::{QaBatchResult, QuickAccessBackendState, QuickAccessCache},
 };
 
 #[tauri::command]

@@ -8,13 +8,12 @@ use super::{
     settings, theme, tray, window,
 };
 use crate::{
-    backend::QuickAccessBackendState,
     cleanup::AutoCleanState,
     config::{AppMode, Config},
     db,
     error::report_background_error,
     privacy::{LockResult, PrivacyManager},
-    quick_access::{QuickAccessCache, QuickAccessWatchers},
+    quick_access::{QuickAccessBackendState, QuickAccessCache, QuickAccessWatchers},
 };
 
 pub(crate) fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {

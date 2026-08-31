@@ -3,13 +3,13 @@ use tauri::{Emitter, Manager, State};
 
 use crate::{
     app::{scheduler::AutoCleanMonitor, settings},
-    backend::{BackendMode, QuickAccessBackendState},
     config::Config,
     error::{command_warning, CommandError, CommandResult, CommandWarning, ErrorCode},
     privacy::{
         LockResult, PrivacyExitFailure, PrivacyManager, PrivacyModeState,
         PRIVACY_STATE_CHANGED_EVENT,
     },
+    quick_access::{BackendMode, QuickAccessBackendState},
 };
 
 use super::run_blocking;

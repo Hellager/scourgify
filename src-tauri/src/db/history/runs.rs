@@ -3,7 +3,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use super::history::HistoryError;
+use super::HistoryError;
 
 const MAX_PAGE_SIZE: u32 = 100;
 

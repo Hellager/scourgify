@@ -1,5 +1,4 @@
 mod auto;
-mod matcher;
 
 use anyhow::Result;
 use serde::Serialize;
@@ -10,16 +9,16 @@ pub(crate) use auto::AutoCleanSectionResult;
 pub(crate) use auto::{run as run_auto_clean, AutoCleanError, AutoCleanResult, AutoCleanState};
 
 use crate::{
-    backend::QuickAccessBackendState,
     db::{
-        history::{self, CleanSource, NewCleanRecord},
-        history_runs::{self, CleanupAction, CleanupTrigger, NewCleanupRun, RunCompletion},
-        rules, DbState,
+        history::{
+            self, runs, runs::CleanupAction, runs::CleanupTrigger, runs::NewCleanupRun,
+            runs::RunCompletion, CleanSource, NewCleanRecord,
+        },
+        rule_repository, DbState,
     },
-    quick_access::{QaBatchResult, QaItem},
-    rules::{Rule, RuleScope},
+    quick_access::{QaBatchResult, QaItem, QuickAccessBackendState},
+    rules::{classify, MatchResult, Rule, RuleScope},
 };
-pub(crate) use matcher::{classify, MatchResult};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -246,7 +245,7 @@ fn run_operation(
     source: CleanSource,
 ) -> Result<QaBatchResult> {
     let requested = prepared.total;
-    let run_id = database.with_connection(|connection| history_runs::begin(connection, run))?;
+    let run_id = database.with_connection(|connection| runs::begin(connection, run))?;
     match execute(
         database,
         backend,
@@ -259,7 +258,7 @@ fn run_operation(
         Ok(mut result) => {
             let completion = completion_from_batch(&result);
             if let Err(error) = database.with_connection(|connection| {
-                history_runs::finish(connection, run_id, &completion, history_retention)
+                runs::finish(connection, run_id, &completion, history_retention)
             }) {
                 let error = format!("{error:#}");
                 log::error!("cleanup run completion failed run_id={run_id} error={error}");
@@ -277,7 +276,7 @@ fn run_operation(
                 ..RunCompletion::default()
             };
             if let Err(finish_error) = database.with_connection(|connection| {
-                history_runs::finish(connection, run_id, &completion, history_retention)
+                runs::finish(connection, run_id, &completion, history_retention)
             }) {
                 log::error!(
                     "failed cleanup run could not be finalized run_id={run_id} error={finish_error:#}"
@@ -364,7 +363,7 @@ fn execute(
 }
 
 fn load_rules(database: &DbState) -> Result<Vec<Rule>> {
-    database.with_connection(|connection| rules::list(connection))
+    database.with_connection(|connection| rule_repository::list(connection))
 }
 
 fn prepare_cleanup(

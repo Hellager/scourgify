@@ -1,3 +1,7 @@
+mod export;
+pub(crate) mod runs;
+mod stats;
+
 use anyhow::{Context, Result};
 use rusqlite::{
     params,
@@ -390,16 +394,16 @@ pub fn export(
     format: HistoryExportFormat,
     filter: HistoryFilter,
 ) -> Result<HistoryExportResult> {
-    super::history_export::export(connection, path, format, filter)
+    export::export(connection, path, format, filter)
 }
 
 pub fn export_runs(
     connection: &Connection,
     path: &str,
     format: HistoryExportFormat,
-    filter: super::history_runs::CleanupRunFilter,
+    filter: runs::CleanupRunFilter,
 ) -> Result<HistoryExportResult> {
-    super::history_export::export_runs(connection, path, format, filter)
+    export::export_runs(connection, path, format, filter)
 }
 
 pub(super) fn validate_history_filter(filter: HistoryFilter) -> Result<ValidatedHistoryFilter> {
@@ -518,11 +522,11 @@ pub fn restore_hidden(connection: &Connection) -> Result<u64> {
 }
 
 pub fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
-    super::stats::stats(connection, range)
+    stats::stats(connection, range)
 }
 
 pub fn totals(connection: &Connection) -> Result<HistoryTotals> {
-    let totals = super::history_runs::lifetime_totals(connection)?;
+    let totals = runs::lifetime_totals(connection)?;
     Ok(HistoryTotals {
         total: totals.cleaned_total,
         recent_files: totals.cleaned_files,
