@@ -11,7 +11,7 @@ pub(crate) use store::{load, save};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum AppMode {
+pub(crate) enum AppMode {
     #[default]
     Dashboard,
     Grid,
@@ -21,7 +21,7 @@ pub enum AppMode {
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum CloseBehavior {
+pub(crate) enum CloseBehavior {
     #[default]
     Hide,
     Quit,
@@ -29,7 +29,7 @@ pub enum CloseBehavior {
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum ThemePreference {
+pub(crate) enum ThemePreference {
     #[default]
     System,
     Light,
@@ -38,7 +38,7 @@ pub enum ThemePreference {
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum VisualizationDataSource {
+pub(crate) enum VisualizationDataSource {
     #[default]
     RecentAccess,
     RecentCleanup,
@@ -46,7 +46,7 @@ pub enum VisualizationDataSource {
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum VisualizationDataRange {
+pub(crate) enum VisualizationDataRange {
     Last7Days,
     Last30Days,
     #[default]
@@ -55,7 +55,7 @@ pub enum VisualizationDataRange {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AutoCleanPolicy {
+pub(crate) enum AutoCleanPolicy {
     #[default]
     Disabled,
     Monitor,
@@ -69,7 +69,7 @@ pub enum AutoCleanPolicy {
 }
 
 impl AutoCleanPolicy {
-    pub fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         match self {
             Self::EveryHours { hours } if !(1..=168).contains(hours) => {
                 anyhow::bail!("auto-clean interval must be between 1 and 168 hours")
@@ -86,53 +86,53 @@ impl AutoCleanPolicy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Config {
+pub(crate) struct Config {
     #[serde(default)]
-    pub app_mode: AppMode,
+    pub(crate) app_mode: AppMode,
     #[serde(default = "default_language")]
-    pub language: String,
+    pub(crate) language: String,
     #[serde(default)]
-    pub auto_start: bool,
+    pub(crate) auto_start: bool,
     #[serde(default)]
-    pub privacy_mode: bool,
+    pub(crate) privacy_mode: bool,
     #[serde(default = "default_true")]
-    pub privacy_mode_cleanup_links: bool,
+    pub(crate) privacy_mode_cleanup_links: bool,
     #[serde(default)]
-    pub close_behavior: CloseBehavior,
+    pub(crate) close_behavior: CloseBehavior,
     #[serde(default)]
-    pub theme: ThemePreference,
+    pub(crate) theme: ThemePreference,
     #[serde(default)]
-    pub visualization_deep_parse: bool,
+    pub(crate) visualization_deep_parse: bool,
     #[serde(default)]
-    pub visualization_data_source: VisualizationDataSource,
+    pub(crate) visualization_data_source: VisualizationDataSource,
     #[serde(default)]
-    pub visualization_data_range: VisualizationDataRange,
+    pub(crate) visualization_data_range: VisualizationDataRange,
     #[serde(default)]
-    pub word_cloud_show_blacklist_terms: bool,
+    pub(crate) word_cloud_show_blacklist_terms: bool,
     #[serde(default = "default_true")]
-    pub show_recent_files: bool,
+    pub(crate) show_recent_files: bool,
     #[serde(default = "default_true")]
-    pub show_frequent_folders: bool,
+    pub(crate) show_frequent_folders: bool,
     #[serde(default = "default_true")]
-    pub notifications_enabled: bool,
+    pub(crate) notifications_enabled: bool,
     #[serde(default = "default_true")]
-    pub notify_operation_complete: bool,
+    pub(crate) notify_operation_complete: bool,
     #[serde(default = "default_true")]
-    pub notify_inactive_operation_complete: bool,
+    pub(crate) notify_inactive_operation_complete: bool,
     #[serde(default)]
-    pub notify_active_operation_complete: bool,
+    pub(crate) notify_active_operation_complete: bool,
     #[serde(default = "default_true")]
-    pub notify_partial_failure: bool,
+    pub(crate) notify_partial_failure: bool,
     #[serde(default = "default_true")]
-    pub confirm_destructive_actions: bool,
+    pub(crate) confirm_destructive_actions: bool,
     #[serde(default = "default_true")]
-    pub smart_clean_confirm: bool,
+    pub(crate) smart_clean_confirm: bool,
     #[serde(default)]
-    pub history_retention: usize,
+    pub(crate) history_retention: usize,
     #[serde(default)]
-    pub auto_clean: AutoCleanPolicy,
+    pub(crate) auto_clean: AutoCleanPolicy,
     #[serde(default)]
-    pub auto_clean_last_run: Option<DateTime<Utc>>,
+    pub(crate) auto_clean_last_run: Option<DateTime<Utc>>,
 }
 
 impl Config {
@@ -164,7 +164,7 @@ impl Config {
         }
     }
 
-    pub fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.history_retention > MAX_HISTORY_RETENTION {
             anyhow::bail!("history retention must not exceed {MAX_HISTORY_RETENTION}")
         }
@@ -177,7 +177,7 @@ impl Config {
     }
 }
 
-pub fn normalize_language(language: &str) -> String {
+pub(crate) fn normalize_language(language: &str) -> String {
     let tag = language.trim().replace('_', "-").to_ascii_lowercase();
     let parts: Vec<&str> = tag.split('-').filter(|part| !part.is_empty()).collect();
 

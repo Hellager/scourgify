@@ -35,7 +35,7 @@ pub(crate) enum HistoryError {
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum CleanSource {
+pub(crate) enum CleanSource {
     Manual,
     Auto,
 }
@@ -60,44 +60,44 @@ impl FromSql for CleanSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewCleanRecord {
-    pub run_id: Option<i64>,
-    pub item_path: String,
-    pub item_type: String,
-    pub rule_id: Option<i64>,
-    pub rule_keyword: Option<String>,
-    pub source: CleanSource,
+pub(crate) struct NewCleanRecord {
+    pub(crate) run_id: Option<i64>,
+    pub(crate) item_path: String,
+    pub(crate) item_type: String,
+    pub(crate) rule_id: Option<i64>,
+    pub(crate) rule_keyword: Option<String>,
+    pub(crate) source: CleanSource,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct HistoryQuery {
-    pub page: u32,
-    pub page_size: u32,
-    pub sort_by: String,
-    pub sort_order: String,
+pub(crate) struct HistoryQuery {
+    pub(crate) page: u32,
+    pub(crate) page_size: u32,
+    pub(crate) sort_by: String,
+    pub(crate) sort_order: String,
     #[serde(flatten)]
-    pub filter: HistoryFilter,
+    pub(crate) filter: HistoryFilter,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
-pub struct HistoryFilter {
+pub(crate) struct HistoryFilter {
     #[serde(default)]
-    pub search: String,
+    pub(crate) search: String,
     #[serde(default)]
-    pub item_type: Option<String>,
+    pub(crate) item_type: Option<String>,
     #[serde(default)]
-    pub matched_by_rule: Option<bool>,
+    pub(crate) matched_by_rule: Option<bool>,
     #[serde(default)]
-    pub source: Option<CleanSource>,
+    pub(crate) source: Option<CleanSource>,
     #[serde(default)]
-    pub run_id: Option<i64>,
+    pub(crate) run_id: Option<i64>,
     #[serde(default)]
-    pub date_range: Option<String>,
+    pub(crate) date_range: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum HistoryExportFormat {
+pub(crate) enum HistoryExportFormat {
     Csv,
     Json,
 }
@@ -112,23 +112,23 @@ impl HistoryExportFormat {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct HistoryExportResult {
-    pub count: u64,
-    pub path: String,
-    pub format: HistoryExportFormat,
+pub(crate) struct HistoryExportResult {
+    pub(crate) count: u64,
+    pub(crate) path: String,
+    pub(crate) format: HistoryExportFormat,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct CleanRecord {
-    pub id: i64,
-    pub run_id: Option<i64>,
-    pub item_path: String,
-    pub item_type: String,
-    pub rule_id: Option<i64>,
-    pub rule_keyword: Option<String>,
-    pub source: CleanSource,
-    pub cleaned_at: String,
-    pub visible: bool,
+pub(crate) struct CleanRecord {
+    pub(crate) id: i64,
+    pub(crate) run_id: Option<i64>,
+    pub(crate) item_path: String,
+    pub(crate) item_type: String,
+    pub(crate) rule_id: Option<i64>,
+    pub(crate) rule_keyword: Option<String>,
+    pub(crate) source: CleanSource,
+    pub(crate) cleaned_at: String,
+    pub(crate) visible: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -182,49 +182,49 @@ pub(super) const HISTORY_COLUMNS: &str =
     "id, run_id, item_path, item_type, rule_id, rule_keyword, source, cleaned_at, visible";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct CleanRecordPage {
-    pub records: Vec<CleanRecord>,
-    pub total: u64,
-    pub overall_total: u64,
-    pub hidden_total: u64,
-    pub page: u32,
-    pub page_size: u32,
+pub(crate) struct CleanRecordPage {
+    pub(crate) records: Vec<CleanRecord>,
+    pub(crate) total: u64,
+    pub(crate) overall_total: u64,
+    pub(crate) hidden_total: u64,
+    pub(crate) page: u32,
+    pub(crate) page_size: u32,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct StatsTrendPoint {
-    pub period: String,
-    pub count: u64,
-    pub recent_files: u64,
-    pub frequent_folders: u64,
+pub(crate) struct StatsTrendPoint {
+    pub(crate) period: String,
+    pub(crate) count: u64,
+    pub(crate) recent_files: u64,
+    pub(crate) frequent_folders: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct RuleHitStat {
-    pub keyword: String,
-    pub count: u64,
+pub(crate) struct RuleHitStat {
+    pub(crate) keyword: String,
+    pub(crate) count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct Stats {
-    pub total: u64,
-    pub recent_files: u64,
-    pub frequent_folders: u64,
-    pub retained_total: u64,
-    pub daily_trend: Vec<StatsTrendPoint>,
-    pub weekly_trend: Vec<StatsTrendPoint>,
-    pub rule_hits: Vec<RuleHitStat>,
+pub(crate) struct Stats {
+    pub(crate) total: u64,
+    pub(crate) recent_files: u64,
+    pub(crate) frequent_folders: u64,
+    pub(crate) retained_total: u64,
+    pub(crate) daily_trend: Vec<StatsTrendPoint>,
+    pub(crate) weekly_trend: Vec<StatsTrendPoint>,
+    pub(crate) rule_hits: Vec<RuleHitStat>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-pub struct HistoryTotals {
-    pub total: u64,
-    pub recent_files: u64,
-    pub frequent_folders: u64,
+pub(crate) struct HistoryTotals {
+    pub(crate) total: u64,
+    pub(crate) recent_files: u64,
+    pub(crate) frequent_folders: u64,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-pub enum StatsRange {
+pub(crate) enum StatsRange {
     #[serde(rename = "24h")]
     Last24Hours,
     #[serde(rename = "7d")]
@@ -246,7 +246,7 @@ impl StatsRange {
     }
 }
 
-pub fn insert_batch(
+pub(crate) fn insert_batch(
     connection: &mut Connection,
     records: &[NewCleanRecord],
     retention: usize,
@@ -305,7 +305,7 @@ pub fn insert_batch(
         .context("failed to commit clean records")
 }
 
-pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordPage> {
+pub(crate) fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordPage> {
     if query.page == 0 {
         return Err(HistoryError::Page.into());
     }
@@ -388,7 +388,7 @@ pub fn list(connection: &Connection, query: HistoryQuery) -> Result<CleanRecordP
     })
 }
 
-pub fn export(
+pub(crate) fn export(
     connection: &Connection,
     path: &str,
     format: HistoryExportFormat,
@@ -397,7 +397,7 @@ pub fn export(
     export::export(connection, path, format, filter)
 }
 
-pub fn export_runs(
+pub(crate) fn export_runs(
     connection: &Connection,
     path: &str,
     format: HistoryExportFormat,
@@ -467,12 +467,12 @@ fn history_search_pattern(search: &str) -> Option<String> {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-pub struct HistoryClearResult {
-    pub clean_records: u64,
-    pub cleanup_runs: u64,
+pub(crate) struct HistoryClearResult {
+    pub(crate) clean_records: u64,
+    pub(crate) cleanup_runs: u64,
 }
 
-pub fn clear(connection: &mut Connection) -> Result<HistoryClearResult> {
+pub(crate) fn clear(connection: &mut Connection) -> Result<HistoryClearResult> {
     let transaction = connection
         .transaction()
         .context("failed to start history clear transaction")?;
@@ -491,7 +491,7 @@ pub fn clear(connection: &mut Connection) -> Result<HistoryClearResult> {
     })
 }
 
-pub fn remove(connection: &Connection, id: i64) -> Result<()> {
+pub(crate) fn remove(connection: &Connection, id: i64) -> Result<()> {
     let affected = connection
         .execute("DELETE FROM clean_records WHERE id = ?1", [id])
         .context("failed to delete clean record")?;
@@ -501,7 +501,7 @@ pub fn remove(connection: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn set_visible(connection: &Connection, id: i64, visible: bool) -> Result<()> {
+pub(crate) fn set_visible(connection: &Connection, id: i64, visible: bool) -> Result<()> {
     let affected = connection
         .execute(
             "UPDATE clean_records SET visible = ?1 WHERE id = ?2",
@@ -514,18 +514,18 @@ pub fn set_visible(connection: &Connection, id: i64, visible: bool) -> Result<()
     Ok(())
 }
 
-pub fn restore_hidden(connection: &Connection) -> Result<u64> {
+pub(crate) fn restore_hidden(connection: &Connection) -> Result<u64> {
     let affected = connection
         .execute("UPDATE clean_records SET visible = 1 WHERE visible = 0", [])
         .context("failed to restore hidden clean records")?;
     u64::try_from(affected).context("restored clean record count is too large")
 }
 
-pub fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
+pub(crate) fn stats(connection: &Connection, range: StatsRange) -> Result<Stats> {
     stats::stats(connection, range)
 }
 
-pub fn totals(connection: &Connection) -> Result<HistoryTotals> {
+pub(crate) fn totals(connection: &Connection) -> Result<HistoryTotals> {
     let totals = runs::lifetime_totals(connection)?;
     Ok(HistoryTotals {
         total: totals.cleaned_total,

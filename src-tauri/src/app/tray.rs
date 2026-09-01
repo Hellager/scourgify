@@ -24,7 +24,7 @@ const QUIT_ID: &str = "quit";
 const MODE_PREFIX: &str = "mode:";
 const LANGUAGE_PREFIX: &str = "language:";
 
-pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
+pub(crate) fn build<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
     let menu = build_menu(app)?;
 
     TrayIconBuilder::with_id(theme::MAIN_TRAY_ID)

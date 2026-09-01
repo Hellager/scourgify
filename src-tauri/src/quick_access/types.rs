@@ -22,98 +22,105 @@ pub(crate) enum QuickAccessError {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct QaItem {
-    pub path: String,
-    pub name: String,
-    pub last_interaction_at: Option<u64>,
-    pub pinned: Option<bool>,
+pub(crate) struct QaItem {
+    pub(crate) path: String,
+    pub(crate) name: String,
+    pub(crate) last_interaction_at: Option<u64>,
+    pub(crate) pinned: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-pub struct QaCounts {
-    pub recent: usize,
-    pub frequent: usize,
-    pub all: usize,
+pub(crate) struct QaCounts {
+    pub(crate) recent: usize,
+    pub(crate) frequent: usize,
+    pub(crate) all: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct QaItemMetadata {
-    pub path: String,
-    pub name: String,
-    pub last_interaction_at: Option<u64>,
-    pub access_count: u32,
-    pub score: Option<f32>,
-    pub recent_rank: i32,
-    pub mru_position: u64,
-    pub pinned: bool,
-    pub pin_order: Option<i32>,
-    pub warning_count: usize,
+pub(crate) struct QaItemMetadata {
+    pub(crate) path: String,
+    pub(crate) name: String,
+    pub(crate) last_interaction_at: Option<u64>,
+    pub(crate) access_count: u32,
+    pub(crate) score: Option<f32>,
+    pub(crate) recent_rank: i32,
+    pub(crate) mru_position: u64,
+    pub(crate) pinned: bool,
+    pub(crate) pin_order: Option<i32>,
+    pub(crate) warning_count: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
-pub struct QaBatchResult {
-    pub total: usize,
-    pub succeeded: Vec<String>,
-    pub failed: Vec<QaBatchFailure>,
-    pub warnings: Vec<QaBatchWarning>,
-    pub skipped_protected: Vec<String>,
-    pub history_error: Option<String>,
+/// Describes a best-effort Quick Access removal batch.
+///
+/// `succeeded` contains completed primary mutations, `failed` contains
+/// per-item failures, and `warnings` contains post-mutation problems for items
+/// whose primary mutation completed. Protected paths are never submitted to
+/// Windows. A `history_error` means Windows changes already happened and were
+/// not rolled back.
+pub(crate) struct QaBatchResult {
+    pub(crate) total: usize,
+    pub(crate) succeeded: Vec<String>,
+    pub(crate) failed: Vec<QaBatchFailure>,
+    pub(crate) warnings: Vec<QaBatchWarning>,
+    pub(crate) skipped_protected: Vec<String>,
+    pub(crate) history_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct QaBatchFailure {
-    pub path: String,
-    pub error: CommandError,
+pub(crate) struct QaBatchFailure {
+    pub(crate) path: String,
+    pub(crate) error: CommandError,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct QaBatchWarning {
-    pub path: String,
-    pub warning: CommandWarning,
+pub(crate) struct QaBatchWarning {
+    pub(crate) path: String,
+    pub(crate) warning: CommandWarning,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct QaMutationResult {
-    pub action: &'static str,
-    pub target: String,
-    pub affected: u64,
-    pub warnings: Vec<CommandWarning>,
+pub(crate) struct QaMutationResult {
+    pub(crate) action: &'static str,
+    pub(crate) target: String,
+    pub(crate) affected: u64,
+    pub(crate) warnings: Vec<CommandWarning>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct QaRestoreResult {
-    pub success: bool,
-    pub recent: Option<QaRestoreSectionResult>,
-    pub frequent: Option<QaRestoreSectionResult>,
+pub(crate) struct QaRestoreResult {
+    pub(crate) success: bool,
+    pub(crate) recent: Option<QaRestoreSectionResult>,
+    pub(crate) frequent: Option<QaRestoreSectionResult>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct QaRestoreSectionResult {
-    pub success: bool,
-    pub deleted_lnk_count: usize,
-    pub recent_files_cleared: Option<bool>,
-    pub backing_file_deleted: Option<bool>,
-    pub rebuilt: Option<bool>,
-    pub non_default_raw_path_count: usize,
-    pub raw_path_cleanup: Option<QaRawPathCleanupResult>,
-    pub error: Option<CommandError>,
+pub(crate) struct QaRestoreSectionResult {
+    pub(crate) success: bool,
+    pub(crate) deleted_lnk_count: usize,
+    pub(crate) recent_files_cleared: Option<bool>,
+    pub(crate) backing_file_deleted: Option<bool>,
+    pub(crate) rebuilt: Option<bool>,
+    pub(crate) non_default_raw_path_count: usize,
+    pub(crate) raw_path_cleanup: Option<QaRawPathCleanupResult>,
+    pub(crate) error: Option<CommandError>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct QaRawPathCleanupResult {
-    pub success: bool,
-    pub requested_count: usize,
-    pub backing_file_deleted: bool,
-    pub rebuilt: bool,
-    pub remaining_count: usize,
-    pub error: Option<CommandError>,
+pub(crate) struct QaRawPathCleanupResult {
+    pub(crate) success: bool,
+    pub(crate) requested_count: usize,
+    pub(crate) backing_file_deleted: bool,
+    pub(crate) rebuilt: bool,
+    pub(crate) remaining_count: usize,
+    pub(crate) error: Option<CommandError>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-pub struct QaVisibility {
-    pub recent: bool,
-    pub frequent: bool,
-    pub start_recommended: bool,
+pub(crate) struct QaVisibility {
+    pub(crate) recent: bool,
+    pub(crate) frequent: bool,
+    pub(crate) start_recommended: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

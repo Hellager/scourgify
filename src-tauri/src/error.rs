@@ -34,18 +34,18 @@ pub(crate) enum ErrorCode {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct CommandError {
-    pub code: ErrorCode,
-    pub message: String,
-    pub retryable: bool,
-    pub incident_id: String,
+    pub(crate) code: ErrorCode,
+    pub(crate) message: String,
+    pub(crate) retryable: bool,
+    pub(crate) incident_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct CommandWarning {
-    pub code: &'static str,
-    pub step: &'static str,
-    pub message: String,
-    pub incident_id: String,
+    pub(crate) code: &'static str,
+    pub(crate) step: &'static str,
+    pub(crate) message: String,
+    pub(crate) incident_id: String,
 }
 
 impl CommandError {

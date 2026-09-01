@@ -23,6 +23,12 @@ pub(crate) enum PathKind {
     Directory,
 }
 
+/// Abstracts the real Windows integration from the debug mock.
+///
+/// Implementations must preserve the report contracts of mutation methods:
+/// item-level or post-mutation failures belong in result DTOs when the primary
+/// operation can still be described, while validation and boundary-wide
+/// failures return `Err`.
 pub(crate) trait QuickAccessBackend: Send + Sync {
     fn list_items(&self, qa_type: &str) -> Result<Vec<QaItem>>;
     fn list_item_metadata(&self, qa_type: &str) -> Result<Vec<QaItemMetadata>>;

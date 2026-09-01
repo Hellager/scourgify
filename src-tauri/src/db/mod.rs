@@ -1,3 +1,10 @@
+//! Owns SQLite initialization, migrations, connection access, and repositories.
+//!
+//! Database startup is deliberately degradable: initialization failures produce
+//! an unavailable [`DbState`] so the desktop application can still start and
+//! expose recovery status. Callers use [`DbState::with_connection`] for
+//! serialized writes or [`DbState::read_connection`] for independent reads.
+
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
@@ -31,11 +38,12 @@ pub(crate) enum DatabaseStateError {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct DatabaseStatus {
-    pub available: bool,
-    pub path: Option<String>,
-    pub schema_version: Option<u32>,
-    pub error: Option<String>,
+/// Reports persistence availability with a safe error summary.
+pub(crate) struct DatabaseStatus {
+    pub(crate) available: bool,
+    pub(crate) path: Option<String>,
+    pub(crate) schema_version: Option<u32>,
+    pub(crate) error: Option<String>,
 }
 
 struct DbInner {
@@ -50,7 +58,12 @@ struct MockDb {
     path: tempfile::TempPath,
 }
 
-pub struct DbState {
+/// Holds either a migrated SQLite connection or a recoverable unavailable state.
+///
+/// Initialization failure is represented in [`DatabaseStatus`] rather than
+/// aborting application startup. [`Self::retry`] can replace an unavailable
+/// state with a live connection in place.
+pub(crate) struct DbState {
     path: Option<PathBuf>,
     inner: Mutex<DbInner>,
     #[cfg(debug_assertions)]
@@ -67,7 +80,8 @@ impl DbState {
         Self::available(PathBuf::from(":memory:"), connection, schema_version)
     }
 
-    pub fn status(&self) -> DatabaseStatus {
+    /// Returns a safe status snapshot and never exposes private error context.
+    pub(crate) fn status(&self) -> DatabaseStatus {
         #[cfg(debug_assertions)]
         if self.mock_enabled.load(Ordering::Relaxed) {
             return match self.mock.lock() {
@@ -91,7 +105,12 @@ impl DbState {
         }
     }
 
-    pub fn retry(&self) -> DatabaseStatus {
+    /// Reopens and migrates an unavailable database in place.
+    ///
+    /// This operation holds the database-state mutex while opening and
+    /// migrating. On failure it keeps the state unavailable, updates the safe
+    /// diagnostic summary, and returns that status rather than an error.
+    pub(crate) fn retry(&self) -> DatabaseStatus {
         #[cfg(debug_assertions)]
         if self.mock_enabled.load(Ordering::Relaxed) {
             return self.status();
@@ -137,7 +156,7 @@ impl DbState {
         database_status(Some(path), &inner)
     }
 
-    pub fn directory(&self) -> Option<PathBuf> {
+    pub(crate) fn directory(&self) -> Option<PathBuf> {
         #[cfg(debug_assertions)]
         if self.mock_enabled.load(Ordering::Relaxed) {
             return self
@@ -152,6 +171,12 @@ impl DbState {
         self.path.as_ref()?.parent().map(Path::to_path_buf)
     }
 
+    /// Runs an operation while holding exclusive access to the primary connection.
+    ///
+    /// The closure may start transactions and mutate the database. It must not
+    /// re-enter this method on the same state because the mutex remains held for
+    /// the closure's complete lifetime. An unavailable database returns
+    /// [`DatabaseStateError::Unavailable`] before the closure runs.
     pub(crate) fn with_connection<T>(
         &self,
         operation: impl FnOnce(&mut Connection) -> Result<T>,
@@ -192,6 +217,11 @@ impl DbState {
         )
     }
 
+    /// Opens an independent read-only connection for longer-running queries.
+    ///
+    /// Availability is checked first, then SQLite is opened with a five-second
+    /// busy timeout. The returned connection does not hold the primary state
+    /// mutex and cannot be used for writes.
     pub(crate) fn read_connection(&self) -> Result<Connection> {
         #[cfg(debug_assertions)]
         if self.mock_enabled.load(Ordering::Relaxed) {
@@ -305,7 +335,12 @@ fn open_read_connection(path: &Path) -> Result<Connection> {
     Ok(connection)
 }
 
-pub fn initialize<R: Runtime>(app: &AppHandle<R>) -> DbState {
+/// Initializes persistence, degrading to an unavailable state on any failure.
+///
+/// The function resolves the application configuration path, creates parent
+/// directories, opens SQLite, and applies migrations. Failures are logged and
+/// captured in the returned status so application startup can continue.
+pub(crate) fn initialize<R: Runtime>(app: &AppHandle<R>) -> DbState {
     let path = match app.path().app_config_dir() {
         Ok(directory) => directory.join(DATABASE_FILE),
         Err(error) => {

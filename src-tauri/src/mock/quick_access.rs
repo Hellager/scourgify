@@ -55,9 +55,9 @@ pub(crate) enum MockOverviewRequest {
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct MockOverviewConfig {
-    pub counts: MockOverviewRequest,
-    pub stats: MockOverviewRequest,
-    pub delay_ms: u64,
+    pub(crate) counts: MockOverviewRequest,
+    pub(crate) stats: MockOverviewRequest,
+    pub(crate) delay_ms: u64,
 }
 
 impl Default for MockOverviewConfig {
@@ -72,13 +72,13 @@ impl Default for MockOverviewConfig {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct MockSnapshot {
-    pub scenario: MockScenario,
-    pub revision: u64,
-    pub recent: Vec<QaItem>,
-    pub frequent: Vec<QaItem>,
-    pub recent_metadata: Vec<QaItemMetadata>,
-    pub frequent_metadata: Vec<QaItemMetadata>,
-    pub visibility: QaVisibility,
+    pub(crate) scenario: MockScenario,
+    pub(crate) revision: u64,
+    pub(crate) recent: Vec<QaItem>,
+    pub(crate) frequent: Vec<QaItem>,
+    pub(crate) recent_metadata: Vec<QaItemMetadata>,
+    pub(crate) frequent_metadata: Vec<QaItemMetadata>,
+    pub(crate) visibility: QaVisibility,
 }
 
 #[derive(Debug, Clone)]

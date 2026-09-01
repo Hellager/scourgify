@@ -1,3 +1,10 @@
+//! Models cleanup rules, matching precedence, and import/export.
+//!
+//! Matching is case-insensitive substring matching. Enabled whitelist rules
+//! take precedence over blacklist rules, and the lowest rule ID wins within a
+//! rule type. Repository persistence remains in [`crate::db`]; this module owns
+//! rule semantics and transfer validation.
+
 mod matcher;
 pub(crate) mod transfer;
 
@@ -45,18 +52,18 @@ impl RuleType {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct Rule {
-    pub id: i64,
-    pub keyword: String,
-    pub rule_type: RuleType,
-    pub scope: RuleScope,
-    pub enabled: bool,
-    pub created_at: String,
+    pub(crate) id: i64,
+    pub(crate) keyword: String,
+    pub(crate) rule_type: RuleType,
+    pub(crate) scope: RuleScope,
+    pub(crate) enabled: bool,
+    pub(crate) created_at: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct NewRule {
-    pub keyword: String,
-    pub rule_type: RuleType,
-    pub scope: RuleScope,
-    pub enabled: bool,
+    pub(crate) keyword: String,
+    pub(crate) rule_type: RuleType,
+    pub(crate) scope: RuleScope,
+    pub(crate) enabled: bool,
 }

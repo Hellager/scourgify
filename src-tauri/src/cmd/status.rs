@@ -37,37 +37,37 @@ pub(crate) enum RuntimeState {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct RuntimeStatusItem {
-    pub state: RuntimeState,
+    pub(crate) state: RuntimeState,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct QuickAccessRuntimeStatus {
-    pub state: RuntimeState,
-    pub active_watchers: usize,
-    pub expected_watchers: usize,
-    pub failing_watchers: usize,
+    pub(crate) state: RuntimeState,
+    pub(crate) active_watchers: usize,
+    pub(crate) expected_watchers: usize,
+    pub(crate) failing_watchers: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct AutoCleanRuntimeStatus {
-    pub state: RuntimeState,
-    pub policy: &'static str,
+    pub(crate) state: RuntimeState,
+    pub(crate) policy: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct RulesRuntimeStatus {
-    pub state: RuntimeState,
-    pub total: usize,
-    pub enabled: usize,
+    pub(crate) state: RuntimeState,
+    pub(crate) total: usize,
+    pub(crate) enabled: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct RuntimeStatusSnapshot {
-    pub overall: RuntimeState,
-    pub database: RuntimeStatusItem,
-    pub qa_monitoring: QuickAccessRuntimeStatus,
-    pub auto_clean: AutoCleanRuntimeStatus,
-    pub rules: RulesRuntimeStatus,
+    pub(crate) overall: RuntimeState,
+    pub(crate) database: RuntimeStatusItem,
+    pub(crate) qa_monitoring: QuickAccessRuntimeStatus,
+    pub(crate) auto_clean: AutoCleanRuntimeStatus,
+    pub(crate) rules: RulesRuntimeStatus,
 }
 
 #[tauri::command]

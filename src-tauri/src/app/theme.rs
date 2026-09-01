@@ -2,12 +2,12 @@ use anyhow::Result;
 use tauri::{image::Image, AppHandle, Manager, Runtime};
 use winreg::{enums::*, RegKey};
 
-pub const MAIN_TRAY_ID: &str = "main-tray";
+pub(crate) const MAIN_TRAY_ID: &str = "main-tray";
 
 const LIGHT_ICON: &[u8] = include_bytes!("../../icons/light/icon.ico");
 const DARK_ICON: &[u8] = include_bytes!("../../icons/dark/icon.ico");
 
-pub fn spawn_theme_watcher<R: Runtime>(app: AppHandle<R>) {
+pub(crate) fn spawn_theme_watcher<R: Runtime>(app: AppHandle<R>) {
     std::thread::spawn(move || {
         let mut last_theme = is_system_light_theme();
 
@@ -25,7 +25,7 @@ pub fn spawn_theme_watcher<R: Runtime>(app: AppHandle<R>) {
     });
 }
 
-pub fn is_system_light_theme() -> bool {
+pub(crate) fn is_system_light_theme() -> bool {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let value = hkcu
         .open_subkey_with_flags(
@@ -38,15 +38,15 @@ pub fn is_system_light_theme() -> bool {
     is_light_theme_value(value)
 }
 
-pub fn current_tray_icon() -> Result<Image<'static>> {
+pub(crate) fn current_tray_icon() -> Result<Image<'static>> {
     tray_icon(is_system_light_theme())
 }
 
-pub fn update_current_window_icon<R: Runtime>(app: &AppHandle<R>) {
+pub(crate) fn update_current_window_icon<R: Runtime>(app: &AppHandle<R>) {
     update_window_icon(app, is_system_light_theme());
 }
 
-pub fn tray_icon(light: bool) -> Result<Image<'static>> {
+pub(crate) fn tray_icon(light: bool) -> Result<Image<'static>> {
     Ok(Image::from_bytes(if light { LIGHT_ICON } else { DARK_ICON })?.to_owned())
 }
 

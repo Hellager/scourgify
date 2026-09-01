@@ -20,16 +20,16 @@ use crate::{
     quick_access::{QuickAccessBackendState, QuickAccessCache},
 };
 
-pub const AUTO_CLEAN_FINISHED_EVENT: &str = "auto-clean-finished";
+pub(crate) const AUTO_CLEAN_FINISHED_EVENT: &str = "auto-clean-finished";
 
 const ERROR_RETRY_DELAY: Duration = Duration::from_secs(60);
 
-pub struct AutoCleanScheduler {
+pub(crate) struct AutoCleanScheduler {
     sender: Sender<SchedulerMessage>,
     alive: Arc<AtomicBool>,
 }
 
-pub struct AutoCleanMonitor {
+pub(crate) struct AutoCleanMonitor {
     sender: Sender<()>,
     alive: Arc<AtomicBool>,
 }
@@ -43,7 +43,7 @@ impl Drop for WorkerAliveGuard {
 }
 
 impl AutoCleanScheduler {
-    pub fn start<R: Runtime>(app: AppHandle<R>) -> Result<Self> {
+    pub(crate) fn start<R: Runtime>(app: AppHandle<R>) -> Result<Self> {
         let (sender, receiver) = mpsc::channel();
         let alive = Arc::new(AtomicBool::new(true));
         let worker_alive = alive.clone();
@@ -57,7 +57,7 @@ impl AutoCleanScheduler {
         Ok(Self { sender, alive })
     }
 
-    pub fn reschedule(&self) -> Result<()> {
+    pub(crate) fn reschedule(&self) -> Result<()> {
         self.sender
             .send(SchedulerMessage::Reschedule)
             .context("auto-clean scheduler is unavailable")
@@ -69,7 +69,7 @@ impl AutoCleanScheduler {
 }
 
 impl AutoCleanMonitor {
-    pub fn start<R: Runtime>(app: AppHandle<R>) -> Result<Self> {
+    pub(crate) fn start<R: Runtime>(app: AppHandle<R>) -> Result<Self> {
         let (sender, receiver) = mpsc::channel();
         let alive = Arc::new(AtomicBool::new(true));
         let worker_alive = alive.clone();
@@ -83,7 +83,7 @@ impl AutoCleanMonitor {
         Ok(Self { sender, alive })
     }
 
-    pub fn trigger(&self) -> Result<()> {
+    pub(crate) fn trigger(&self) -> Result<()> {
         self.sender
             .send(())
             .context("auto-clean monitor is unavailable")
@@ -95,19 +95,19 @@ impl AutoCleanMonitor {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct AutoCleanFinished {
-    pub completed_at: DateTime<Utc>,
-    pub total: usize,
-    pub succeeded: usize,
-    pub failed: usize,
-    pub warnings: usize,
-    pub section_errors: usize,
-    pub history_errors: usize,
-    pub post_process_warnings: Vec<CommandWarning>,
-    pub last_run_persisted: bool,
+pub(crate) struct AutoCleanFinished {
+    pub(crate) completed_at: DateTime<Utc>,
+    pub(crate) total: usize,
+    pub(crate) succeeded: usize,
+    pub(crate) failed: usize,
+    pub(crate) warnings: usize,
+    pub(crate) section_errors: usize,
+    pub(crate) history_errors: usize,
+    pub(crate) post_process_warnings: Vec<CommandWarning>,
+    pub(crate) last_run_persisted: bool,
 }
 
-pub fn run_now<R: Runtime>(app: &AppHandle<R>) -> Result<AutoCleanResult> {
+pub(crate) fn run_now<R: Runtime>(app: &AppHandle<R>) -> Result<AutoCleanResult> {
     let config = config_snapshot(app)?;
     let mut result = execute(app, &config, CleanupTrigger::Manual)?;
     finish(app, &config, &mut result);

@@ -9,7 +9,7 @@ const MAX_PAGE_SIZE: u32 = 100;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum CleanupAction {
+pub(crate) enum CleanupAction {
     RemoveSelected,
     Empty,
     SmartClean,
@@ -18,7 +18,7 @@ pub enum CleanupAction {
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum CleanupTrigger {
+pub(crate) enum CleanupTrigger {
     Manual,
     Monitor,
     Scheduled,
@@ -26,7 +26,7 @@ pub enum CleanupTrigger {
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum CleanupRunStatus {
+pub(crate) enum CleanupRunStatus {
     Running,
     Success,
     Partial,
@@ -82,26 +82,26 @@ impl CleanupRunStatus {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct NewCleanupRun<'a> {
-    pub action: CleanupAction,
-    pub trigger: CleanupTrigger,
-    pub qa_type: &'a str,
+pub(crate) struct NewCleanupRun<'a> {
+    pub(crate) action: CleanupAction,
+    pub(crate) trigger: CleanupTrigger,
+    pub(crate) qa_type: &'a str,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct RunCompletion {
-    pub requested: usize,
-    pub succeeded: usize,
-    pub failed: usize,
-    pub protected: usize,
-    pub warnings: usize,
-    pub history_errors: usize,
-    pub section_errors: usize,
-    pub incident_id: Option<String>,
+pub(crate) struct RunCompletion {
+    pub(crate) requested: usize,
+    pub(crate) succeeded: usize,
+    pub(crate) failed: usize,
+    pub(crate) protected: usize,
+    pub(crate) warnings: usize,
+    pub(crate) history_errors: usize,
+    pub(crate) section_errors: usize,
+    pub(crate) incident_id: Option<String>,
 }
 
 impl RunCompletion {
-    pub fn status(&self) -> CleanupRunStatus {
+    pub(crate) fn status(&self) -> CleanupRunStatus {
         if self.succeeded == 0
             && self.failed == 0
             && self.section_errors == 0
@@ -126,67 +126,67 @@ impl RunCompletion {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct CleanupRun {
-    pub id: i64,
-    pub action: String,
-    pub trigger: String,
-    pub qa_type: String,
-    pub status: CleanupRunStatus,
-    pub requested_count: i64,
-    pub succeeded_count: i64,
-    pub failed_count: i64,
-    pub protected_count: i64,
-    pub warning_count: i64,
-    pub history_error_count: i64,
-    pub section_error_count: i64,
-    pub incident_id: Option<String>,
-    pub started_at: String,
-    pub completed_at: Option<String>,
+pub(crate) struct CleanupRun {
+    pub(crate) id: i64,
+    pub(crate) action: String,
+    pub(crate) trigger: String,
+    pub(crate) qa_type: String,
+    pub(crate) status: CleanupRunStatus,
+    pub(crate) requested_count: i64,
+    pub(crate) succeeded_count: i64,
+    pub(crate) failed_count: i64,
+    pub(crate) protected_count: i64,
+    pub(crate) warning_count: i64,
+    pub(crate) history_error_count: i64,
+    pub(crate) section_error_count: i64,
+    pub(crate) incident_id: Option<String>,
+    pub(crate) started_at: String,
+    pub(crate) completed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
-pub struct CleanupRunFilter {
+pub(crate) struct CleanupRunFilter {
     #[serde(default)]
-    pub action: Option<CleanupAction>,
+    pub(crate) action: Option<CleanupAction>,
     #[serde(default)]
-    pub trigger: Option<CleanupTrigger>,
+    pub(crate) trigger: Option<CleanupTrigger>,
     #[serde(default)]
-    pub status: Option<CleanupRunStatus>,
+    pub(crate) status: Option<CleanupRunStatus>,
     #[serde(default)]
-    pub date_range: Option<String>,
+    pub(crate) date_range: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct CleanupRunQuery {
-    pub page: u32,
-    pub page_size: u32,
+pub(crate) struct CleanupRunQuery {
+    pub(crate) page: u32,
+    pub(crate) page_size: u32,
     #[serde(flatten)]
-    pub filter: CleanupRunFilter,
+    pub(crate) filter: CleanupRunFilter,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct CleanupRunPage {
-    pub runs: Vec<CleanupRun>,
-    pub total: u64,
-    pub page: u32,
-    pub page_size: u32,
+pub(crate) struct CleanupRunPage {
+    pub(crate) runs: Vec<CleanupRun>,
+    pub(crate) total: u64,
+    pub(crate) page: u32,
+    pub(crate) page_size: u32,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct LifetimeTotals {
-    pub cleaned_total: u64,
-    pub cleaned_files: u64,
-    pub cleaned_folders: u64,
-    pub cleanup_runs_total: u64,
-    pub successful_runs: u64,
-    pub partial_runs: u64,
-    pub failed_runs: u64,
-    pub noop_runs: u64,
-    pub interrupted_runs: u64,
-    pub tracking_started_at: String,
+pub(crate) struct LifetimeTotals {
+    pub(crate) cleaned_total: u64,
+    pub(crate) cleaned_files: u64,
+    pub(crate) cleaned_folders: u64,
+    pub(crate) cleanup_runs_total: u64,
+    pub(crate) successful_runs: u64,
+    pub(crate) partial_runs: u64,
+    pub(crate) failed_runs: u64,
+    pub(crate) noop_runs: u64,
+    pub(crate) interrupted_runs: u64,
+    pub(crate) tracking_started_at: String,
 }
 
-pub fn begin(connection: &Connection, run: NewCleanupRun<'_>) -> Result<i64> {
+pub(crate) fn begin(connection: &Connection, run: NewCleanupRun<'_>) -> Result<i64> {
     connection
         .execute(
             "INSERT INTO cleanup_runs (action, trigger, qa_type) VALUES (?1, ?2, ?3)",
@@ -196,7 +196,7 @@ pub fn begin(connection: &Connection, run: NewCleanupRun<'_>) -> Result<i64> {
     Ok(connection.last_insert_rowid())
 }
 
-pub fn finish(
+pub(crate) fn finish(
     connection: &mut Connection,
     run_id: i64,
     completion: &RunCompletion,
@@ -263,7 +263,7 @@ pub(crate) fn latest_terminal_auto_clean_completion(
         .transpose()
 }
 
-pub fn list(connection: &Connection, query: CleanupRunQuery) -> Result<CleanupRunPage> {
+pub(crate) fn list(connection: &Connection, query: CleanupRunQuery) -> Result<CleanupRunPage> {
     if query.page == 0 {
         return Err(HistoryError::Page.into());
     }
@@ -320,7 +320,7 @@ pub fn list(connection: &Connection, query: CleanupRunQuery) -> Result<CleanupRu
     })
 }
 
-pub fn visit_filtered(
+pub(crate) fn visit_filtered(
     connection: &Connection,
     filter: CleanupRunFilter,
     mut visit: impl FnMut(CleanupRun) -> Result<()>,
@@ -354,7 +354,7 @@ pub fn visit_filtered(
     Ok(count)
 }
 
-pub fn lifetime_totals(connection: &Connection) -> Result<LifetimeTotals> {
+pub(crate) fn lifetime_totals(connection: &Connection) -> Result<LifetimeTotals> {
     let values = connection
         .query_row(
             "SELECT cleaned_total, cleaned_files, cleaned_folders, cleanup_runs_total,
@@ -392,7 +392,7 @@ pub fn lifetime_totals(connection: &Connection) -> Result<LifetimeTotals> {
     })
 }
 
-pub fn mark_interrupted(connection: &Connection) -> Result<u64> {
+pub(crate) fn mark_interrupted(connection: &Connection) -> Result<u64> {
     let interrupted = connection
         .query_row(
             "SELECT COUNT(*) FROM cleanup_runs WHERE status = 'running'",

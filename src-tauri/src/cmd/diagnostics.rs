@@ -6,8 +6,8 @@ use crate::error::{CommandError, CommandResult, ErrorCode};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct LogDirectoryStatus {
-    pub path: String,
-    pub exists: bool,
+    pub(crate) path: String,
+    pub(crate) exists: bool,
 }
 
 #[tauri::command]

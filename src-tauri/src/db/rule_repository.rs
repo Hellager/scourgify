@@ -36,7 +36,7 @@ impl FromSql for RuleScope {
     }
 }
 
-pub fn list(connection: &Connection) -> Result<Vec<Rule>> {
+pub(crate) fn list(connection: &Connection) -> Result<Vec<Rule>> {
     let mut statement = connection
         .prepare(
             "SELECT id, keyword, rule_type, scope, enabled, created_at FROM rules ORDER BY id ASC",
@@ -51,7 +51,7 @@ pub fn list(connection: &Connection) -> Result<Vec<Rule>> {
     Ok(rules)
 }
 
-pub fn add(connection: &Connection, rule: NewRule) -> Result<Rule> {
+pub(crate) fn add(connection: &Connection, rule: NewRule) -> Result<Rule> {
     let rule = normalize(rule)?;
     connection
         .execute(
@@ -67,7 +67,7 @@ pub fn add(connection: &Connection, rule: NewRule) -> Result<Rule> {
     find(connection, connection.last_insert_rowid())?.context("added rule was not found")
 }
 
-pub fn update(connection: &Connection, id: i64, rule: NewRule) -> Result<Rule> {
+pub(crate) fn update(connection: &Connection, id: i64, rule: NewRule) -> Result<Rule> {
     let rule = normalize(rule)?;
     let changed = connection
         .execute(
@@ -85,14 +85,14 @@ pub fn update(connection: &Connection, id: i64, rule: NewRule) -> Result<Rule> {
     find(connection, id)?.with_context(|| format!("updated rule {id} was not found"))
 }
 
-pub fn remove(connection: &Connection, id: i64) -> Result<()> {
+pub(crate) fn remove(connection: &Connection, id: i64) -> Result<()> {
     let changed = connection
         .execute("DELETE FROM rules WHERE id = ?1", [id])
         .with_context(|| format!("failed to remove rule {id}"))?;
     ensure_rule_changed(id, changed)
 }
 
-pub fn clear(connection: &mut Connection, ids: Option<&[i64]>) -> Result<usize> {
+pub(crate) fn clear(connection: &mut Connection, ids: Option<&[i64]>) -> Result<usize> {
     let Some(ids) = ids else {
         return connection
             .execute("DELETE FROM rules", [])
@@ -112,7 +112,7 @@ pub fn clear(connection: &mut Connection, ids: Option<&[i64]>) -> Result<usize> 
     Ok(affected)
 }
 
-pub fn toggle(connection: &Connection, id: i64, enabled: bool) -> Result<Rule> {
+pub(crate) fn toggle(connection: &Connection, id: i64, enabled: bool) -> Result<Rule> {
     let changed = connection
         .execute(
             "UPDATE rules SET enabled = ?1 WHERE id = ?2",

@@ -10,7 +10,7 @@ enum AutoCleanNotification {
     PartialFailure,
 }
 
-pub fn notify_partial_failure<R: Runtime>(app: &AppHandle<R>, config: &Config, body: &str) {
+pub(crate) fn notify_partial_failure<R: Runtime>(app: &AppHandle<R>, config: &Config, body: &str) {
     if !config.notifications_enabled || !config.notify_partial_failure {
         return;
     }
@@ -20,7 +20,7 @@ pub fn notify_partial_failure<R: Runtime>(app: &AppHandle<R>, config: &Config, b
     }
 }
 
-pub fn notify_auto_clean<R: Runtime>(
+pub(crate) fn notify_auto_clean<R: Runtime>(
     app: &AppHandle<R>,
     config: &Config,
     result: &AutoCleanResult,

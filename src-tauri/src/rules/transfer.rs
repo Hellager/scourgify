@@ -39,22 +39,22 @@ pub(crate) enum RuleTransferError {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct RuleExportResult {
-    pub count: usize,
-    pub path: String,
-    pub version: u32,
+    pub(crate) count: usize,
+    pub(crate) path: String,
+    pub(crate) version: u32,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct RuleImportResult {
-    pub count: usize,
-    pub version: u32,
+    pub(crate) count: usize,
+    pub(crate) version: u32,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct RuleImportPreview {
-    pub count: usize,
-    pub rules: Vec<NewRule>,
-    pub version: u32,
+    pub(crate) count: usize,
+    pub(crate) rules: Vec<NewRule>,
+    pub(crate) version: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]

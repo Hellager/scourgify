@@ -1,3 +1,10 @@
+//! Adapts frontend IPC requests to backend domain operations.
+//!
+//! Commands validate serialized input, acquire application state and privacy
+//! guards, move blocking work off the async runtime, and translate failures
+//! into the stable [`crate::error::CommandError`] contract. Business rules
+//! belong in the domain modules rather than in this adapter layer.
+
 mod app;
 mod cleanup;
 mod database;
@@ -19,9 +26,9 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct ActionReceipt {
-    pub action: &'static str,
-    pub target: String,
-    pub affected: u64,
+    pub(crate) action: &'static str,
+    pub(crate) target: String,
+    pub(crate) affected: u64,
 }
 
 impl ActionReceipt {
@@ -183,6 +190,12 @@ fn state_error(operation: &str, error: impl std::fmt::Display) -> CommandError {
     )
 }
 
+/// Runs synchronous backend work on Tauri's blocking thread pool.
+///
+/// The returned future waits for the closure and preserves its
+/// [`CommandResult`]. A worker join failure is converted to a retryable internal
+/// command error associated with `operation`. Dropping the future does not
+/// guarantee that already-started blocking work is cancelled.
 pub(crate) async fn run_blocking<T: Send + 'static>(
     operation: &'static str,
     work: impl FnOnce() -> CommandResult<T> + Send + 'static,

@@ -20,8 +20,8 @@ const LANGUAGE_CHANGED_EVENT: &str = "language-changed";
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SettingsUpdate<T> {
-    pub value: T,
-    pub warnings: Vec<CommandWarning>,
+    pub(crate) value: T,
+    pub(crate) warnings: Vec<CommandWarning>,
 }
 
 pub(crate) fn update<R: Runtime>(

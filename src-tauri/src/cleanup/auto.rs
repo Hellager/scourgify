@@ -31,6 +31,7 @@ pub(crate) enum AutoCleanError {
 }
 
 #[derive(Default)]
+/// Serializes automatic cleanup runs within the process.
 pub(crate) struct AutoCleanState {
     running: Mutex<()>,
 }
@@ -55,23 +56,27 @@ impl AutoCleanState {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct AutoCleanSectionResult {
-    pub result: Option<QaBatchResult>,
-    pub error: Option<String>,
+    pub(crate) result: Option<QaBatchResult>,
+    pub(crate) error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+/// Aggregates independent Recent and Frequent automatic-cleanup outcomes.
+///
+/// A section may fail while the other succeeds. Per-item failures, history
+/// failures, and post-processing warnings remain separately observable.
 pub(crate) struct AutoCleanResult {
-    pub recent: AutoCleanSectionResult,
-    pub frequent: AutoCleanSectionResult,
-    pub total: usize,
-    pub succeeded: usize,
-    pub failed: usize,
-    pub warnings: usize,
-    pub skipped_protected: usize,
-    pub section_errors: usize,
-    pub history_errors: usize,
-    pub post_process_warnings: Vec<CommandWarning>,
-    pub last_run_persisted: bool,
+    pub(crate) recent: AutoCleanSectionResult,
+    pub(crate) frequent: AutoCleanSectionResult,
+    pub(crate) total: usize,
+    pub(crate) succeeded: usize,
+    pub(crate) failed: usize,
+    pub(crate) warnings: usize,
+    pub(crate) skipped_protected: usize,
+    pub(crate) section_errors: usize,
+    pub(crate) history_errors: usize,
+    pub(crate) post_process_warnings: Vec<CommandWarning>,
+    pub(crate) last_run_persisted: bool,
 }
 
 impl AutoCleanResult {
@@ -113,6 +118,12 @@ impl AutoCleanResult {
     }
 }
 
+/// Runs Recent and Frequent smart cleanup under one write permit.
+///
+/// The call fails before mutation when another run owns the state guard, the
+/// database is unavailable, or privacy mode is active. After it starts, the two
+/// sections are attempted independently and partial outcomes are returned in
+/// [`AutoCleanResult`]. The privacy permit remains held through both sections.
 pub(crate) fn run(
     database: &DbState,
     backend: &QuickAccessBackendState,

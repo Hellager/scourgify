@@ -1,3 +1,10 @@
+//! Builds privacy-preserving word-cloud aggregates for the dashboard.
+//!
+//! Raw Quick Access and cleanup-history paths stay in Rust. This module applies
+//! time ranges, tokenization, rule annotations, weighting, and result caps, then
+//! returns aggregate terms only. Optional rule data may degrade to warnings; a
+//! required corpus failure still returns an error.
+
 mod tokenizer;
 
 use std::collections::{HashMap, HashSet};
@@ -36,35 +43,35 @@ pub(crate) enum WordCloudRange {
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub(crate) struct WordCloudTerm {
-    pub text: String,
-    pub score: f64,
-    pub occurrences: u64,
-    pub recent_occurrences: u64,
-    pub frequent_occurrences: u64,
-    pub cleanup_occurrences: u64,
-    pub total_access_count: u64,
-    pub manual_cleanups: u64,
-    pub automatic_cleanups: u64,
-    pub pinned_items: u64,
-    pub blacklist_hits: u64,
+    pub(crate) text: String,
+    pub(crate) score: f64,
+    pub(crate) occurrences: u64,
+    pub(crate) recent_occurrences: u64,
+    pub(crate) frequent_occurrences: u64,
+    pub(crate) cleanup_occurrences: u64,
+    pub(crate) total_access_count: u64,
+    pub(crate) manual_cleanups: u64,
+    pub(crate) automatic_cleanups: u64,
+    pub(crate) pinned_items: u64,
+    pub(crate) blacklist_hits: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct WordCloudWarning {
-    pub code: &'static str,
-    pub message: String,
+    pub(crate) code: &'static str,
+    pub(crate) message: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub(crate) struct WordCloudResult {
-    pub source: WordCloudSource,
-    pub range: Option<WordCloudRange>,
-    pub corpus_items: u64,
-    pub truncated: bool,
-    pub blacklist_terms_included: bool,
-    pub blacklist_terms_available: bool,
-    pub terms: Vec<WordCloudTerm>,
-    pub warnings: Vec<WordCloudWarning>,
+    pub(crate) source: WordCloudSource,
+    pub(crate) range: Option<WordCloudRange>,
+    pub(crate) corpus_items: u64,
+    pub(crate) truncated: bool,
+    pub(crate) blacklist_terms_included: bool,
+    pub(crate) blacklist_terms_available: bool,
+    pub(crate) terms: Vec<WordCloudTerm>,
+    pub(crate) warnings: Vec<WordCloudWarning>,
 }
 
 #[derive(Debug, Default)]

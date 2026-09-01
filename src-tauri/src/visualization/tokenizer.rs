@@ -5,8 +5,8 @@ use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Token {
-    pub key: String,
-    pub display: String,
+    pub(crate) key: String,
+    pub(crate) display: String,
 }
 
 static JIEBA: OnceLock<Jieba> = OnceLock::new();

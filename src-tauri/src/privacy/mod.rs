@@ -1,3 +1,11 @@
+//! Coordinates Quick Access privacy locks with all crate-local write operations.
+//!
+//! Privacy transitions and guarded writes share an operation gate. A
+//! [`QuickAccessWritePermit`] therefore prevents privacy mode from activating
+//! for the complete mutation, while an active or exiting lock rejects new
+//! writes. Lock acquisition may degrade to individual Recent and Frequent
+//! targets, and unlock cleanup reports partial or best-effort outcomes.
+
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 #[cfg(debug_assertions)]
@@ -15,13 +23,13 @@ use wincent::prelude::{
 pub(crate) const PRIVACY_STATE_CHANGED_EVENT: &str = "privacy-state-changed";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum LockResult {
+pub(crate) enum LockResult {
     Full,
     Partial,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum PrivacyModeState {
+pub(crate) enum PrivacyModeState {
     Inactive,
     ActiveFull,
     ActivePartial { recent: bool, frequent: bool },
@@ -140,6 +148,10 @@ enum PrivacyLockState {
 }
 
 #[derive(Debug, Default)]
+/// Collects every unlock report and target-level unlock failure.
+///
+/// Target failures do not keep privacy mode active. Successful reports may
+/// still contain individual Recent shortcut deletions that failed best-effort.
 pub(crate) struct PrivacyExitOutcome {
     pub(crate) reports: Vec<QuickAccessUnlockReport>,
     pub(crate) failures: Vec<PrivacyExitFailure>,
@@ -161,11 +173,17 @@ pub(crate) enum PrivacyAccessError {
 
 #[must_use = "the permit must be held for the complete Quick Access write"]
 #[derive(Debug)]
+/// Prevents privacy transitions while a Quick Access mutation is in progress.
+///
+/// The permit owns the operation-gate guard. Callers must keep it alive until
+/// every protected Windows side effect has completed; dropping it allows a
+/// waiting privacy transition to proceed.
 pub(crate) struct QuickAccessWritePermit<'a> {
     _guard: MutexGuard<'a, ()>,
 }
 
-pub struct PrivacyManager {
+/// Owns privacy lock state and the gate shared with Quick Access writers.
+pub(crate) struct PrivacyManager {
     operation_gate: Mutex<()>,
     manager: QuickAccessManager,
     state: Mutex<PrivacyLockState>,
@@ -177,7 +195,7 @@ pub struct PrivacyManager {
 }
 
 impl PrivacyManager {
-    pub fn new(cleanup_links: bool) -> Self {
+    pub(crate) fn new(cleanup_links: bool) -> Self {
         Self {
             operation_gate: Mutex::new(()),
             manager: QuickAccessManager::new(),
@@ -190,6 +208,11 @@ impl PrivacyManager {
         }
     }
 
+    /// Acquires permission for one complete Quick Access write operation.
+    ///
+    /// This call blocks behind an in-progress privacy transition. It returns
+    /// [`PrivacyAccessError::Active`] when privacy mode is active or exiting, and
+    /// the returned permit blocks new transitions until it is dropped.
     pub(crate) fn begin_quick_access_write(
         &self,
     ) -> Result<QuickAccessWritePermit<'_>, PrivacyAccessError> {
@@ -222,6 +245,12 @@ impl PrivacyManager {
         Ok(QuickAccessWritePermit { _guard: guard })
     }
 
+    /// Activates as much Quick Access privacy protection as can be acquired.
+    ///
+    /// The call waits for outstanding write permits. If the combined lock fails,
+    /// Recent and Frequent locks are attempted independently. At least one
+    /// successful target returns a partial outcome with diagnostics; failure of
+    /// both targets returns an error and leaves privacy mode inactive.
     pub(crate) fn enter(&self) -> Result<PrivacyEnterOutcome, PrivacyEnterError> {
         let _operation = self
             .operation_gate
@@ -290,6 +319,12 @@ impl PrivacyManager {
         })
     }
 
+    /// Releases all held privacy locks and returns every best-effort report.
+    ///
+    /// The call waits for outstanding write permits. Each held target is
+    /// attempted even if another target fails, and the manager becomes inactive
+    /// after those attempts. When Recent-link cleanup is enabled, individual
+    /// deletion failures remain in the unlock reports and do not prevent exit.
     pub(crate) fn exit(&self) -> Result<PrivacyExitOutcome> {
         let _operation = self
             .operation_gate
@@ -334,7 +369,7 @@ impl PrivacyManager {
         Ok(outcome)
     }
 
-    pub fn state(&self) -> PrivacyModeState {
+    pub(crate) fn state(&self) -> PrivacyModeState {
         #[cfg(debug_assertions)]
         if self.mock_mode.load(Ordering::Relaxed) {
             return *self

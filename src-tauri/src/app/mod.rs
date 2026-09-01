@@ -1,3 +1,10 @@
+//! Assembles and runs the Tauri desktop application.
+//!
+//! This module owns process-level setup, windows, the tray, background
+//! scheduling, notifications, and settings side effects. Domain operations
+//! remain in their dedicated modules and are exposed to the frontend through
+//! [`crate::cmd`].
+
 pub(crate) mod alert;
 pub(crate) mod i18n;
 pub(crate) mod notifier;
@@ -17,7 +24,7 @@ use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 use crate::config::{AppMode, Config};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+pub(crate) fn run() {
     crate::error::install_panic_hook();
     tauri::Builder::default()
         .plugin(build_logger().build())

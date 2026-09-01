@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-pub const LANGUAGES: &[(&str, &str)] = &[
+pub(crate) const LANGUAGES: &[(&str, &str)] = &[
     ("en-US", "English"),
     ("zh-CN", "简体中文"),
     ("zh-TW", "繁體中文"),
@@ -9,24 +9,24 @@ pub const LANGUAGES: &[(&str, &str)] = &[
 ];
 
 #[derive(Clone, Copy, Serialize)]
-pub struct LanguageChanged {
-    pub language: &'static str,
+pub(crate) struct LanguageChanged {
+    pub(crate) language: &'static str,
 }
 
-pub struct TrayText {
-    pub open_dashboard: &'static str,
-    pub auto_start: &'static str,
-    pub privacy_mode: &'static str,
-    pub privacy_mode_partial: &'static str,
-    pub mode: &'static str,
-    pub mode_dashboard: &'static str,
-    pub mode_grid: &'static str,
-    pub mode_tray: &'static str,
-    pub language: &'static str,
-    pub quit: &'static str,
+pub(crate) struct TrayText {
+    pub(crate) open_dashboard: &'static str,
+    pub(crate) auto_start: &'static str,
+    pub(crate) privacy_mode: &'static str,
+    pub(crate) privacy_mode_partial: &'static str,
+    pub(crate) mode: &'static str,
+    pub(crate) mode_dashboard: &'static str,
+    pub(crate) mode_grid: &'static str,
+    pub(crate) mode_tray: &'static str,
+    pub(crate) language: &'static str,
+    pub(crate) quit: &'static str,
 }
 
-pub fn tray_text(language: &str) -> TrayText {
+pub(crate) fn tray_text(language: &str) -> TrayText {
     match language {
         "zh-CN" => TrayText {
             open_dashboard: "打开主界面",
@@ -91,7 +91,7 @@ pub fn tray_text(language: &str) -> TrayText {
     }
 }
 
-pub fn language_event(language: &str) -> LanguageChanged {
+pub(crate) fn language_event(language: &str) -> LanguageChanged {
     LanguageChanged {
         language: canonical(language),
     }

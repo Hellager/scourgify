@@ -4,13 +4,13 @@ use crate::rules::{Rule, RuleScope, RuleType};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub enum MatchResult {
+pub(crate) enum MatchResult {
     Protected { rule_id: i64, keyword: String },
     Targeted { rule_id: i64, keyword: String },
     Neutral,
 }
 
-pub fn classify(path: &str, item_scope: RuleScope, rules: &[Rule]) -> MatchResult {
+pub(crate) fn classify(path: &str, item_scope: RuleScope, rules: &[Rule]) -> MatchResult {
     let path = path.to_lowercase();
     if let Some(rule) = first_match(&path, item_scope, rules, RuleType::Whitelist) {
         return MatchResult::Protected {

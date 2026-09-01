@@ -27,7 +27,7 @@ enum VisibilityTarget {
     StartRecommended,
 }
 
-pub fn list_items(qa_type: &str) -> Result<Vec<QaItem>> {
+pub(crate) fn list_items(qa_type: &str) -> Result<Vec<QaItem>> {
     let manager = QuickAccessManager::new();
     let qa_type = parse_qa_type(qa_type)?;
     let items = get_items_logged(&manager, qa_type, "list")?;
@@ -35,7 +35,7 @@ pub fn list_items(qa_type: &str) -> Result<Vec<QaItem>> {
     Ok(items_from_paths_with_manager(&manager, qa_type, items))
 }
 
-pub fn list_item_metadata(qa_type: &str) -> Result<Vec<QaItemMetadata>> {
+pub(crate) fn list_item_metadata(qa_type: &str) -> Result<Vec<QaItemMetadata>> {
     let manager = QuickAccessManager::new();
     let qa_type = parse_write_qa_type(qa_type)?;
     let entries = match qa_type {
@@ -152,7 +152,7 @@ fn filetime_to_unix_ms(filetime: u64) -> Option<u64> {
         .map(|ticks| ticks / 10_000)
 }
 
-pub fn add_item(qa_type: &str, path: &str) -> Result<()> {
+pub(crate) fn add_item(qa_type: &str, path: &str) -> Result<()> {
     let qa_type = parse_write_qa_type(qa_type)?;
     let path = validate_add_item_path(qa_type, path)?;
     log::info!(
@@ -189,7 +189,13 @@ pub fn add_item(qa_type: &str, path: &str) -> Result<()> {
     }
 }
 
-pub fn remove_items(qa_type: &str, paths: Vec<String>) -> Result<QaBatchResult> {
+/// Removes paths as a best-effort Windows batch.
+///
+/// Supported targets are `recent` and `frequent`. Once validation succeeds,
+/// per-item failures and Explorer refresh warnings are returned in
+/// [`QaBatchResult`] rather than turning partial success into a top-level error.
+/// Recent removal also attempts deep cleanup of matching shortcut files.
+pub(crate) fn remove_items(qa_type: &str, paths: Vec<String>) -> Result<QaBatchResult> {
     let qa_type = parse_write_qa_type(qa_type)?;
     log::info!(
         "wincent remove batch started qa_type={} total={}",
@@ -214,7 +220,7 @@ fn default_remove_options() -> RemoveOptions {
     RemoveOptions::new().deep_clean_recent_links()
 }
 
-pub fn restore_defaults(qa_type: &str) -> Result<QaRestoreResult> {
+pub(crate) fn restore_defaults(qa_type: &str) -> Result<QaRestoreResult> {
     let qa_type = parse_qa_type(qa_type)?;
     log::info!(
         "wincent restore defaults started qa_type={}",
@@ -241,7 +247,7 @@ pub fn restore_defaults(qa_type: &str) -> Result<QaRestoreResult> {
     }
 }
 
-pub fn get_visibility() -> Result<QaVisibility> {
+pub(crate) fn get_visibility() -> Result<QaVisibility> {
     let manager = QuickAccessManager::new();
 
     Ok(QaVisibility {
@@ -251,7 +257,7 @@ pub fn get_visibility() -> Result<QaVisibility> {
     })
 }
 
-pub fn set_visibility(qa_type: &str, visible: bool) -> Result<QaVisibilityMutationResult> {
+pub(crate) fn set_visibility(qa_type: &str, visible: bool) -> Result<QaVisibilityMutationResult> {
     let target = parse_visibility_qa_type(qa_type)?;
     log::info!(
         "Quick Access visibility update started qa_type={} visible={visible}",

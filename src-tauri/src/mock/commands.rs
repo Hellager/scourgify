@@ -139,19 +139,19 @@ impl MockPathLocale {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct MockState {
-    pub enabled: bool,
-    pub snapshot: MockSnapshot,
-    pub overview: MockOverviewConfig,
+    pub(crate) enabled: bool,
+    pub(crate) snapshot: MockSnapshot,
+    pub(crate) overview: MockOverviewConfig,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct MockRulesResult {
-    pub generated: usize,
+    pub(crate) generated: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct MockHistoryResult {
-    pub generated: usize,
+    pub(crate) generated: usize,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

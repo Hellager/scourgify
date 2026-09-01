@@ -1,3 +1,11 @@
+//! Coordinates rule-aware Quick Access cleanup and its audit history.
+//!
+//! This module classifies items, excludes protected paths, invokes the
+//! [`crate::quick_access`] batch boundary, and records successful mutations in
+//! [`crate::db`]. Windows mutations are not rolled back when history recording
+//! or run finalization fails; those post-mutation failures are returned in the
+//! cleanup report.
+
 mod auto;
 
 use anyhow::Result;
@@ -28,14 +36,14 @@ pub(crate) enum CleanupError {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct ClassifiedItem {
-    pub path: String,
-    pub name: String,
-    pub item_type: String,
-    pub last_interaction_at: Option<u64>,
-    pub pinned: Option<bool>,
+pub(crate) struct ClassifiedItem {
+    pub(crate) path: String,
+    pub(crate) name: String,
+    pub(crate) item_type: String,
+    pub(crate) last_interaction_at: Option<u64>,
+    pub(crate) pinned: Option<bool>,
     #[serde(rename = "match")]
-    pub match_result: MatchResult,
+    pub(crate) match_result: MatchResult,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,8 +67,8 @@ struct PreparedCleanup {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ClassificationCounts {
-    pub targeted: usize,
-    pub protected: usize,
+    pub(crate) targeted: usize,
+    pub(crate) protected: usize,
 }
 
 pub(crate) fn count_classifications(
@@ -80,7 +88,11 @@ pub(crate) fn count_classifications(
         })
 }
 
-pub fn list_classified(
+/// Classifies visible items against the current persisted rule set.
+///
+/// Rule or database failures abort classification without mutating Quick
+/// Access. `qa_type` accepts only `recent` or `frequent`.
+pub(crate) fn list_classified(
     database: &DbState,
     qa_type: &str,
     items: Vec<QaItem>,
@@ -105,7 +117,13 @@ pub(crate) fn validate_list_type(qa_type: &str) -> Result<()> {
     item_type_for(qa_type).map(|_| ())
 }
 
-pub fn remove_selected(
+/// Removes selected, non-protected paths and records successful deletions.
+///
+/// Paths are deduplicated case-insensitively. Batch mutation is best-effort:
+/// per-item failures and warnings remain in [`QaBatchResult`]. A history write
+/// failure does not roll back Windows changes and is returned through
+/// `history_error`.
+pub(crate) fn remove_selected(
     database: &DbState,
     backend: &QuickAccessBackendState,
     qa_type: &str,
@@ -134,7 +152,12 @@ pub fn remove_selected(
     )
 }
 
-pub fn empty_current(
+/// Removes every currently visible item except whitelist-protected paths.
+///
+/// Listing or rule-loading failures prevent mutation. Once the Windows batch
+/// begins, partial success and history failures follow the same report contract
+/// as [`remove_selected`].
+pub(crate) fn empty_current(
     database: &DbState,
     backend: &QuickAccessBackendState,
     qa_type: &str,
@@ -168,7 +191,12 @@ pub fn empty_current(
     )
 }
 
-pub fn smart_clean(
+/// Removes currently visible paths targeted by enabled blacklist rules.
+///
+/// Whitelist matches take precedence and are reported as skipped. The batch is
+/// best-effort, and successful Windows mutations are not rolled back if audit
+/// history cannot be written or finalized.
+pub(crate) fn smart_clean(
     database: &DbState,
     backend: &QuickAccessBackendState,
     qa_type: &str,

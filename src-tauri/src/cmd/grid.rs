@@ -13,18 +13,18 @@ use super::run_blocking;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct GridSummary {
-    pub recent_files: usize,
-    pub quick_access: usize,
-    pub frequent_folders: usize,
-    pub blacklist_rules: Option<usize>,
-    pub to_clean: Option<usize>,
-    pub to_clean_recent: Option<usize>,
-    pub to_clean_frequent: Option<usize>,
-    pub whitelist_rules: Option<usize>,
-    pub protected_items: Option<usize>,
-    pub cleaned_files: Option<u64>,
-    pub cleaned_total: Option<u64>,
-    pub cleaned_folders: Option<u64>,
+    pub(crate) recent_files: usize,
+    pub(crate) quick_access: usize,
+    pub(crate) frequent_folders: usize,
+    pub(crate) blacklist_rules: Option<usize>,
+    pub(crate) to_clean: Option<usize>,
+    pub(crate) to_clean_recent: Option<usize>,
+    pub(crate) to_clean_frequent: Option<usize>,
+    pub(crate) whitelist_rules: Option<usize>,
+    pub(crate) protected_items: Option<usize>,
+    pub(crate) cleaned_files: Option<u64>,
+    pub(crate) cleaned_total: Option<u64>,
+    pub(crate) cleaned_folders: Option<u64>,
 }
 
 #[tauri::command]

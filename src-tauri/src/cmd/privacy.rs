@@ -16,13 +16,13 @@ use super::run_blocking;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct PrivacyTransition {
-    pub state: PrivacyModeState,
-    pub lock_result: Option<LockResult>,
-    pub reports: usize,
-    pub new_links: usize,
-    pub deleted_links: usize,
-    pub failed_link_deletions: usize,
-    pub warnings: Vec<CommandWarning>,
+    pub(crate) state: PrivacyModeState,
+    pub(crate) lock_result: Option<LockResult>,
+    pub(crate) reports: usize,
+    pub(crate) new_links: usize,
+    pub(crate) deleted_links: usize,
+    pub(crate) failed_link_deletions: usize,
+    pub(crate) warnings: Vec<CommandWarning>,
 }
 
 #[tauri::command]

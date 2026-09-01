@@ -41,8 +41,8 @@ struct CategoryRefreshLocks {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct QuickAccessChanged {
-    pub qa_type: &'static str,
-    pub revision: u64,
+    pub(crate) qa_type: &'static str,
+    pub(crate) revision: u64,
 }
 
 impl QuickAccessCache {
@@ -252,9 +252,9 @@ struct ActiveMonitor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct QuickAccessWatcherStatus {
-    pub active: usize,
-    pub expected: usize,
-    pub failing: usize,
+    pub(crate) active: usize,
+    pub(crate) expected: usize,
+    pub(crate) failing: usize,
 }
 
 impl QuickAccessWatchers {
