@@ -13,7 +13,7 @@
 
 - Documented the Rust crate entry point, Windows platform requirements, side
   effects, blocking behavior, and fatal initialization failures, with missing
-  public documentation enforced at compile time.
+  documentation for externally reachable crate APIs enforced at compile time.
 - Added the MIT license file and completed Cargo package metadata for the
   repository, README, MSRV, keywords, categories, and Windows docs.rs target.
 - Marked the internal Tauri crate as non-publishable because Scourgify is
