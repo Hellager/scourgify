@@ -2494,7 +2494,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4919,7 +4919,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5312,7 +5312,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 [[package]]
 name = "wincent"
 version = "0.2.6"
-source = "git+https://github.com/Hellager/wincent-rs.git?rev=cd7e7289b4b12bbfb744624125a8c7639d4e3482#cd7e7289b4b12bbfb744624125a8c7639d4e3482"
+source = "git+https://github.com/Hellager/wincent-rs.git?rev=8eea2155e7afbe3d22e5e85fe061b2df2232533c#8eea2155e7afbe3d22e5e85fe061b2df2232533c"
 dependencies = [
  "md5",
  "rand 0.10.1",

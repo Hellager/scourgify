@@ -33,6 +33,7 @@ pub(crate) trait QuickAccessBackend: Send + Sync {
     fn list_items(&self, qa_type: &str) -> Result<Vec<QaItem>>;
     fn list_item_metadata(&self, qa_type: &str) -> Result<Vec<QaItemMetadata>>;
     fn add_item(&self, qa_type: &str, path: &str) -> Result<()>;
+    fn pin_frequent_folder(&self, path: &str) -> Result<()>;
     fn remove_items(&self, qa_type: &str, paths: Vec<String>) -> Result<QaBatchResult>;
     fn restore_defaults(&self, qa_type: &str) -> Result<QaRestoreResult>;
     fn get_visibility(&self) -> Result<QaVisibility>;
@@ -53,6 +54,10 @@ impl QuickAccessBackend for RealQuickAccessBackend {
 
     fn add_item(&self, qa_type: &str, path: &str) -> Result<()> {
         operations::add_item(qa_type, path)
+    }
+
+    fn pin_frequent_folder(&self, path: &str) -> Result<()> {
+        operations::pin_frequent_folder(path)
     }
 
     fn remove_items(&self, qa_type: &str, paths: Vec<String>) -> Result<QaBatchResult> {

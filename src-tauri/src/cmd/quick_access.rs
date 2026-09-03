@@ -124,6 +124,41 @@ pub(crate) async fn add_qa_item(
 }
 
 #[tauri::command]
+pub(crate) async fn pin_frequent_folder(
+    app: AppHandle,
+    path: String,
+) -> CommandResult<QaMutationResult> {
+    run_blocking("pin_frequent_folder", move || {
+        let privacy = app.state::<PrivacyManager>();
+        let backend = app.state::<QuickAccessBackendState>();
+        let cache = app.state::<QuickAccessCache>();
+        let _write_permit = begin_quick_access_write(privacy.inner())?;
+        let mut warnings = Vec::new();
+        if let Err(error) = backend
+            .backend()
+            .and_then(|backend| backend.pin_frequent_folder(&path))
+        {
+            let warning = error
+                .downcast_ref::<wincent::prelude::WincentError>()
+                .and_then(|error| wincent_post_mutation_warning("pin_frequent_folder", error));
+            if let Some(warning) = warning {
+                warnings.push(warning);
+            } else {
+                return Err(quick_access_error("pin_frequent_folder", error));
+            }
+        }
+        cache.refresh_after_write(&app, backend.inner(), "frequent");
+        Ok(QaMutationResult {
+            action: "pin_frequent_folder",
+            target: path,
+            affected: 1,
+            warnings,
+        })
+    })
+    .await
+}
+
+#[tauri::command]
 pub(crate) async fn restore_qa_defaults(
     app: AppHandle,
     qa_type: String,

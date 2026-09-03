@@ -189,6 +189,38 @@ pub(crate) fn add_item(qa_type: &str, path: &str) -> Result<()> {
     }
 }
 
+pub(crate) fn pin_frequent_folder(path: &str) -> Result<()> {
+    let path = validate_add_item_path(QuickAccess::FrequentFolders, path)?;
+    log::info!(
+        "wincent pin frequent folder started path={}",
+        path.display()
+    );
+
+    match QuickAccessManager::new().pin_frequent_folder(&path) {
+        Ok(()) => {
+            log::info!(
+                "wincent pin frequent folder succeeded path={}",
+                path.display()
+            );
+            Ok(())
+        }
+        Err(error) => {
+            if matches!(&error, WincentError::PostMutationFailure { .. }) {
+                log::warn!(
+                    "wincent pin frequent folder completed with post-mutation warning path={} error={error}",
+                    path.display()
+                );
+            } else {
+                log::error!(
+                    "wincent pin frequent folder failed path={} error={error}",
+                    path.display()
+                );
+            }
+            Err(error.into())
+        }
+    }
+}
+
 /// Removes paths as a best-effort Windows batch.
 ///
 /// Supported targets are `recent` and `frequent`. Once validation succeeds,

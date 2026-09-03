@@ -179,6 +179,22 @@ impl MockQuickAccessBackend {
         if path.trim().is_empty() {
             return PathKind::Missing;
         }
+        if let Ok(data) = self.data.read() {
+            if data
+                .recent
+                .iter()
+                .any(|item| item.path.eq_ignore_ascii_case(path))
+            {
+                return PathKind::File;
+            }
+            if data
+                .frequent
+                .iter()
+                .any(|item| item.path.eq_ignore_ascii_case(path))
+            {
+                return PathKind::Directory;
+            }
+        }
         let local_path = std::path::Path::new(path);
         if local_path.is_file() {
             return PathKind::File;
@@ -255,6 +271,29 @@ impl QuickAccessBackend for MockQuickAccessBackend {
             return Err(anyhow!("mock item already exists: {path}"));
         }
         items.push(item(path, (qa_type == "frequent").then_some(false), 0));
+        sync_metadata(&mut data);
+        data.revision = data.revision.wrapping_add(1);
+        Ok(())
+    }
+
+    fn pin_frequent_folder(&self, path: &str) -> Result<()> {
+        if self.path_kind(path) != PathKind::Directory {
+            return Err(QuickAccessError::NotAFolder(path.to_string()).into());
+        }
+
+        let mut data = self
+            .data
+            .write()
+            .map_err(|error| anyhow!("mock Quick Access state is unavailable: {error}"))?;
+        let item = data
+            .frequent
+            .iter_mut()
+            .find(|item| item.path.eq_ignore_ascii_case(path))
+            .ok_or_else(|| QuickAccessError::ItemNotFound(path.to_string()))?;
+        if item.pinned == Some(true) {
+            return Err(anyhow!("mock frequent folder is already pinned: {path}"));
+        }
+        item.pinned = Some(true);
         sync_metadata(&mut data);
         data.revision = data.revision.wrapping_add(1);
         Ok(())
@@ -582,6 +621,31 @@ mod tests {
         assert_ne!(changed.frequent[0].path, before.frequent[0].path);
         assert_eq!(changed.revision, before.revision + 1);
         assert_eq!(changed.frequent_metadata.len(), changed.frequent.len());
+    }
+
+    #[test]
+    fn pinning_is_distinct_from_adding_a_frequent_folder() {
+        let backend = MockQuickAccessBackend::new();
+        let folder = backend
+            .list_items("frequent")
+            .unwrap()
+            .into_iter()
+            .find(|item| item.pinned == Some(false))
+            .unwrap();
+
+        assert!(backend.add_item("frequent", &folder.path).is_err());
+        backend.pin_frequent_folder(&folder.path).unwrap();
+
+        assert_eq!(
+            backend
+                .list_items("frequent")
+                .unwrap()
+                .into_iter()
+                .find(|item| item.path == folder.path)
+                .unwrap()
+                .pinned,
+            Some(true)
+        );
     }
 
     #[test]

@@ -138,7 +138,7 @@ Rust 入口为 `src-tauri/src/main.rs`，实际构建过程在 `src-tauri/src/ap
 
 - 顶部四张摘要卡分别显示最近文件、常用文件夹、永久累计清理总量和自动清理状态；点击整张卡片打开对应明细或设置弹窗。
 - 深度解析关闭时，最近文件和常用文件夹卡片只显示当前可见数；开启后显示“可见数/DestList 解析数”，解析失败时分母显示 `--`。
-- 最近文件和常用文件夹弹窗默认按最后使用时间倒序显示。名称和路径使用彼此独立的列头关键词筛选，日期列可切换升降序。
+- 最近文件和常用文件夹弹窗默认按最后使用时间倒序显示。名称和路径使用彼此独立的列头关键词筛选，日期列可切换升降序；操作列可移除可见项目，并可固定可见且未固定的常用文件夹，不可见项目不提供操作。
 - 深度解析关闭时弹窗调用 `list_qa_items`，只展示当前可见项目；开启后再调用 `list_qa_item_metadata`，按路径合并 DestList metadata 和可见项目，并增加“是否可见”列及全部/可见/隐藏筛选。
 - DestList 解析失败不会丢弃已经读到的可见项目，弹窗会保留基础列表并显示错误提示。
 - 已清理卡片打开最近清理记录弹窗，固定每页 10 条；自动清理卡片可直接选择禁用、每隔若干小时、每天定时或 monitor 模式，并显示下次运行时间或倒计时。
@@ -215,7 +215,7 @@ Dashboard 和 Grid 共享 `TitleBar.tsx` 提供最小化、最大化、关闭和
 | 数据库 | `get_database_status`、`retry_database`、`open_database_directory` |
 | 运行状态 | `get_runtime_status` |
 | 规则 | `get_rules`、`add_rule`、`update_rule`、`remove_rule`、`toggle_rule`、`clear_rules`、`export_rules`、`preview_rules_import`、`import_rules` |
-| Quick Access | `list_qa_items`、`get_qa_counts`、`list_qa_item_metadata`、`add_qa_item`、`restore_qa_defaults`、`get/set_qa_visibility`、`open_in_explorer` |
+| Quick Access | `list_qa_items`、`get_qa_counts`、`list_qa_item_metadata`、`add_qa_item`、`pin_frequent_folder`、`restore_qa_defaults`、`get/set_qa_visibility`、`open_in_explorer` |
 | Dashboard 可视化 | `get_dashboard_word_cloud`（数据中心显式传入当前数据源、范围、深度解析和黑名单偏好；参数省略时兼容读取已保存偏好，Mock Lab 可只覆盖数据源和范围） |
 | 清理 | `list_qa_items_classified`、`remove_qa_items`、`empty_qa_items`、`smart_clean`、`run_auto_clean_now` |
 | 历史和统计 | `get_clean_records`、`get_cleanup_runs`、`export_clean_records`、`export_cleanup_runs`、`clear_clean_records`、`remove_clean_record`、`set_clean_record_visibility`、`restore_hidden_clean_records`、`get_stats` |

@@ -31,7 +31,9 @@ import {
   FilterX,
   ListFilter,
   LoaderCircle,
+  Pin,
   Search,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAppShell } from "@/components/AppShell";
@@ -177,9 +179,13 @@ interface QaBatchResult {
   total: number;
   succeeded: string[];
   failed: unknown[];
-  warnings: unknown[];
+  warnings: Array<{ warning: { message: string } }>;
   skipped_protected: string[];
   history_error: string | null;
+}
+
+interface QaMutationResult {
+  warnings: Array<{ message: string }>;
 }
 
 interface QuickAccessChanged {
@@ -238,6 +244,14 @@ export function Dashboard() {
   const [autoHours, setAutoHours] = useState("24");
   const [autoTime, setAutoTime] = useState("09:00");
   const [savingAutoClean, setSavingAutoClean] = useState(false);
+  const [qaAction, setQaAction] = useState<{
+    action: "pin" | "remove";
+    path: string;
+  } | null>(null);
+  const [pendingQaRemove, setPendingQaRemove] = useState<{
+    item: QaItem;
+    qaType: QaType;
+  } | null>(null);
   const [smartCleanConfirmOpen, setSmartCleanConfirmOpen] = useState(false);
   const [skipSmartCleanConfirm, setSkipSmartCleanConfirm] = useState(false);
   const [smartCleaning, setSmartCleaning] = useState(false);
@@ -635,6 +649,54 @@ export function Dashboard() {
     await runSmartClean();
   };
 
+  const runQaAction = async (qaType: QaType, item: QaItem, action: "pin" | "remove") => {
+    if (!item.visible || privacyActive) {
+      if (privacyActive) {
+        toast.warning(t("privacyWriteDisabled"));
+      }
+      return;
+    }
+
+    setQaAction({ action, path: item.path });
+    try {
+      if (action === "pin") {
+        const result = await invokeCommand<QaMutationResult>("pin_frequent_folder", {
+          path: item.path,
+        });
+        result.warnings.forEach((warning) => toast.warning(warning.message));
+        toast.success(t("pinnedItem"));
+      } else {
+        const result = await invokeCommand<QaBatchResult>("remove_qa_items", {
+          paths: [item.path],
+          qaType,
+        });
+        if (result.succeeded.length > 0) {
+          toast.success(t("removedItems", { succeeded: result.succeeded.length }));
+        } else if (result.skipped_protected.length > 0) {
+          toast.warning(t("cleanedItemsProtected", { protected: 1, succeeded: 0 }));
+        } else {
+          toast.error(t("failedRemoveItems", { failed: result.failed.length }));
+        }
+        result.warnings.forEach((warning) => toast.warning(warning.warning.message));
+        dispatchAppEvent(REFRESH_HISTORY_EVENT);
+      }
+      await loadQaItems(qaType);
+      dispatchAppEvent(REFRESH_DASHBOARD_EVENT, { fresh: true });
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setQaAction(null);
+    }
+  };
+
+  const requestQaRemove = (qaType: QaType, item: QaItem) => {
+    if (config.confirm_destructive_actions) {
+      setPendingQaRemove({ item, qaType });
+    } else {
+      void runQaAction(qaType, item, "remove");
+    }
+  };
+
   const nextAutoCleanTime = useMemo(
     () => getNextAutoCleanTime(config.auto_clean, config.auto_clean_last_run),
     [config.auto_clean, config.auto_clean_last_run],
@@ -764,16 +826,53 @@ export function Dashboard() {
       </Suspense>
 
       <QuickAccessDialog
+        action={qaAction}
         items={activeQaState.items}
         deepParseEnabled={config.visualization_deep_parse}
         language={language}
         loading={activeQaState.loading}
         error={activeQaState.error}
+        privacyActive={privacyActive}
+        onPin={(item) => void runQaAction("frequent", item, "pin")}
+        onRemove={(item) => requestQaRemove(activeQaType, item)}
         onOpenChange={(open) => !open && setDialog(null)}
         open={dialog === "recent" || dialog === "frequent"}
         qaType={activeQaType}
         t={t}
       />
+      <AlertDialog
+        open={pendingQaRemove !== null}
+        onOpenChange={(open) => !open && setPendingQaRemove(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("removeSelectedQuestion")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("removeSelectedDescription", { count: 1 })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={privacyActive}
+              onClick={() => {
+                if (pendingQaRemove) {
+                  void runQaAction(
+                    pendingQaRemove.qaType,
+                    pendingQaRemove.item,
+                    "remove",
+                  );
+                }
+                setPendingQaRemove(null);
+              }}
+              type="button"
+            >
+              <Trash2 />
+              {t("removeItem")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <CleanedItemsDialog
         error={historyError}
         history={history}
@@ -958,6 +1057,8 @@ function quickAccessColumnClassName(columnId: string, constrained: boolean) {
         return "min-w-0 overflow-hidden";
       case "visible":
         return "min-w-0 overflow-hidden";
+      case "actions":
+        return "w-20 min-w-20 text-center";
       default:
         return undefined;
     }
@@ -970,6 +1071,8 @@ function quickAccessColumnClassName(columnId: string, constrained: boolean) {
       return "max-w-56";
     case "path":
       return "max-w-[420px]";
+    case "actions":
+      return "w-20 min-w-20 text-center";
     default:
       return undefined;
   }
@@ -995,24 +1098,32 @@ function quickAccessVisibleColumnWidth(label: string) {
 }
 
 function QuickAccessDialog({
+  action,
   deepParseEnabled,
   error,
   items,
   language,
   loading,
+  onPin,
+  onRemove,
   onOpenChange,
   open,
   qaType,
+  privacyActive,
   t,
 }: {
+  action: { action: "pin" | "remove"; path: string } | null;
   deepParseEnabled: boolean;
   error: string | null;
   items: QaItem[];
   language: Language;
   loading: boolean;
+  onPin: (item: QaItem) => void;
+  onRemove: (item: QaItem) => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   qaType: QaType;
+  privacyActive: boolean;
   t: Translate;
 }) {
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -1110,8 +1221,74 @@ function QuickAccessDialog({
             } satisfies ColumnDef<QaItem>,
           ]
         : []),
+      {
+        id: "actions",
+        enableSorting: false,
+        header: t("actions"),
+        cell: ({ row }) => {
+          const item = row.original;
+          if (!item.visible) {
+            return null;
+          }
+          const busy = action?.path === item.path;
+          return (
+            <div className="flex justify-center gap-1">
+              {qaType === "frequent" ? (
+                item.pinned === true ? (
+                  <span
+                    aria-label={t("pinned")}
+                    className="grid size-6 place-items-center text-primary"
+                    role="img"
+                    title={t("pinned")}
+                  >
+                    <Pin className="size-3 fill-current" />
+                  </span>
+                ) : item.pinned === false ? (
+                  <Button
+                    aria-label={t("pinItem")}
+                    disabled={busy || privacyActive}
+                    onClick={() => onPin(item)}
+                    size="icon-xs"
+                    title={privacyActive ? t("privacyWriteDisabled") : t("pinItem")}
+                    type="button"
+                    variant="ghost"
+                  >
+                    {busy && action.action === "pin" ? (
+                      <LoaderCircle className="animate-spin" />
+                    ) : (
+                      <Pin />
+                    )}
+                  </Button>
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="grid size-6 place-items-center text-muted-foreground/40"
+                  >
+                    <Pin className="size-3" />
+                  </span>
+                )
+              ) : null}
+              <Button
+                aria-label={t("removeItem")}
+                disabled={busy || privacyActive}
+                onClick={() => onRemove(item)}
+                size="icon-xs"
+                title={privacyActive ? t("privacyWriteDisabled") : t("removeItem")}
+                type="button"
+                variant="ghost"
+              >
+                {busy && action.action === "remove" ? (
+                  <LoaderCircle className="animate-spin" />
+                ) : (
+                  <Trash2 />
+                )}
+              </Button>
+            </div>
+          );
+        },
+      },
     ],
-    [deepParseEnabled, language, t],
+    [action, deepParseEnabled, language, onPin, onRemove, privacyActive, qaType, t],
   );
   const table = useReactTable({
     columns,
@@ -1134,11 +1311,7 @@ function QuickAccessDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
-        className={
-          deepParseEnabled
-            ? "max-h-[80svh] overflow-hidden sm:w-[calc(100%-4rem)] sm:max-w-5xl"
-            : "max-h-[80svh] overflow-hidden sm:max-w-4xl"
-        }
+        className="max-h-[80svh] overflow-hidden sm:w-[calc(100%-4rem)] sm:max-w-5xl"
         showCloseButton={false}
       >
         <DialogHeader className="sr-only">
@@ -1151,15 +1324,16 @@ function QuickAccessDialog({
           aria-busy={loading}
           className="h-[58svh] overflow-auto rounded-md border"
         >
-          <Table className={deepParseEnabled ? "table-fixed" : undefined}>
-            {deepParseEnabled ? (
-              <colgroup>
-                <col className="w-[22%]" />
-                <col />
-                <col className="w-[25%]" />
+          <Table className="table-fixed">
+            <colgroup>
+              <col className="w-[22%]" />
+              <col />
+              <col className="w-[25%]" />
+              {deepParseEnabled ? (
                 <col style={{ width: visibleColumnWidth }} />
-              </colgroup>
-            ) : null}
+              ) : null}
+              <col className="w-20" />
+            </colgroup>
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
@@ -1184,7 +1358,7 @@ function QuickAccessDialog({
             </TableHeader>
             <TableBody>
               {rows.length === 0 ? (
-                <TableMessage colSpan={deepParseEnabled ? 4 : 3} destructive={Boolean(error)}>
+                <TableMessage colSpan={deepParseEnabled ? 5 : 4} destructive={Boolean(error)}>
                   {loading
                     ? t("loadingItems")
                     : error ??
